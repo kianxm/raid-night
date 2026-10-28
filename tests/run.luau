@@ -19,6 +19,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "Config",
+		load = function()
+			return require("./specs/Config.spec")
+		end,
+	},
+	{
 		name = "Economy",
 		load = function()
 			return require("./specs/Economy.spec")

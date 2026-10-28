@@ -58,7 +58,7 @@ local store: any = nil
 local sessions: { [number]: Session } = {}
 local loadedListeners: { (Player, PlayerProfile) -> () } = {}
 local releasingListeners: { (number, PlayerProfile) -> () } = {}
-local leaving: { [Player]: true } = setmetatable({} :: any, { __mode = "k" })
+local leaving: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any -- weak: no leak
 local closing = false
 
 local function keyFor(userId: number): string
