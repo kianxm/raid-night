@@ -7,7 +7,7 @@ Current phase: 0 · Last updated: 2026-10-28
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | P0.1 | integration | — | Done | #1 | 1 | CI green (tests, StyLua, selene, luau-analyze via rokit). Baseline StyLua diffs fixed |
-| P0.2 | raid | — | In review | #3, #4 | 1 | Split for size: #3 Plots pure logic (+326), #4 DenWorldService (+421, stacked). CI green on both. Place settings hand-off: Max Players 8 (Kian), remove template Baseplate/SpawnLocation |
+| P0.2 | raid | — | In review | #3, #4 | 1 | Split for size: #3 Plots pure logic (+326), #4 DenWorldService (+421, stacked). CI green on both. Max Players set to 8 by Kian 2026-10-28. Remove template Baseplate/SpawnLocation (integration, local) |
 | P0.3 | data | — | In review | #2 | 1 | ProfileStore 1.0.3 vendored. `Config.Flags` approved by Kian 2026-10-28. Reviewer APPROVED (no blockers). Integration: merge + Studio rejoin test |
 | P0.3a | data | P0.3 | Todo | | 0 | Reviewer follow-ups on #2: S1 fail-closed flag check, S3 stamp only true templates, S4 session/Player guard, S6-S8 docs |
 | P0.3b | data | P0.3 | Todo | | 0 | Reviewer S5: DataService save-now-and-confirm + same-server Escrow.Store so P0.5 live steals go through Escrow durably. Prerequisite for P0.5 |
@@ -31,6 +31,7 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 - 2026-10-27: Studio MCP connected ("Raid Night", placeId 140078354239554). Smoke test passed:
   output prints `[RaidNight] server started`. Harmless warning from the default place:
   `ContentId rbxassetid://203785492 ... Asset type does not match` (not from our code).
+- 2026-10-28: Kian enabled Studio Access to API Services and set Max Players to 8.
 - 2026-10-28: Playbook Appendix D is out of date; `.github/workflows/ci.yml` (PR #1) is the source
   of truth (pinned tools via rokit, selene included).
 - 2026-10-27: `integration` branch created from `main` with the playbook, ledger and `rokit.toml`.
