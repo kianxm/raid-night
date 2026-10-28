@@ -227,15 +227,8 @@ local function runSimulation(seed: number)
 			if thisRaider == defenderId then
 				thisRaider = (thisRaider % PLAYERS) + 1
 			end
-			local record = Escrow.create(
-				raidId,
-				thisRaider,
-				defenderId,
-				grabbed,
-				RaidRules.lootGlow(snapshot, false),
-				false,
-				now
-			)
+			local record =
+				Escrow.create(raidId, thisRaider, defenderId, grabbed, RaidRules.lootGlow(snapshot, false), false, now)
 			world.store.saveRecord(record)
 			table.insert(open, raidId)
 			tryAdvance(raidId, now, crashy)

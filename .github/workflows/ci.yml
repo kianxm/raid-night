@@ -1,0 +1,69 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, integration]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Bump these on purpose. lune, StyLua and selene versions come from rokit.toml.
+  ROKIT_VERSION: "1.2.0"
+  LUAU_VERSION: "0.744"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rokit
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/rokit.zip" \
+            "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/rokit-${ROKIT_VERSION}-linux-x86_64.zip"
+          unzip -o -q "$RUNNER_TEMP/rokit.zip" -d "$RUNNER_TEMP/rokit"
+          "$RUNNER_TEMP/rokit/rokit" self-install
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned tools from rokit.toml
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          rokit authenticate github --token "$GITHUB_TOKEN"
+          rokit install --no-trust-check
+
+      - name: Install luau-analyze
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/luau.zip" \
+            "https://github.com/luau-lang/luau/releases/download/${LUAU_VERSION}/luau-ubuntu.zip"
+          unzip -o -q "$RUNNER_TEMP/luau.zip" -d "$HOME/luau"
+          echo "$HOME/luau" >> "$GITHUB_PATH"
+
+      - name: Tool versions
+        run: |
+          lune --version
+          stylua --version
+          selene --version
+          command -v luau-analyze
+
+      - name: Tests
+        run: lune run tests/run.luau
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: stylua --check src tests tools
+
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: selene src
+
+      - name: Type check
+        if: ${{ !cancelled() }}
+        run: luau-analyze src/Shared/*.luau src/Shared/Data/*.luau

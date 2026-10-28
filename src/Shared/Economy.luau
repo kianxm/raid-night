@@ -35,7 +35,9 @@ function Economy.critterRate(critter: Critter, rebirths: number): number
 	if not species then
 		return 0
 	end
-	local base = species.glowPerSecond * Economy.mutationMultiplier(critter.mutation) * Economy.rebirthMultiplier(rebirths)
+	local base = species.glowPerSecond
+		* Economy.mutationMultiplier(critter.mutation)
+		* Economy.rebirthMultiplier(rebirths)
 	if critter.placement == "Pad" then
 		return base
 	elseif critter.placement == "Vault" then
