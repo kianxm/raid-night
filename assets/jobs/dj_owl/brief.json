@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2.5,
+    "texture": 1024,
+    "triangles": 3000
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "dj_owl",
+  "idleAnimation": "scratches the record and bobs its head to the beat",
+  "look": "round owl wearing big headphones behind a tiny glowing turntable",
+  "name": "DJ Owl",
+  "notes": "",
+  "palette": [
+    "#7CFFCB",
+    "#6B4E8F",
+    "#160F24"
+  ],
+  "status": "prompts-ready",
+  "tier": "Rare"
+}

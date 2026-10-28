@@ -1,0 +1,194 @@
+--!strict
+--[[
+	Types: the shared contracts for Raid Night.
+
+	Every service, every agent and every test builds against these types. Changing anything in
+	this file is a contract change:
+	  1. Update docs/contracts.md in the same commit.
+	  2. Bump SCHEMA_VERSION in Config.luau if a persisted shape changed, and add a migration.
+	  3. Get a review from the `reviewer` agent before merging.
+
+	Persisted types (saved to DataStore) are marked [persisted]. Never remove or rename a field on
+	a persisted type without a migration.
+]]
+
+-- Critter catalog -------------------------------------------------------------------------------
+
+export type Tier = "Common" | "Uncommon" | "Rare" | "Epic" | "Legendary" | "Mythic" | "Secret"
+
+export type Mutation = "None" | "Shiny" | "Moonlit" | "Haunted" | "Golden"
+
+-- Weight slows the player carrying a stolen critter. Heavier = rarer = riskier to grab.
+export type Weight = "Light" | "Medium" | "Heavy" | "VeryHeavy"
+
+-- A species is static design data from Data/Critters.luau. Never persisted.
+export type CritterSpecies = {
+	id: string, -- stable snake_case id; never reuse or rename once shipped
+	name: string, -- display name
+	tier: Tier,
+	glowPerSecond: number, -- base income before mutation and rebirth multipliers
+	weight: Weight,
+	look: string, -- one-line visual description; feeds asset prompts (tools/assets)
+	idle: string, -- the funny idle animation, one line; feeds animation briefs
+	palette: { string }, -- 2-4 hex colors; first is the glow color
+	eventOnly: boolean, -- true = never in eggs; only from events
+}
+
+-- Owned critters ----------------------------------------------------------------------------------
+
+-- Where an owned critter sits. Pad earns and can be stolen. Vault earns half and is never
+-- stealable in async raids. Guard earns nothing and defends. Inventory is unplaced.
+export type Placement = "Pad" | "Vault" | "Guard" | "Inventory"
+
+-- [persisted] One owned critter. `uid` is globally unique and is the anti-duplication key:
+-- a uid must exist in exactly one place at any moment (one profile, or one in-flight escrow).
+export type Critter = {
+	uid: string,
+	speciesId: string,
+	mutation: Mutation,
+	placement: Placement,
+	padIndex: number?, -- set only when placement == "Pad"
+	acquiredAt: number, -- unix seconds
+	stolenLockUntil: number?, -- untradeable until this time (set when stolen)
+}
+
+-- Den defenses --------------------------------------------------------------------------------
+
+export type TrapKind = "SlowPuddle" | "Net" | "Sprinkler" | "AlarmMoth" | "Trapdoor"
+
+-- [persisted]
+export type Trap = {
+	kind: TrapKind,
+	level: number,
+	gridX: number,
+	gridY: number,
+}
+
+-- Raids, revenge, logs ---------------------------------------------------------------------------
+
+-- [persisted] A revenge right granted to a defender after a successful raid on them.
+export type RevengeToken = {
+	raidId: string, -- the raid that created this token
+	targetUserId: number, -- the raider, who becomes the revenge target
+	expiresAt: number,
+	shieldBypassUsed: boolean, -- revenge may ignore the target's shield once
+}
+
+export type RaidDirection = "Incoming" | "Outgoing"
+
+-- [persisted] One line in a player's raid log (newest first, capped by Config.RaidLog.maxEntries).
+export type RaidLogEntry = {
+	raidId: string,
+	direction: RaidDirection,
+	otherUserId: number,
+	escaped: boolean, -- for Incoming: true = you were robbed; false = you held
+	speciesId: string?, -- critter taken, if any
+	glow: number,
+	at: number,
+	isRevenge: boolean,
+}
+
+-- [persisted, inside PlayerProfile.appliedTransfers] What a profile applied for one raid.
+-- Kept so a retried transfer returns the same answer instead of applying twice.
+export type AppliedTransfer = {
+	role: "Debit" | "Credit",
+	at: number,
+	critter: Critter?, -- the exact critter debited or credited, if any
+	glow: number,
+}
+
+-- Player profile --------------------------------------------------------------------------------
+
+-- [persisted] The whole saved state for one player. One DataStore key per user, session-locked
+-- by ProfileStore. Other servers never write it directly: they send messages (see Escrow.luau).
+export type PlayerProfile = {
+	schemaVersion: number,
+	userId: number,
+	createdAt: number,
+
+	-- Economy
+	glow: number, -- banked Glow: safe, never stealable
+	stored: number, -- unbanked Glow sitting in the den: stealable (share capped per raid)
+	storedUpdatedAt: number, -- last time `stored` was accrued
+	denLevel: number,
+	rebirths: number,
+	raiderRank: number,
+	vaultSlots: number,
+
+	-- Collection and defenses
+	critters: { [string]: Critter }, -- keyed by uid
+	traps: { Trap },
+
+	-- Raid safety state
+	shieldUntil: number,
+	lossDay: number, -- UTC day index the daily counters belong to
+	lossesToday: number, -- critters lost today (capped by Config.Limits.maxLossesPerDay)
+	pairRaidsToday: { [string]: number }, -- other userId (as string) -> raids between you today
+
+	-- Raid history and idempotency
+	raidLog: { RaidLogEntry },
+	revengeTokens: { [string]: RevengeToken }, -- keyed by raidId
+	appliedTransfers: { [string]: AppliedTransfer }, -- keyed by raidId; pruned after 7 days
+
+	-- Social and notifications
+	nemesisUserId: number?,
+	notificationPromptedAt: number?,
+}
+
+-- Snapshots and matchmaking ---------------------------------------------------------------------
+
+-- [persisted, separate key] The raidable picture of a den, saved on leave and every
+-- Config.Snapshot.intervalSeconds while online. Async raids are built from this, never from
+-- the live profile.
+export type DenSnapshot = {
+	schemaVersion: number,
+	userId: number,
+	takenAt: number,
+	power: number,
+	defenseRating: number,
+	denLevel: number,
+	critters: { Critter }, -- Pad and Guard critters only. Vault critters are never included.
+	traps: { Trap },
+	storedGlow: number, -- `stored` accrued at snapshot time
+	shieldUntil: number,
+	protectedUntil: number, -- new-player protection end
+}
+
+-- [MemoryStore, not persisted] One entry in a matchmaking pool.
+export type MatchEntry = {
+	userId: number,
+	power: number,
+	lastActiveAt: number,
+	lastRaidedAt: number,
+	shieldUntil: number,
+	protectedUntil: number,
+}
+
+-- Escrow ----------------------------------------------------------------------------------------
+
+-- Pending: created by the raider's server when a raid ends in an escape.
+-- Debited: the defender's profile has given up the loot; the loot lives only in this record.
+-- Committed: the raider's profile has received the loot. Terminal.
+-- Voided: cancelled before any debit (cheat detected, raid invalid). Terminal.
+export type EscrowState = "Pending" | "Debited" | "Committed" | "Voided"
+
+-- [persisted, separate key per raidId] The record that makes a cross-profile transfer safe.
+export type EscrowRecord = {
+	raidId: string,
+	raiderUserId: number,
+	defenderUserId: number,
+	critterUid: string?, -- the critter the raider grabbed, if any
+	glowRequested: number, -- loot Glow computed from the snapshot
+	state: EscrowState,
+	critter: Critter?, -- filled at Debited: the exact critter taken (nil if it was gone)
+	glow: number, -- filled at Debited: Glow actually taken (<= glowRequested)
+	isRevenge: boolean,
+	createdAt: number,
+	updatedAt: number,
+}
+
+-- Results ------------------------------------------------------------------------------------
+
+export type Result<T> = { ok: true, value: T } | { ok: false, reason: string }
+
+return {}

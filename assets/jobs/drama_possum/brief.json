@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "drama_possum",
+  "idleAnimation": "faints dramatically with its tongue out, then peeks one eye open",
+  "look": "grey possum with a pink nose and a glowing tail tip",
+  "name": "Drama Possum",
+  "notes": "",
+  "palette": [
+    "#FFB3D9",
+    "#9A9AA8",
+    "#1E1E2C"
+  ],
+  "status": "prompts-ready",
+  "tier": "Uncommon"
+}

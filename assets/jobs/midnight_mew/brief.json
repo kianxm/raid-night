@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 4,
+    "texture": 1024,
+    "triangles": 5000
+  },
+  "eventOnly": true,
+  "humanArtPass": true,
+  "id": "midnight_mew",
+  "idleAnimation": "its eye looks around slowly, then stares straight at the camera",
+  "look": "cat-sized creature made of pure darkness with a single huge glowing moon eye",
+  "name": "The Midnight Mew",
+  "notes": "",
+  "palette": [
+    "#FFFFFF",
+    "#000000",
+    "#2A0A3D"
+  ],
+  "status": "prompts-ready",
+  "tier": "Secret"
+}

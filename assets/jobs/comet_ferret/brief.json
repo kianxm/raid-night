@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2.5,
+    "texture": 1024,
+    "triangles": 3000
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "comet_ferret",
+  "idleAnimation": "zooms in a quick loop leaving a ring of sparkles",
+  "look": "sleek white ferret trailing a sparkling comet tail",
+  "name": "Comet Ferret",
+  "notes": "",
+  "palette": [
+    "#FFFFFF",
+    "#9FD8FF",
+    "#141A33"
+  ],
+  "status": "prompts-ready",
+  "tier": "Rare"
+}

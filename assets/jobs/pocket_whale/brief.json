@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 3,
+    "texture": 1024,
+    "triangles": 3000
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "pocket_whale",
+  "idleAnimation": "spouts a puff of stardust from its blowhole",
+  "look": "palm-sized floating whale with glowing constellation spots",
+  "name": "Pocket Whale",
+  "notes": "",
+  "palette": [
+    "#8FB8FF",
+    "#2D3F7A",
+    "#0B1026"
+  ],
+  "status": "prompts-ready",
+  "tier": "Epic"
+}

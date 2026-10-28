@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 4,
+    "texture": 1024,
+    "triangles": 5000
+  },
+  "eventOnly": false,
+  "humanArtPass": true,
+  "id": "eclipse_wyrm",
+  "idleAnimation": "coils tighter and the eclipse corona flares outward",
+  "look": "serpentine dragon whose coiled body forms a glowing solar eclipse ring",
+  "name": "Eclipse Wyrm",
+  "notes": "",
+  "palette": [
+    "#FFB347",
+    "#1A1A1A",
+    "#05050A"
+  ],
+  "status": "prompts-ready",
+  "tier": "Mythic"
+}

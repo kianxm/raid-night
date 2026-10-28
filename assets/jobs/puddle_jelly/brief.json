@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "puddle_jelly",
+  "idleAnimation": "bobs up and down, then accidentally zaps itself",
+  "look": "land jellyfish floating like a balloon with dangling glowing tendrils",
+  "name": "Puddle Jelly",
+  "notes": "",
+  "palette": [
+    "#E0A3FF",
+    "#7FD4FF",
+    "#1A1433"
+  ],
+  "status": "prompts-ready",
+  "tier": "Uncommon"
+}

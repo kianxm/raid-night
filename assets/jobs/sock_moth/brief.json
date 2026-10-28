@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "sock_moth",
+  "idleAnimation": "headbutts the nearest lamp over and over",
+  "look": "fluffy cream moth wearing a stolen striped sock as a cape",
+  "name": "Sock Moth",
+  "notes": "",
+  "palette": [
+    "#FFF1B8",
+    "#C9A0DC",
+    "#2B2440"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}

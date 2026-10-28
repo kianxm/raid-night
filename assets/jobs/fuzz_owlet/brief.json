@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "fuzz_owlet",
+  "idleAnimation": "rotates its head all the way around, then blinks slowly at you",
+  "look": "baby owl that is ninety percent fluff with huge glowing eyes",
+  "name": "Fuzz Owlet",
+  "notes": "",
+  "palette": [
+    "#FFE08A",
+    "#C7B8A3",
+    "#2A2433"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}

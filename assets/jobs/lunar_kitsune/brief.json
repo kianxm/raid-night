@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 3.5,
+    "texture": 1024,
+    "triangles": 5000
+  },
+  "eventOnly": false,
+  "humanArtPass": true,
+  "id": "lunar_kitsune",
+  "idleAnimation": "its tails cycle through the phases of the moon one by one",
+  "look": "elegant three-tailed spirit fox, each tail glowing as a different moon phase",
+  "name": "Lunar Kitsune",
+  "notes": "",
+  "palette": [
+    "#F5F0FF",
+    "#9D8CFF",
+    "#0F0D24"
+  ],
+  "status": "prompts-ready",
+  "tier": "Legendary"
+}

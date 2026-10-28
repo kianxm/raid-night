@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 3.5,
+    "texture": 1024,
+    "triangles": 5000
+  },
+  "eventOnly": false,
+  "humanArtPass": true,
+  "id": "storm_hare",
+  "idleAnimation": "thumps its foot and a thunderclap rolls out",
+  "look": "silver hare with lightning-bolt ears riding a small thundercloud",
+  "name": "Storm Hare",
+  "notes": "",
+  "palette": [
+    "#E3F2FF",
+    "#FFE45C",
+    "#141B33"
+  ],
+  "status": "prompts-ready",
+  "tier": "Legendary"
+}

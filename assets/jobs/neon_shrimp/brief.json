@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "neon_shrimp",
+  "idleAnimation": "throws a fast little punch combo at the air",
+  "look": "curled shrimp with long neon antennae and tiny boxing gloves",
+  "name": "Neon Shrimp",
+  "notes": "",
+  "palette": [
+    "#FF6B6B",
+    "#FFD1D1",
+    "#1A1A2E"
+  ],
+  "status": "prompts-ready",
+  "tier": "Uncommon"
+}

@@ -1,0 +1,278 @@
+--!strict
+--[[
+	Escrow: moves raid loot from a defender's profile to a raider's profile without ever
+	duplicating or losing a critter, even if a server crashes between any two writes.
+
+	Why this exists: Roblox DataStore has no transactions across keys. The defender and the
+	raider are separate keys, usually loaded (session-locked) by different servers. So a
+	transfer is split into steps that are each a single-key write, and every step is idempotent
+	(safe to repeat). An escrow record, stored under its own key per raidId, tracks progress.
+
+	State machine:
+
+	    Pending ──debitDefender + markDebited──▶ Debited ──creditRaider + markCommitted──▶ Committed
+	       │
+	       └──void (only before any debit)──▶ Voided
+
+	Invariants (checked by tests/specs/EscrowSimulation.spec.luau):
+	  1. A critter uid exists in exactly one place: one profile, or in flight for one raid.
+	     In flight means taken from the defender but not yet credited to the raider; it is held
+	     durably in the record (Debited) or, if a crash hit between the two saves, in the
+	     defender's appliedTransfers entry until recovery copies it to the record.
+	  2. Glow is conserved: Glow taken from a defender equals Glow given to the raider.
+	  3. Repeating any step, any number of times, changes nothing after the first success.
+
+	Transport (server layer, not this module):
+	  - debitDefender runs wherever the defender's profile is loaded. If the defender is online,
+	    deliver it as a ProfileStore message so their session applies it; if offline, the raider's
+	    server loads the profile, applies it and releases it.
+	  - A recovery sweep advances any record left in Pending or Debited (on raider join, and on a
+	    timer), using `advance`.
+]]
+
+local Types = require("./Types")
+local Config = require("./Config")
+local RaidRules = require("./RaidRules")
+
+type PlayerProfile = Types.PlayerProfile
+type EscrowRecord = Types.EscrowRecord
+type AppliedTransfer = Types.AppliedTransfer
+type Critter = Types.Critter
+
+local Escrow = {}
+
+-- Persistence interface the driver needs. The server implements it with ProfileStore and a
+-- DataStore for records; the simulation implements it in memory with crash injection.
+-- `load*` returns a working copy; nothing persists until the matching `save*` is called.
+export type Store = {
+	loadRecord: (raidId: string) -> EscrowRecord?,
+	saveRecord: (record: EscrowRecord) -> (),
+	loadProfile: (userId: number) -> PlayerProfile,
+	saveProfile: (profile: PlayerProfile) -> (),
+}
+
+local function cloneCritter(critter: Critter): Critter
+	return table.clone(critter)
+end
+
+function Escrow.create(
+	raidId: string,
+	raiderUserId: number,
+	defenderUserId: number,
+	critterUid: string?,
+	glowRequested: number,
+	isRevenge: boolean,
+	now: number
+): EscrowRecord
+	assert(raiderUserId ~= defenderUserId, "Escrow.create: raider and defender must differ")
+	assert(glowRequested >= 0, "Escrow.create: glowRequested must be >= 0")
+	return {
+		raidId = raidId,
+		raiderUserId = raiderUserId,
+		defenderUserId = defenderUserId,
+		critterUid = critterUid,
+		glowRequested = glowRequested,
+		state = "Pending",
+		critter = nil,
+		glow = 0,
+		isRevenge = isRevenge,
+		createdAt = now,
+		updatedAt = now,
+	}
+end
+
+--[[
+	Step 1, on the DEFENDER's profile. Takes the grabbed critter (if it is still on a pad and the
+	defender is under the daily loss cap) and up to `glowRequested` from storage. Records the
+	defender-side consequences (shield, revenge token, log). Idempotent: a repeat returns the
+	first result unchanged.
+]]
+function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now: number): AppliedTransfer
+	assert(defender.userId == record.defenderUserId, "debitDefender: wrong profile")
+	local existing = defender.appliedTransfers[record.raidId]
+	if existing then
+		assert(existing.role == "Debit", "debitDefender: raidId already used for a credit")
+		return existing
+	end
+	assert(record.state == "Pending", `debitDefender: record is {record.state}, expected Pending`)
+
+	RaidRules.resetDailyIfNeeded(defender, now)
+
+	local taken: Critter? = nil
+	if record.critterUid then
+		local critter = defender.critters[record.critterUid]
+		local underLossCap = defender.lossesToday < Config.Limits.maxLossesPerDay
+		-- The critter may have moved to the vault, been sold, or been stolen by a concurrent raid
+		-- since the snapshot. In those cases the raid still succeeds, with Glow only.
+		if critter and critter.placement == "Pad" and underLossCap then
+			taken = cloneCritter(critter)
+			defender.critters[record.critterUid] = nil
+		end
+	end
+
+	local glow = math.clamp(math.floor(defender.stored), 0, record.glowRequested)
+	defender.stored -= glow
+
+	local applied: AppliedTransfer = {
+		role = "Debit",
+		at = now,
+		critter = taken,
+		glow = glow,
+	}
+	defender.appliedTransfers[record.raidId] = applied
+
+	RaidRules.recordIncoming(
+		defender,
+		record.raidId,
+		record.raiderUserId,
+		if taken then taken.speciesId else nil,
+		glow,
+		record.isRevenge,
+		now
+	)
+
+	return applied
+end
+
+-- Step 2, on the RECORD. Stores what was actually taken. Idempotent.
+function Escrow.markDebited(record: EscrowRecord, applied: AppliedTransfer, now: number)
+	if record.state == "Debited" or record.state == "Committed" then
+		return
+	end
+	assert(record.state == "Pending", `markDebited: record is {record.state}`)
+	record.critter = if applied.critter then cloneCritter(applied.critter) else nil
+	record.glow = applied.glow
+	record.state = "Debited"
+	record.updatedAt = now
+end
+
+--[[
+	Step 3, on the RAIDER's profile. Adds the escrowed critter (to Inventory, trade-locked) and
+	the Glow (banked: loot is safe once home). Idempotent.
+]]
+function Escrow.creditRaider(raider: PlayerProfile, record: EscrowRecord, now: number): AppliedTransfer
+	assert(raider.userId == record.raiderUserId, "creditRaider: wrong profile")
+	local existing = raider.appliedTransfers[record.raidId]
+	if existing then
+		assert(existing.role == "Credit", "creditRaider: raidId already used for a debit")
+		return existing
+	end
+	assert(
+		record.state == "Debited" or record.state == "Committed",
+		`creditRaider: record is {record.state}, expected Debited`
+	)
+
+	local given: Critter? = nil
+	if record.critter then
+		local critter = cloneCritter(record.critter)
+		assert(raider.critters[critter.uid] == nil, `creditRaider: uid {critter.uid} already owned (duplicate)`)
+		critter.placement = "Inventory"
+		critter.padIndex = nil
+		critter.acquiredAt = now
+		critter.stolenLockUntil = now + Config.Raid.stolenTradeLockSeconds
+		raider.critters[critter.uid] = critter
+		given = cloneCritter(critter)
+	end
+
+	raider.glow += record.glow
+
+	local applied: AppliedTransfer = {
+		role = "Credit",
+		at = now,
+		critter = given,
+		glow = record.glow,
+	}
+	raider.appliedTransfers[record.raidId] = applied
+	return applied
+end
+
+-- Step 4, on the RECORD. Terminal. Idempotent.
+function Escrow.markCommitted(record: EscrowRecord, now: number)
+	if record.state == "Committed" then
+		return
+	end
+	assert(record.state == "Debited", `markCommitted: record is {record.state}`)
+	record.state = "Committed"
+	record.updatedAt = now
+end
+
+-- Cancels a raid before anything moved. Returns false if it is too late to void.
+-- Needs the defender's profile: a crash between saving the defender and saving the record
+-- leaves the record Pending even though the debit already landed. Voiding then would strand
+-- the loot, so the defender's appliedTransfers entry is the real "too late" signal.
+function Escrow.void(record: EscrowRecord, defender: PlayerProfile, now: number): boolean
+	assert(defender.userId == record.defenderUserId, "void: wrong profile")
+	if record.state == "Voided" then
+		return true
+	end
+	if record.state ~= "Pending" or defender.appliedTransfers[record.raidId] ~= nil then
+		return false
+	end
+	record.state = "Voided"
+	record.updatedAt = now
+	return true
+end
+
+function Escrow.isTerminal(record: EscrowRecord): boolean
+	return record.state == "Committed" or record.state == "Voided"
+end
+
+--[[
+	Drives a record to a terminal state, one single-key write at a time. Safe to call any
+	number of times, from any server, after any crash. `checkpoint`, if given, is called after
+	every save; the simulation uses it to inject crashes.
+
+	NOTE: if the defender's session is held by another server, the server layer must route the
+	debit through that session (ProfileStore message) instead of calling this directly.
+]]
+function Escrow.advance(raidId: string, store: Store, now: number, checkpoint: ((string) -> ())?): EscrowRecord?
+	local function check(name: string)
+		if checkpoint then
+			checkpoint(name)
+		end
+	end
+
+	local record = store.loadRecord(raidId)
+	if not record then
+		return nil
+	end
+
+	if record.state == "Pending" then
+		local defender = store.loadProfile(record.defenderUserId)
+		local applied = Escrow.debitDefender(defender, record, now)
+		store.saveProfile(defender)
+		check("savedDefender")
+
+		Escrow.markDebited(record, applied, now)
+		store.saveRecord(record)
+		check("savedRecordDebited")
+	end
+
+	if record.state == "Debited" then
+		local raider = store.loadProfile(record.raiderUserId)
+		Escrow.creditRaider(raider, record, now)
+		store.saveProfile(raider)
+		check("savedRaider")
+
+		Escrow.markCommitted(record, now)
+		store.saveRecord(record)
+		check("savedRecordCommitted")
+	end
+
+	return record
+end
+
+-- Drops idempotency entries older than the retention window. Only safe because every escrow
+-- is driven to a terminal state within minutes; the window is days.
+function Escrow.pruneApplied(profile: PlayerProfile, now: number): number
+	local removed = 0
+	for raidId, applied in profile.appliedTransfers do
+		if now - applied.at > Config.Escrow.appliedTransferRetentionSeconds then
+			profile.appliedTransfers[raidId] = nil
+			removed += 1
+		end
+	end
+	return removed
+end
+
+return Escrow

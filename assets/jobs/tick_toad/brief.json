@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 3,
+    "texture": 1024,
+    "triangles": 3000
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "tick_toad",
+  "idleAnimation": "ticks steadily until its alarm rings and it falls over",
+  "look": "plump golden toad with a pocket watch built into its belly",
+  "name": "Tick Toad",
+  "notes": "",
+  "palette": [
+    "#FFD45E",
+    "#8A6B2E",
+    "#201A10"
+  ],
+  "status": "prompts-ready",
+  "tier": "Epic"
+}

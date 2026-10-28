@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2.5,
+    "texture": 1024,
+    "triangles": 3000
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "bubble_otter",
+  "idleAnimation": "the bubble pops, the otter drops, then blows a new bubble around itself",
+  "look": "otter floating on its back inside a large glowing soap bubble",
+  "name": "Bubble Otter",
+  "notes": "",
+  "palette": [
+    "#9EE8FF",
+    "#7A5640",
+    "#122030"
+  ],
+  "status": "prompts-ready",
+  "tier": "Rare"
+}

@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "nimbus_lamb",
+  "idleAnimation": "sneezes a tiny bolt of lightning",
+  "look": "little lamb whose wool is a small dark storm cloud",
+  "name": "Nimbus Lamb",
+  "notes": "",
+  "palette": [
+    "#B8C7FF",
+    "#4A5578",
+    "#141A2E"
+  ],
+  "status": "prompts-ready",
+  "tier": "Uncommon"
+}

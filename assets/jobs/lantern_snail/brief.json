@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "lantern_snail",
+  "idleAnimation": "shell flickers, the snail lets out a long sigh",
+  "look": "chubby snail whose shell is a little glowing paper lantern",
+  "name": "Lantern Snail",
+  "notes": "",
+  "palette": [
+    "#FFC86B",
+    "#E9846A",
+    "#2A2140"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}

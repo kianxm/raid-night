@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "lid_raccoon",
+  "idleAnimation": "drums on the lid with its paws",
+  "look": "tiny raccoon holding a trash can lid like a shield",
+  "name": "Lid Raccoon",
+  "notes": "",
+  "palette": [
+    "#9BE15D",
+    "#6E6E78",
+    "#1C1C24"
+  ],
+  "status": "prompts-ready",
+  "tier": "Uncommon"
+}

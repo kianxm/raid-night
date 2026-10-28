@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "wick_cat",
+  "idleAnimation": "chases its own tail flame in a circle",
+  "look": "small black cat with a candle flame burning on the tip of its tail",
+  "name": "Wick Cat",
+  "notes": "",
+  "palette": [
+    "#FF9E3D",
+    "#2B2B33",
+    "#120F14"
+  ],
+  "status": "prompts-ready",
+  "tier": "Uncommon"
+}

@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2.5,
+    "texture": 1024,
+    "triangles": 3000
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "crescent_fox",
+  "idleAnimation": "yawns, and the crescent tail glows brighter as it does",
+  "look": "slim midnight-blue fox whose tail curls into a glowing crescent moon",
+  "name": "Crescent Fox",
+  "notes": "",
+  "palette": [
+    "#FFF4C2",
+    "#2C3E7A",
+    "#10162E"
+  ],
+  "status": "prompts-ready",
+  "tier": "Rare"
+}

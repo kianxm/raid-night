@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2.5,
+    "texture": 1024,
+    "triangles": 3000
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "noodle_weasel",
+  "idleAnimation": "tries to stretch and ties itself into a knot",
+  "look": "extremely long cream weasel with a glowing collar",
+  "name": "Noodle Weasel",
+  "notes": "",
+  "palette": [
+    "#FFD6A5",
+    "#EADBC8",
+    "#24202A"
+  ],
+  "status": "prompts-ready",
+  "tier": "Rare"
+}

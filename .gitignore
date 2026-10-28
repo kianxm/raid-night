@@ -1,0 +1,27 @@
+# Place files: the source of truth is src/, synced by Rojo. Never commit binaries of the place.
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+
+# Claude Code worktrees for parallel agents
+.claude/worktrees/
+
+# Packages installed by Wally (re-created by `wally install`)
+Packages/
+ServerPackages/
+DevPackages/
+
+# Raw AI generations are large and disposable; only cleaned, approved assets are committed.
+assets/raw/**
+!assets/raw/.gitkeep
+
+# Local secrets (Open Cloud keys, Higgsfield keys)
+.env
+*.key
+
+# OS / editor
+.DS_Store
+.vscode/*
+!.vscode/settings.json
+sourcemap.json

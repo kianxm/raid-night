@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "pebble_toad",
+  "idleAnimation": "puffs its throat into a glowing bubble that pops in its face",
+  "look": "squat round toad covered in speckled glowing spots",
+  "name": "Pebble Toad",
+  "notes": "",
+  "palette": [
+    "#B6FF6B",
+    "#6B8F3A",
+    "#1E2A1A"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}

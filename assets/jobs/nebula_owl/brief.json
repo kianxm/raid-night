@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 4,
+    "texture": 1024,
+    "triangles": 5000
+  },
+  "eventOnly": false,
+  "humanArtPass": true,
+  "id": "nebula_owl",
+  "idleAnimation": "blinks slowly and a few stars fall from its wings",
+  "look": "large owl whose wings hold a swirling galaxy",
+  "name": "Nebula Owl",
+  "notes": "",
+  "palette": [
+    "#C79BFF",
+    "#4FD6FF",
+    "#090618"
+  ],
+  "status": "prompts-ready",
+  "tier": "Mythic"
+}

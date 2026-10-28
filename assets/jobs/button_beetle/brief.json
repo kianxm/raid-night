@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "button_beetle",
+  "idleAnimation": "flips onto its back and spins like a coin",
+  "look": "small beetle whose shell is a big shiny four-hole sewing button",
+  "name": "Button Beetle",
+  "notes": "",
+  "palette": [
+    "#FF8FB1",
+    "#A33B5E",
+    "#1F1424"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}

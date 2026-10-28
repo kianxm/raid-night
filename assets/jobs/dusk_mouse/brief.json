@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "dusk_mouse",
+  "idleAnimation": "ears flicker on and off like a faulty nightlight",
+  "look": "tiny round grey mouse with oversized ears that glow like nightlights",
+  "name": "Dusk Mouse",
+  "notes": "",
+  "palette": [
+    "#7FE7FF",
+    "#5B6478",
+    "#1B2236"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}

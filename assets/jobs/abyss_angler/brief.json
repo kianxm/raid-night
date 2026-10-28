@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 3.5,
+    "texture": 1024,
+    "triangles": 5000
+  },
+  "eventOnly": false,
+  "humanArtPass": true,
+  "id": "abyss_angler",
+  "idleAnimation": "the moon lure dims, the angler panics, then it flares back on",
+  "look": "floating deep-sea anglerfish whose lure is a tiny full moon",
+  "name": "Abyss Angler",
+  "notes": "",
+  "palette": [
+    "#FFF7D6",
+    "#2B5F7A",
+    "#070D18"
+  ],
+  "status": "prompts-ready",
+  "tier": "Legendary"
+}

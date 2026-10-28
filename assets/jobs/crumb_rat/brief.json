@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "crumb_rat",
+  "idleAnimation": "nibbles the crumb, drops it, panics, picks it back up",
+  "look": "scruffy brown rat hugging a cracker crumb bigger than its head",
+  "name": "Crumb Rat",
+  "notes": "",
+  "palette": [
+    "#FFD27F",
+    "#8A6A4A",
+    "#231B17"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}

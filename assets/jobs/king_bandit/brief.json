@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 3.5,
+    "texture": 1024,
+    "triangles": 5000
+  },
+  "eventOnly": false,
+  "humanArtPass": true,
+  "id": "king_bandit",
+  "idleAnimation": "counts a stack of glowing coins and grins",
+  "look": "regal raccoon wearing a crown made from a trash can lid and a tattered velvet cape",
+  "name": "King Bandit",
+  "notes": "",
+  "palette": [
+    "#FFD24A",
+    "#7A1F3D",
+    "#15111C"
+  ],
+  "status": "prompts-ready",
+  "tier": "Legendary"
+}

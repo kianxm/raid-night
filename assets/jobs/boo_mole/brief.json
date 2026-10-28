@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "boo_mole",
+  "idleAnimation": "pops out of the ground and silently mouths boo",
+  "look": "translucent ghostly mole wearing tiny round sunglasses",
+  "name": "Boo Mole",
+  "notes": "",
+  "palette": [
+    "#C8FFF4",
+    "#6FA8A0",
+    "#16232A"
+  ],
+  "status": "prompts-ready",
+  "tier": "Uncommon"
+}

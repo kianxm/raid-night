@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "heightStuds": 2,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "eventOnly": false,
+  "humanArtPass": false,
+  "id": "blinkbug",
+  "idleAnimation": "its glow cuts out, it taps its tail until it flickers back on",
+  "look": "round firefly with a lightbulb-shaped glowing tail",
+  "name": "Blinkbug",
+  "notes": "",
+  "palette": [
+    "#FFF27A",
+    "#3D3A2A",
+    "#121626"
+  ],
+  "status": "prompts-ready",
+  "tier": "Common"
+}
