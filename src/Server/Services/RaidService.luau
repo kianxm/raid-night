@@ -11,7 +11,8 @@
 	  - Escape = the carried critter crosses the raider's border or the pocket's escape gate
 
 	TODO (Phase 0, live stealing):
-	  [ ] Den plots, pads, borders; grab, carry, tag-to-drop, lockdown button
+	  [x] Den plots, pads, borders (DenWorldService, P0.2)
+	  [ ] Grab, carry, tag-to-drop, lockdown button
 	TODO (Phase 1, async raids):
 	  [ ] StartRaid: RaidRules.canRaid, acquire lock, load snapshot, build pocket den far off-map
 	      from pooled models, start the Config.Raid.durationSeconds timer
