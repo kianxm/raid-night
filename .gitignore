@@ -7,10 +7,11 @@
 # Claude Code worktrees for parallel agents
 .claude/worktrees/
 
-# Packages installed by Wally (re-created by `wally install`)
-Packages/
-ServerPackages/
-DevPackages/
+# Packages installed by Wally (re-created by `wally install`). Anchored to the repo root so
+# vendored modules such as src/Server/Packages/ProfileStore.luau are still committed.
+/Packages/
+/ServerPackages/
+/DevPackages/
 
 # Raw AI generations are large and disposable; only cleaned, approved assets are committed.
 assets/raw/**

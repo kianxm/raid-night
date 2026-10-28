@@ -10,6 +10,7 @@
 local Types = require("./Types")
 local Config = require("./Config")
 local RaidRules = require("./RaidRules")
+local Escrow = require("./Escrow")
 
 type PlayerProfile = Types.PlayerProfile
 
@@ -63,6 +64,31 @@ function Profile.migrate(profile: any): PlayerProfile
 		profile.schemaVersion = version
 	end
 	return profile :: PlayerProfile
+end
+
+--[[
+	Readies a save the server just loaded, before anything reads it. Runs, in order:
+	migrate; stamp a brand-new save (ProfileStore copies the `Profile.new(0, 0)` template, so
+	createdAt == 0 means "never played"); check the save belongs to `userId`; roll the daily
+	counters; drop expired revenge tokens and old escrow idempotency entries.
+
+	Mutates `data` in place and errors on a save it cannot trust (newer schema, wrong owner).
+	DataService passes a copy so a failure leaves the loaded save untouched.
+]]
+function Profile.prepare(data: any, userId: number, now: number): PlayerProfile
+	local profile = Profile.migrate(data)
+	if profile.createdAt == 0 then
+		local fresh = Profile.new(userId, now)
+		profile.userId = userId
+		profile.createdAt = fresh.createdAt
+		profile.storedUpdatedAt = fresh.storedUpdatedAt
+		profile.lossDay = fresh.lossDay
+	end
+	assert(profile.userId == userId, `Profile.prepare: save belongs to {profile.userId}, not {userId}`)
+	RaidRules.resetDailyIfNeeded(profile, now)
+	RaidRules.pruneRevengeTokens(profile, now)
+	Escrow.pruneApplied(profile, now)
+	return profile
 end
 
 return Profile
