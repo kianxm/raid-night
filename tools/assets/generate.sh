@@ -8,14 +8,15 @@
 # SAFE BY DEFAULT: prints the commands without running them. To actually spend credits:
 #   DRY_RUN=0 tools/assets/generate.sh images dusk_mouse
 #
-# BEFORE FIRST USE: confirm model ids and flags in the Higgsfield CLI docs (they change), and
-# set them below. Run `higgsfield auth login` once.
+# Image model and flags checked against higgsfield CLI 1.2.2 (2026-10-28). Run `higgsfield auth login`
+# and `higgsfield workspace set <id>` once. MODEL_3D is not verified yet: check it before Stage 3.
 
 set -euo pipefail
 
-IMAGE_MODEL="${IMAGE_MODEL:-SET_ME_image_model_id}"     # a model that accepts reference images
+IMAGE_MODEL="${IMAGE_MODEL:-seedream_v4_5}"             # Seedream 4.5: up to 14 reference images, 1 credit
+IMAGE_QUALITY="${IMAGE_QUALITY:-high}"                   # basic | high (same cost)
 MODEL_3D="${MODEL_3D:-multi_image_to_3d}"                # multi-view image to 3D
-STYLE_REFS=(assets/clean/_style/ref-01.png assets/clean/_style/ref-02.png assets/clean/_style/ref-03.png)
+STYLE_REFS=(assets/clean/_style/ref-01.png assets/clean/_style/ref-02.png assets/clean/_style/ref-03.png assets/clean/_style/ref-04.png)
 DRY_RUN="${DRY_RUN:-1}"
 
 mode="${1:-}"; shift || true
@@ -49,15 +50,15 @@ for id in "$@"; do
   case "$mode" in
     images)
       echo "== $id: front view + icon"
-      run higgsfield generate create "$IMAGE_MODEL" --prompt "$(cat "$job/front.txt")" "${ref_flags[@]}" --wait
-      run higgsfield generate create "$IMAGE_MODEL" --prompt "$(cat "$job/icon.txt")" "${ref_flags[@]}" --wait
+      run higgsfield generate create "$IMAGE_MODEL" --quality "$IMAGE_QUALITY" --prompt "$(cat "$job/front.txt")" "${ref_flags[@]}" --wait
+      run higgsfield generate create "$IMAGE_MODEL" --quality "$IMAGE_QUALITY" --prompt "$(cat "$job/icon.txt")" "${ref_flags[@]}" --wait
       echo "   Save the chosen front as $raw/front.png and the icon as $raw/icon.png"
       ;;
     views)
       [[ -f "$raw/front.png" || "$DRY_RUN" == "1" ]] || { echo "Approve and save $raw/front.png first" >&2; exit 1; }
       echo "== $id: side + back from the approved front"
-      run higgsfield generate create "$IMAGE_MODEL" --prompt "$(cat "$job/side.txt") Same character as the reference." --image "$raw/front.png" --wait
-      run higgsfield generate create "$IMAGE_MODEL" --prompt "$(cat "$job/back.txt") Same character as the reference." --image "$raw/front.png" --wait
+      run higgsfield generate create "$IMAGE_MODEL" --quality "$IMAGE_QUALITY" --prompt "$(cat "$job/side.txt") Same character as the reference." --image "$raw/front.png" --wait
+      run higgsfield generate create "$IMAGE_MODEL" --quality "$IMAGE_QUALITY" --prompt "$(cat "$job/back.txt") Same character as the reference." --image "$raw/front.png" --wait
       echo "   Save them as $raw/side.png and $raw/back.png"
       ;;
     model)
