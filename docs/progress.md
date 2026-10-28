@@ -8,11 +8,11 @@ Current phase: 0 · Last updated: 2026-10-28
 | --- | --- | --- | --- | --- | --- | --- |
 | P0.1 | integration | — | Done | #1 | 1 | CI green (tests, StyLua, selene, luau-analyze via rokit). Baseline StyLua diffs fixed |
 | P0.2 | raid | — | In progress | agent/raid/P0.2 | 1 | |
-| P0.3 | data | — | In progress | agent/data/P0.3 | 1 | Vendor ProfileStore (approved). `Config.Flags` approved by Kian 2026-10-28 |
+| P0.3 | data | — | In review | #2 | 1 | ProfileStore 1.0.3 vendored. `Config.Flags` approved by Kian 2026-10-28. Reviewer pass, then Studio rejoin test |
 | P0.4 | economy | P0.3 | Todo | | 0 | |
 | P0.5 | raid | P0.2, P0.4 | Todo | | 0 | |
 | P0.6 | ui | P0.4 | Todo | | 0 | |
-| P0.7 | assets | — | Todo | | 0 | Budget approved: 10 images max, no retries. Higgsfield CLI 1.2.2 authed; MCP added (needs session restart) |
+| P0.7 | assets | — | In progress | agent/assets/P0.7 | 1 | Budget approved: 10 images max, no retries. Higgsfield CLI 1.2.2 authed; MCP added (needs session restart) |
 | P0.8 | integration | P0.5, P0.6 | Todo | | 0 | |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
