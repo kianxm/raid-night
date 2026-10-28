@@ -36,9 +36,9 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
-- Repo protections: the repo is private on GitHub Free, which offers neither branch protection nor
-  rulesets (API returns 403). Options are in PR #1: upgrade to Pro (recommended), make the repo
-  public, or enforce by convention. Until then, PRs-only is by convention.
+- Repo protections: GitHub Free (private repo) does not enforce rulesets; Kian created one but it
+  is inactive until Pro. Decision 2026-10-28: PRs-only by convention for Phase 0; revisit (upgrade
+  to Pro) before Phase 1 fan-out.
 
 ## Gate history
 - G0: cleared 2026-10-27 (Kian, in chat)
