@@ -20,6 +20,7 @@ local Services = ServerScriptService:WaitForChild("Server"):WaitForChild("Servic
 
 local order = {
 	"DataService", -- profiles first; everything else reads them
+	"DenWorldService", -- map, den plots and spawns; IncomeService and RaidService build on it
 	"IncomeService",
 	"SnapshotService",
 	"EscrowService",
