@@ -12,7 +12,7 @@ Current phase: 0 · Last updated: 2026-10-28
 | P0.4 | economy | P0.3 | Todo | | 0 | |
 | P0.5 | raid | P0.2, P0.4 | Todo | | 0 | |
 | P0.6 | ui | P0.4 | Todo | | 0 | |
-| P0.7 | assets | — | Blocked | | 0 | Budget approved: 10 images max, no retries. Waiting on Higgsfield CLI + MCP setup |
+| P0.7 | assets | — | Todo | | 0 | Budget approved: 10 images max, no retries. Higgsfield CLI 1.2.2 authed; MCP added (needs session restart) |
 | P0.8 | integration | P0.5, P0.6 | Todo | | 0 | |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
@@ -36,9 +36,6 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
-- P0.7: install the Higgsfield CLI (`higgsfield auth login`) and add the Higgsfield MCP
-  (`claude mcp add --transport http higgsfield https://mcp.higgsfield.ai/mcp`), then restart the
-  session. Budget is set (10 images, no retries).
 - Repo protections: the repo is private on GitHub Free, which offers neither branch protection nor
   rulesets (API returns 403). Options are in PR #1: upgrade to Pro (recommended), make the repo
   public, or enforce by convention. Until then, PRs-only is by convention.
