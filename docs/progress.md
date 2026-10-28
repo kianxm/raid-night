@@ -7,7 +7,7 @@ Current phase: 0 · Last updated: 2026-10-28
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | P0.1 | integration | — | Done | #1 | 1 | CI green (tests, StyLua, selene, luau-analyze via rokit). Baseline StyLua diffs fixed |
-| P0.2 | raid | — | In progress | agent/raid/P0.2 | 1 | |
+| P0.2 | raid | — | In review | #3 | 1 | Checks + CI green. 747 lines, being split: #3 (Plots pure logic) + stacked part B (DenWorldService). Place settings hand-off: Max Players 8, remove template Baseplate/SpawnLocation |
 | P0.3 | data | — | In review | #2 | 1 | ProfileStore 1.0.3 vendored. `Config.Flags` approved by Kian 2026-10-28. Reviewer pass, then Studio rejoin test |
 | P0.4 | economy | P0.3 | Todo | | 0 | |
 | P0.5 | raid | P0.2, P0.4 | Todo | | 0 | |
