@@ -12,12 +12,42 @@
 local process = require("@lune/process")
 
 local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
-	{ name = "Catalog", load = function() return require("./specs/Catalog.spec") end },
-	{ name = "Economy", load = function() return require("./specs/Economy.spec") end },
-	{ name = "RaidRules", load = function() return require("./specs/RaidRules.spec") end },
-	{ name = "Profile", load = function() return require("./specs/Profile.spec") end },
-	{ name = "Escrow", load = function() return require("./specs/Escrow.spec") end },
-	{ name = "EscrowSimulation", load = function() return require("./specs/EscrowSimulation.spec") end },
+	{
+		name = "Catalog",
+		load = function()
+			return require("./specs/Catalog.spec")
+		end,
+	},
+	{
+		name = "Economy",
+		load = function()
+			return require("./specs/Economy.spec")
+		end,
+	},
+	{
+		name = "RaidRules",
+		load = function()
+			return require("./specs/RaidRules.spec")
+		end,
+	},
+	{
+		name = "Profile",
+		load = function()
+			return require("./specs/Profile.spec")
+		end,
+	},
+	{
+		name = "Escrow",
+		load = function()
+			return require("./specs/Escrow.spec")
+		end,
+	},
+	{
+		name = "EscrowSimulation",
+		load = function()
+			return require("./specs/EscrowSimulation.spec")
+		end,
+	},
 }
 
 local filter = process.args[1]
