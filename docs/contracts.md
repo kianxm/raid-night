@@ -45,6 +45,23 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 If you change `Escrow.luau`, `RaidRules.recordIncoming` or anything in `appliedTransfers`, the
 simulation must still pass, and the `reviewer` agent must sign off.
 
+## Kill switches
+
+`Config.Flags` holds one boolean per feature. `false` turns the feature off everywhere. Services
+read `Config.Flags.<name>` directly and check it before acting on a request.
+
+| Flag | Gates | Default |
+| --- | --- | --- |
+| `raids` | Live stealing (RaidService) and new `Live` escrow transfers | `true` |
+| `asyncRaids` | Offline raids in pocket dens and new `Async` escrow transfers | `false` |
+| `purchases` | Robux products (PurchaseService) | `false` |
+| `trading` | Trading (post-launch) | `false` |
+| `notifications` | Experience notifications (NotificationService) | `false` |
+
+Defaults turn on only the features that exist. Escrow recovery is never gated: records already
+in `Pending` or `Debited` always advance, so turning a flag off cannot strand loot in flight.
+Adding a flag is a contract change.
+
 ## Schema changes
 
 1. Add the field with a default in `Profile.new`.

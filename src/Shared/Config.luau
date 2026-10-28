@@ -22,6 +22,16 @@ end
 local Config = {
 	SCHEMA_VERSION = 1,
 
+	-- Kill switches. false turns the feature off everywhere; every service checks its flag
+	-- before acting. Defaults: only features that exist are on.
+	Flags = {
+		raids = true, -- live stealing (Phase 0)
+		asyncRaids = false, -- offline raids (Phase 1)
+		purchases = false, -- Robux products (Phase 2)
+		trading = false, -- trading (post-launch)
+		notifications = false, -- experience notifications (Phase 2)
+	},
+
 	Loot = {
 		maxCrittersPerRaid = 1,
 		storedGlowShare = 0.25, -- share of the defender's stored Glow a raid can take

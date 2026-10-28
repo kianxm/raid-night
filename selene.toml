@@ -1,4 +1,5 @@
 # Game code (src/) targets Roblox. Tests and tools run under Lune; lint them separately
 # with `selene tests tools --config selene.lune.toml` once you add a Lune std definition.
 std = "roblox"
-exclude = ["tests/**", "tools/**"]
+# src/Server/Packages holds vendored third-party code; never lint or reformat it.
+exclude = ["tests/**", "tools/**", "src/Server/Packages/**"]
