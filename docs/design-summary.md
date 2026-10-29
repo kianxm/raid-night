@@ -63,8 +63,11 @@ amplify it.
 ## Monetization
 
 Protection, convenience, status, social moments. Never ransom. No paid randomness at launch.
-Passes: VIP 399, vault slot 199, auto-collect 149, raid scout 249, themes and gear skins.
-Products: shield 49, timer skips, event pass 399. Glow is earn-only at launch (D-028). Phase 2
+Passes: VIP 399, vault slot 199, auto-collect 149, raid scout 249, themes and gear skins, escape
+emotes (49-149 each).
+Products: shield 49, timer skips, event pass 399, critter accessories (25-149, direct sale,
+cosmetic only), and the "Lantern Night" server boost (99-199: +50% Glow earned by everyone in
+the server for 15 min, buyer announced). No randomness in any launch product (D-029). Glow is earn-only at launch (D-028). Phase 2
 paid-randomness mini-phase: paid eggs, Blood Moon summon and Glow packs (Glow buys eggs), with
 full odds disclosure, PolicyService region checks and a reviewer audit. Egg odds are shown on
 screen for every egg from Phase 0.

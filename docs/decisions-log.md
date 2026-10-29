@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-029 · 2026-10-28 · Three more launch products, no randomness (Kian)
+Decision: add to the launch catalog (design-summary, PurchaseService): server boost "Lantern
+Night" (99-199 Robux, +50% Glow earned server-wide for 15 min, buyer announced), critter
+accessories (25-149, direct sale, cosmetic only), escape emotes (pass, 49-149). No randomness.
+Open policy check (orchestrator flag): Lantern Night sells extra Glow earning for Robux while
+Glow buys random eggs (D-028's reason for earn-only Glow); it ships only after a reviewer policy
+audit and PolicyService checks in P2.8. Accessories and emotes never change stats. Prices are
+ranges until the Phase 3 price tests. Reversible: yes.
+
 ### D-028 · 2026-10-28 · Glow is earn-only at launch; egg odds on screen from Phase 0 (Kian)
 Decision: no Glow packs at launch; no product grants Glow for Robux. Glow packs move to the
 Phase 2 paid-randomness mini-phase, shipped with PolicyService region checks and a reviewer
