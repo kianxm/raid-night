@@ -100,6 +100,27 @@ local Strings = {
 	failServerFull = "Their server is full",
 	failServerGone = "Their server closed",
 	failTeleport = "Couldn't join. Try again",
+	raiderFallback = "Raider",
+
+	-- Menu strip and shared
+	menuShop = "Shop",
+	menuClose = "Close",
+
+	-- Shop (Glow only: no Robux items at launch)
+	shopTitle = "Shop",
+	shopEggTitle = "Night egg",
+	shopEggFree = "Free egg",
+	shopBuyFor = "Buy  {price} Glow",
+	shopBuyFree = "Get it free",
+	shopNeedGlow = "Need {n} more Glow",
+	shopHatched = "Hatched {name}!",
+	shopBuyFailed = "Couldn't buy that now",
+	shopUpgradeTitle = "Den level {n}",
+	shopPads = "{n} pads",
+	shopUpgradeFor = "Upgrade  {price} Glow",
+	shopMaxLevel = "Max level",
+	shopUpgraded = "Den upgraded!",
+	shopUpgradeFailed = "Couldn't upgrade now",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string

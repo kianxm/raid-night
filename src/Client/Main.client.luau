@@ -11,6 +11,8 @@ for _, name in
 		"RevengeController", -- first: it must hear RevengeJoinStatus the moment a teleport lands
 		"DenController",
 		"HudController",
+		"MenuController", -- before the screens that register with it
+		"ShopController",
 		"RaidLogController",
 		"DenStatusController",
 		"RaidPortalController",

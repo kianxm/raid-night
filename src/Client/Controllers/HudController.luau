@@ -22,6 +22,7 @@ local Config = require(Shared:WaitForChild("Config")) :: any
 local CritterCatalog = require(Shared:WaitForChild("CritterCatalog")) :: any
 
 local Hud = script.Parent.Parent:WaitForChild("Hud")
+local Ui = require(script.Parent.Parent:WaitForChild("Raid"):WaitForChild("Ui"))
 local Strings = require(Hud:WaitForChild("Strings"))
 local HudMath = require(Hud:WaitForChild("HudMath"))
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
@@ -48,47 +49,7 @@ local HudController = {}
 local player = Players.LocalPlayer
 local remotes: Instance
 
-local function round(parent: Instance, radius: number)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius)
-	c.Parent = parent
-end
-
-local function outline(parent: Instance, thickness: number)
-	local s = Instance.new("UIStroke")
-	s.Color = COLOR.outline
-	s.Thickness = thickness
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = parent
-end
-
-local function label(parent: Instance, font: Enum.Font, maxSize: number): TextLabel
-	local l = Instance.new("TextLabel")
-	l.BackgroundTransparency = 1
-	l.Font = font
-	l.TextColor3 = COLOR.text
-	l.TextScaled = true
-	l.Size = UDim2.fromScale(1, 1)
-	local limit = Instance.new("UITextSizeConstraint")
-	limit.MaxTextSize = maxSize
-	limit.MinTextSize = 12
-	limit.Parent = l
-	l.Parent = parent
-	return l
-end
-
-local function panel(parent: Instance, name: string, size: UDim2, position: UDim2): Frame
-	local f = Instance.new("Frame")
-	f.Name = name
-	f.Size = size
-	f.Position = position
-	f.BackgroundColor3 = COLOR.panel
-	f.BorderSizePixel = 0
-	round(f, 14)
-	outline(f, 3)
-	f.Parent = parent
-	return f
-end
+local round, outline, label, panel = Ui.round, Ui.outline, Ui.label, Ui.panel
 
 -- One chunky button with a big title and a small price/sub line. Min height 56 px for thumbs.
 local function makeButton(parent: Instance, name: string, order: number, color: Color3)
