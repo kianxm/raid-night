@@ -94,6 +94,9 @@ Escrow storage: DataStore `EscrowRecords`.
   `storedUpdatedAt` as they were.
 - `Net.DenState.ratePerSecond` and `storageCap` are unboosted (`denRate`, `storageCap`).
   Showing a boosted rate would be a contract change.
+- **P2.8 gate.** `EscrowService` and `Matchmaking` still accrue at factor 1. Both must pass
+  the player's factor, or accrue after a call that did, before `Config.Flags.purchases` turns
+  on. This is a hard gate for P2.8, not an optional TODO.
 
 ## Escrow
 
@@ -322,8 +325,8 @@ The pure rules live in `RaidRules`, and the server always decides:
 RaidService (P0.5h) measures the grab-time base: `Economy.denRate(ownerProfile)` when it
 accepts the grab request, before the hold starts and before `BeingRaidedLive` reaches the owner.
 It keeps that value with the carry and passes it as `transferLive`'s last argument on every
-attempt (D-034). Until it does, live records carry no base, and the debit measures the den
-instead.
+attempt (D-034). So every new live record carries a grab-time base. Records without one are
+older records or async ones, and their debit falls back to `denRate` at the debit.
 
 RaidService (P0.5h) shows the state with the den attributes `LiveProtected` and
 `LiveGrabReadyAt` (see Replicated attributes). They are for display only: the server decides
