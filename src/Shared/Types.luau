@@ -187,6 +187,18 @@ export type EscrowRecord = {
 	updatedAt: number,
 }
 
+-- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.
+export type EscrowOpenEntry = {
+	role: "Raider" | "Defender",
+	createdAt: number, -- when the raid's transfer started (unix seconds)
+}
+
+-- [persisted, separate key per user: `Open_<userId>`] Open escrows a player is a party to, keyed
+-- by raidId. Written for BOTH parties before the record is created; removed once the record is
+-- terminal. Recovery reads it on every load, and appliedTransfers entries for raidIds listed
+-- here are never pruned.
+export type EscrowOpenIndex = { [string]: EscrowOpenEntry }
+
 -- Results ------------------------------------------------------------------------------------
 
 export type Result<T> = { ok: true, value: T } | { ok: false, reason: string }

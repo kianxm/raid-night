@@ -19,12 +19,18 @@ the why. Update it in the same commit as any contract change.
 | Profile per user | `PlayerProfile` | DataService only (session-locked) | Others send messages |
 | Snapshot per user | `DenSnapshot` | SnapshotService | Never includes vault critters |
 | Escrow per raidId | `EscrowRecord` | EscrowService | Write-once create, then state moves forward only |
-| Open escrows per raider | `{ [raidId]: createdAt }` | EscrowService | Recovery index; added before the record, removed once terminal |
+| Open escrows per user | `EscrowOpenIndex` | EscrowService | Both raider and defender; added before the record, removed once terminal |
 
-Escrow storage: DataStore `EscrowRecords`, keys `Escrow_<raidId>` (raidId at most 43 characters)
-and `Open_<raiderUserId>`. Forward-only is enforced by `Escrow.canReplace` inside every
-`UpdateAsync`. In Studio without API access (`DataService.persistence() == "Memory"`) both live
-in server memory, like profiles do.
+Escrow storage: DataStore `EscrowRecords`.
+
+- `Escrow_<raidId>`: the `EscrowRecord`. raidId is at most `Config.Escrow.maxRaidIdLength` (43)
+  characters, so the key fits DataStore's 50. Forward-only is enforced by `Escrow.canReplace`
+  inside every `UpdateAsync`.
+- `Open_<userId>`: that player's `EscrowOpenIndex` (`{ [raidId]: { role, createdAt } }`), for the
+  raider and the defender alike. An entry with no record is removed only once it is older than
+  15 minutes (its create may still be in progress).
+- In Studio without API access (`DataService.persistence() == "Memory"`) both live in server
+  memory, like profiles do.
 
 ## Money model
 
@@ -48,6 +54,18 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 3. Repeating any step changes nothing after the first success.
 4. No defender loses more than `Config.Limits.maxLossesPerDay` critters per UTC day.
 
+Only the call that creates a record debits the defender (`Escrow.advance`). Every later path is
+`Escrow.recover`, which never debits afresh. It runs on either party's load, with the parties
+loaded in that server:
+
+- `Pending`, defender loaded: their saved debit moves the record to `Debited`. No debit means
+  `Voided` (nothing moved).
+- `Debited`, raider loaded: credit, then `Committed`.
+
+`appliedTransfers` entries are pruned after `Config.Escrow.appliedTransferRetentionSeconds`, but
+only by EscrowService after reading the player's `Open_` index, and never for a raidId still
+listed there. `Profile.prepare` does not prune them.
+
 If you change `Escrow.luau`, `RaidRules.recordIncoming` or anything in `appliedTransfers`, the
 simulation must still pass, and the `reviewer` agent must sign off.
 
@@ -55,8 +73,8 @@ simulation must still pass, and the `reviewer` agent must sign off.
 
 `Config.Flags` holds one boolean per feature. `false` turns the feature off everywhere. Services
 read `Config.Flags.<name>` directly and check it before acting on a request. Raid and transfer
-starts go through the pure `Escrow.canStartTransfer(Config.Flags, kind, isRevenge)`, which
-EscrowService and RaidService both call.
+starts go through the pure `Escrow.canStartTransfer(Config.Flags, kind, isRevenge)`.
+EscrowService and RaidService must call it before starting any raid or transfer.
 
 | Flag | Gates | Default |
 | --- | --- | --- |
@@ -69,7 +87,7 @@ EscrowService and RaidService both call.
 Unknown transfer kinds are always refused. Switches block STARTING new raids and transfers only.
 Escrow recovery and transfers already in flight are never gated: records in `Pending` or
 `Debited` always advance to completion, so turning a flag off cannot strand loot in flight.
-Raid semantics approved by Kian 2026-10-28 (relayed by the orchestrator in P0.3b).
+Raid semantics approved by Kian 2026-10-28 (decision D-002).
 
 Defaults turn on only the features that exist. Adding a flag is a contract change.
 

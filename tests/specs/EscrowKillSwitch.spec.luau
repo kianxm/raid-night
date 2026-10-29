@@ -1,12 +1,13 @@
 --!strict
 --[[
-	Kill switches (docs/contracts.md, approved by Kian 2026-10-28):
+	Kill switches (docs/contracts.md; decision D-002, approved by Kian 2026-10-28):
 	  - `raids` is the master switch: no raid of any kind starts while it is off.
 	  - "Async" raids and revenge raids also need `asyncRaids`.
 	  - Unknown kinds are refused.
 	  - Switches stop NEW transfers only. Records already in Pending or Debited always finish.
 ]]
 
+local fs = require("@lune/fs")
 local expect = require("../lib/expect")
 local fixtures = require("../lib/fixtures")
 local Types = require("../../src/Shared/Types")
@@ -31,32 +32,36 @@ end
 local tests = {}
 
 tests["every flag combination and kind gives the approved answer"] = function()
-	-- { raids, asyncRaids, kind, isRevenge, expected }
-	local cases: { { any } } = {}
+	-- { kind, isRevenge, needs asyncRaids, known kind }
+	local kinds: { { any } } = {
+		{ "Live", nil, false, true },
+		{ "Live", false, false, true },
+		{ "Live", true, true, true },
+		{ "Async", nil, true, true },
+		{ "Async", false, true, true },
+		{ "Async", true, true, true },
+		{ "Trade", nil, false, false },
+		{ "Trade", true, false, false },
+		{ "", false, false, false },
+	}
 	for _, raids in { true, false } do
 		for _, asyncRaids in { true, false } do
-			table.insert(cases, { raids, asyncRaids, "Live", false, raids })
-			table.insert(cases, { raids, asyncRaids, "Async", false, raids and asyncRaids })
-			table.insert(cases, { raids, asyncRaids, "Async", true, raids and asyncRaids })
-			table.insert(cases, { raids, asyncRaids, "Live", true, raids and asyncRaids })
-			table.insert(cases, { raids, asyncRaids, "Trade", false, false })
-			table.insert(cases, { raids, asyncRaids, "", false, false })
-		end
-	end
-	for _, case in cases do
-		local flags = { raids = case[1], asyncRaids = case[2] }
-		local ok, reason = Escrow.canStartTransfer(flags, case[3], case[4])
-		local label = `raids={case[1]} asyncRaids={case[2]} kind={case[3]} revenge={case[4]}`
-		expect.eq(ok, case[5], label)
-		if ok then
-			expect.eq(reason, nil, `{label}: no reason when allowed`)
-		else
-			expect.truthy(type(reason) == "string" and #reason > 0, `{label}: says why`)
+			for _, k in kinds do
+				local expected = k[4] and raids and (asyncRaids or not k[3])
+				local ok, reason = Escrow.canStartTransfer({ raids = raids, asyncRaids = asyncRaids }, k[1], k[2])
+				local label = `raids={raids} asyncRaids={asyncRaids} kind={k[1]} revenge={k[2]}`
+				expect.eq(ok, expected, label)
+				if ok then
+					expect.eq(reason, nil, `{label}: no reason when allowed`)
+				else
+					expect.truthy(type(reason) == "string" and #reason > 0, `{label}: says why`)
+				end
+			end
 		end
 	end
 end
 
-tests["recovery finishes Pending and Debited records with every switch off"] = function()
+tests["recovery finishes records crashed at every stage with every switch off"] = function()
 	local profiles: { [number]: PlayerProfile } = {}
 	local records: { [string]: EscrowRecord } = {}
 	local store: Escrow.Store = {
@@ -78,46 +83,69 @@ tests["recovery finishes Pending and Debited records with every switch off"] = f
 	}
 
 	local raider, defender = fixtures.veteran(1, NOW), fixtures.veteran(2, NOW)
-	fixtures.give(defender, fixtures.critter("fox", "crescent_fox", "Pad", 1))
-	fixtures.give(defender, fixtures.critter("owl", "crescent_fox", "Pad", 2))
+	local stuck = {
+		{ raidId = "stuck-pending", uid = "fox", after = "savedDefender", state = "Pending" },
+		{ raidId = "stuck-debited", uid = "owl", after = "savedRecordDebited", state = "Debited" },
+		{ raidId = "stuck-credited", uid = "elk", after = "savedRaider", state = "Debited" },
+	}
+	for i, case in stuck do
+		fixtures.give(defender, fixtures.critter(case.uid, "crescent_fox", "Pad", i))
+	end
 	defender.stored = 1000
 	profiles[1], profiles[2] = raider, defender
 	local glowBefore = raider.glow + raider.stored + defender.glow + defender.stored
 
-	-- Start both while switches are on, then crash each at a different point.
-	local function crashAfter(point: string)
-		return function(name: string)
-			if name == point then
+	-- Start each while switches are on, then crash it at a different point.
+	for _, case in stuck do
+		store.saveRecord(Escrow.create(case.raidId, 1, 2, case.uid, 100, false, NOW))
+		local ok = pcall(Escrow.advance, case.raidId, store, NOW, function(name: string)
+			if name == case.after then
 				error("simulated crash after " .. name)
 			end
-		end
+		end)
+		expect.falsy(ok, `{case.raidId} crashed`)
+		expect.eq(records[case.raidId].state, case.state, case.raidId)
 	end
-	store.saveRecord(Escrow.create("stuck-pending", 1, 2, "fox", 100, false, NOW))
-	store.saveRecord(Escrow.create("stuck-debited", 1, 2, "owl", 100, false, NOW))
-	expect.falsy(pcall(Escrow.advance, "stuck-pending", store, NOW, crashAfter("savedDefender")))
-	expect.falsy(pcall(Escrow.advance, "stuck-debited", store, NOW, crashAfter("savedRecordDebited")))
-	expect.eq(records["stuck-pending"].state, "Pending", "debit saved, record not")
-	expect.eq(records["stuck-debited"].state, "Debited")
 
 	-- Every switch off: nothing new may start...
 	local off = { raids = false, asyncRaids = false }
 	for _, kind in { "Live", "Async" } do
 		expect.falsy(Escrow.canStartTransfer(off, kind), `{kind} refused while off`)
 	end
-	-- ...but recovery takes no flags at all, and finishes both.
-	for _, raidId in { "stuck-pending", "stuck-debited" } do
-		local record = Escrow.advance(raidId, store, NOW + 60)
-		expect.eq(record and record.state, "Committed", raidId)
+	-- ...but recovery takes no flags at all, and finishes every one.
+	local function everyone(_userId: number): boolean
+		return true
+	end
+	for _, case in stuck do
+		local record = Escrow.recover(case.raidId, store, NOW + 60, everyone)
+		expect.eq(record and record.state, "Committed", case.raidId)
 	end
 
-	-- Invariants: each uid in exactly one place, Glow conserved.
-	for _, uid in { "fox", "owl" } do
-		expect.eq(profiles[2].critters[uid], nil, `defender no longer has {uid}`)
-		expect.truthy(profiles[1].critters[uid], `raider has {uid}`)
+	-- Invariants: each uid in exactly one place, Glow conserved, nothing credited twice.
+	for _, case in stuck do
+		expect.eq(profiles[2].critters[case.uid], nil, `defender no longer has {case.uid}`)
+		expect.truthy(profiles[1].critters[case.uid], `raider has {case.uid}`)
 	end
 	local glowAfter = profiles[1].glow + profiles[1].stored + profiles[2].glow + profiles[2].stored
 	expect.eq(glowAfter, glowBefore, "Glow conserved")
-	expect.eq(profiles[1].glow - raider.glow, 200, "raider got both raids' Glow")
+	expect.eq(profiles[1].glow - raider.glow, 300, "raider got each raid's Glow exactly once")
+end
+
+-- Strips comments so the guard looks at code only.
+local function codeOnly(source: string): string
+	source = string.gsub(source, "%-%-%[(=*)%[.-%]%1%]", "")
+	source = string.gsub(source, "%-%-[^\n]*", "")
+	return source
+end
+
+tests["EscrowService reads Config.Flags only inside canStartTransfer"] = function()
+	local code = codeOnly(fs.readFile("src/Server/Services/EscrowService.luau"))
+	local first, last = string.find(code, "function EscrowService%.canStartTransfer.-\nend\n")
+	expect.truthy(first and last, "canStartTransfer found")
+	local inside = string.sub(code, first :: number, last :: number)
+	local outside = string.sub(code, 1, (first :: number) - 1) .. string.sub(code, (last :: number) + 1)
+	expect.truthy(string.find(inside, "Config.Flags", 1, true), "canStartTransfer reads Config.Flags")
+	expect.falsy(string.find(outside, "Flags", 1, true), "no other code reads a flag (recovery never does)")
 end
 
 return tests

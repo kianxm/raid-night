@@ -26,7 +26,8 @@
 	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
 	                          not a rollback: the change stays in the live profile and still saves
 	                          on the next autosave or on leave, unless the server dies first.
-	  persistence()           "DataStore", "Memory" (Studio without API access) or nil (checking)
+	                          Never call it from code a player's load waits on.
+	  persistence()          "DataStore", "Memory" (Studio without API access) or nil (checking)
 	  sendMessage             Phase 1, errors until then
 
 	TODO (Phase 1, async core):
@@ -284,18 +285,18 @@ local function saveOnce(session: Session, confirm: (any) -> boolean): "saved" | 
 end
 
 -- Saves a loaded profile now and yields until ProfileStore confirms a save whose written data
--- passes confirm(savedData). `confirm` must check for the specific change that has to be durable
--- (escrow checks appliedTransfers[raidId]). Never call this on a player's join path.
+-- passes confirm(savedData). `confirm` must match the exact change that has to be durable (escrow
+-- matches its appliedTransfers entry by raidId, role and time). Always issues a fresh save: a
+-- previous save's data is never trusted as confirmation.
+-- Yields up to about 36 s, so call it only from a thread nobody waits on to load a player (for
+-- example an onProfileLoaded listener, which runs on its own thread) and never from the loading
+-- code itself.
 function DataService.saveNow(userId: number, confirm: (savedData: any) -> boolean): (boolean, string?)
 	local backoff = SAVE_NOW_FIRST_BACKOFF_SECONDS
 	for attempt = 1, SAVE_NOW_ATTEMPTS do
 		local session = sessions[userId]
 		if not session or not session:IsActive() then
 			return false, `profile {userId} is not loaded in this server`
-		end
-		local ok, already = pcall(confirm, session.LastSavedData)
-		if ok and already then
-			return true, nil -- an earlier save (autosave) already wrote it
 		end
 		local result = saveOnce(session, confirm)
 		if result == "saved" then

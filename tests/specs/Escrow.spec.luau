@@ -128,8 +128,79 @@ end
 tests["old idempotency entries are pruned after the retention window"] = function()
 	local raider, defender, record = setup()
 	runAll(raider, defender, record)
-	expect.eq(Escrow.pruneApplied(raider, NOW + 60), 0, "kept while fresh")
-	expect.eq(Escrow.pruneApplied(raider, NOW + Config.Escrow.appliedTransferRetentionSeconds + 1), 1)
+	expect.eq(Escrow.pruneApplied(raider, NOW + 60, {}), 0, "kept while fresh")
+	expect.eq(Escrow.pruneApplied(raider, NOW + Config.Escrow.appliedTransferRetentionSeconds + 1, {}), 1)
+end
+
+tests["an old idempotency entry is never pruned while its raid is still open"] = function()
+	local _, defender, record = setup()
+	Escrow.debitDefender(defender, record, NOW)
+	local later = NOW + Config.Escrow.appliedTransferRetentionSeconds + 1
+	local open = { [record.raidId] = { role = "Defender" :: "Defender", createdAt = NOW } }
+	expect.eq(Escrow.pruneApplied(defender, later, open), 0, "open raid kept")
+	expect.truthy(defender.appliedTransfers[record.raidId])
+	expect.eq(Escrow.pruneApplied(defender, later, {}), 1, "pruned once closed")
+end
+
+-- In-memory store for recover tests; profiles are working copies, as on a real server.
+local function memoryStore(raider, defender, record)
+	local profiles = { [raider.userId] = raider, [defender.userId] = defender }
+	local records = { [record.raidId] = table.clone(record) }
+	local store: Escrow.Store = {
+		loadRecord = function(raidId)
+			return if records[raidId] then table.clone(records[raidId]) else nil
+		end,
+		saveRecord = function(r)
+			assert(Escrow.canReplace(records[r.raidId], r))
+			records[r.raidId] = table.clone(r)
+		end,
+		loadProfile = function(userId)
+			return profiles[userId]
+		end,
+		saveProfile = function() end,
+	}
+	return store, records
+end
+
+local function everyone(_userId: number): boolean
+	return true
+end
+
+tests["recover voids a Pending record whose defender was never debited, and moves nothing"] = function()
+	local raider, defender, record = setup()
+	local store, records = memoryStore(raider, defender, record)
+	local result = Escrow.recover(record.raidId, store, NOW, everyone)
+	expect.eq(result and result.state, "Voided")
+	expect.eq(records[record.raidId].state, "Voided")
+	expect.truthy(defender.critters["fox"], "defender keeps the fox")
+	expect.eq(defender.stored, 1000, "defender keeps the Glow")
+	expect.eq(raider.critters["fox"], nil)
+end
+
+tests["recover settles a saved debit with the raider away, and credits once they are back"] = function()
+	local raider, defender, record = setup()
+	Escrow.debitDefender(defender, record, NOW) -- saved, then the record write crashed
+	local store, records = memoryStore(raider, defender, record)
+	local function defenderOnly(userId: number): boolean
+		return userId == defender.userId
+	end
+	Escrow.recover(record.raidId, store, NOW, defenderOnly)
+	expect.eq(records[record.raidId].state, "Debited", "loot now held by the record")
+	expect.eq(raider.critters["fox"], nil, "raider not here: not credited yet")
+	Escrow.recover(record.raidId, store, NOW, everyone)
+	expect.eq(records[record.raidId].state, "Committed")
+	expect.truthy(raider.critters["fox"])
+end
+
+tests["recover leaves a Pending record alone while its defender is away"] = function()
+	local raider, defender, record = setup()
+	local store, records = memoryStore(raider, defender, record)
+	local function raiderOnly(userId: number): boolean
+		return userId == raider.userId
+	end
+	Escrow.recover(record.raidId, store, NOW, raiderOnly)
+	expect.eq(records[record.raidId].state, "Pending", "not voided without the defender's profile")
+	expect.truthy(defender.critters["fox"])
 end
 
 -- Snapshots of one record at each state, for the record-store rule.
@@ -169,6 +240,9 @@ tests["the record store refuses a different transfer or different loot under the
 	other.raiderUserId = 99
 	expect.falsy(Escrow.canReplace(pending, other), "different raider")
 	expect.falsy(Escrow.sameTransfer(pending, other))
+	local revenge = table.clone(pending)
+	revenge.isRevenge = true
+	expect.falsy(Escrow.sameTransfer(pending, revenge), "revenge flag differs")
 	local moreGlow = table.clone(debited)
 	moreGlow.glow += 1
 	expect.falsy(Escrow.canReplace(debited, moreGlow), "different Glow")

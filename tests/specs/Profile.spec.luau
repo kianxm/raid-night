@@ -68,7 +68,7 @@ tests["prepare refuses a save from a newer game version"] = function()
 	end)
 end
 
-tests["prepare rolls the day and prunes expired tokens and transfers"] = function()
+tests["prepare rolls the day and prunes expired tokens, but never escrow entries"] = function()
 	local saved: any = Profile.new(42, NOW - 3 * 86400)
 	saved.lossesToday = 3
 	saved.pairRaidsToday["7"] = 2
@@ -83,7 +83,8 @@ tests["prepare rolls the day and prunes expired tokens and transfers"] = functio
 	expect.eq(next(p.pairRaidsToday), nil)
 	expect.eq(p.revengeTokens.old, nil)
 	expect.truthy(p.revengeTokens.live, "unexpired token kept")
-	expect.eq(p.appliedTransfers.old, nil)
+	-- Only EscrowService prunes appliedTransfers, after reading the open-escrow index.
+	expect.truthy(p.appliedTransfers.old, "old entry kept: its raid may still be open")
 	expect.truthy(p.appliedTransfers.recent, "idempotency entry inside the window kept")
 end
 
