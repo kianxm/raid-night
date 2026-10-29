@@ -3,6 +3,18 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-012 · 2026-10-28 · #11 re-review suggestions done now, in P0.3a
+Context: reviewer approved #11 with 7 non-blocking suggestions. Decision: do 1-5 and 7 in P0.3a
+(index timestamp refresh on re-add, prove session ownership before voiding, retry party from
+the record, per-call create nonce, identical-arguments retry rule, test gaps); record 6 (async
+debits by message will race the void rule; EscrowRecord has no kind) as a P1.1 TODO. Why:
+principle 6, cheap to close now. Reversible: yes.
+
+### D-011 · 2026-10-28 · Lockdown cooldown counts from the end
+Decision: LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds, so a den is locked at most
+45 s in every 165 s. Why: fair to raiders (principle 4); lockdowns cannot be chained.
+Reversible: yes (Config + one formula).
+
 ### D-010 · 2026-10-28 · Multi-client testing deferred; single-client harness for P0.5
 Context: Kian has no testers now and will test with people once, at the end. Decision: keep all
 multi-client checks in one deferred list in docs/progress.md; P0.5 ships a Studio-only test
