@@ -36,7 +36,8 @@ Studio-only memory and test profiles (decision D-019, details in `DataService.lu
   persistence, and only for reserved ids (`Profile.isTestUserId`: whole numbers <=
   -1,000,000, clear of real accounts and of Studio Local Server players -1, -2, ...). It is
   never saved, and `saveNow` on it confirms at once. `releaseTestProfile(userId)` works like a
-  leave (`onProfileReleasing` runs), and it refuses while an escrow for that id is still open.
+  leave (`onProfileReleasing` runs), and it refuses while an escrow for that id is still open,
+  or when EscrowService has not registered its release guard (fail closed).
 
 **Never change the store name or the key format.** ProfileStore would find no save under the
 new name and hand every player a fresh template. Everyone silently starts over: the old saves
@@ -55,6 +56,10 @@ Escrow storage: DataStore `EscrowRecords`.
 - When `DataService.persistence() == "Memory"` (Studio without API access, or the Studio memory
   switch above) both live in server memory, like profiles do. Profiles and escrow always share
   one mode: a saved profile never holds an escrow entry that only memory knew.
+  `persistence()` is `nil` until `DataService.start()` has read the memory switch (and while
+  ProfileStore is still checking access). EscrowService takes its mode once, from the first
+  non-nil answer, and reads or writes nothing before that, so the shared mode holds whatever
+  order services start in.
 
 ## Money model
 
@@ -78,7 +83,8 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 3. Repeating any step changes nothing after the first success.
 4. No defender loses more than `Config.Limits.maxLossesPerDay` critters per UTC day.
 
-Only the call that creates a record debits the defender (`Escrow.advance`). That call sets
+Only the call that creates a record, and its same-server retries while the server awaits them
+(kept `createNonce`), debits the defender (`Escrow.advance`). That call sets
 `EscrowRecord.createNonce` (a GUID; optional, missing on older records, no migration) so that a
 create which landed but whose response was lost is still recognised as its own on retry
 (`Escrow.decideCreate`) and driven forward instead of voided. The nonce never changes once
