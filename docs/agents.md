@@ -16,6 +16,10 @@ main ◀── integration ◀── agent/<name>/<task>    (one branch + one wo
   `Escrow.luau`, `Profile.luau` or purchases.
 - The `integration` agent is the only one that drives Roblox Studio through MCP, because
   there is one Studio instance. It merges, syncs with Rojo, playtests, and reports bugs back.
+- `src/Server/Packages/` is vendored third-party code only (ProfileStore today): never edit,
+  lint or format it (it is excluded in `.styluaignore` and `selene.toml`), and never put our
+  code there. Update it only by re-vendoring, as its decision record says
+  (`docs/decisions/0003-profilestore.md`).
 
 ## Which Claude Code mechanism, when
 

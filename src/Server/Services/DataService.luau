@@ -6,12 +6,16 @@
 	The ONLY module that touches the profiles DataStore.
 
 	Lifecycle of one player's profile:
-	  join   StartSessionAsync takes the session lock. ProfileStore retries DataStore errors with
-	         exponential backoff (1 s doubling to 20 s); we give up after LOAD_TIMEOUT_SECONDS.
-	         Profile.prepare runs on a copy, so a save we cannot trust is never modified.
+	  join   StartSessionAsync takes the session lock (once per Player object). ProfileStore
+	         retries DataStore errors with exponential backoff (1 s doubling to 20 s); we give up
+	         after LOAD_TIMEOUT_SECONDS. Profile.prepare runs on a copy, so a save we cannot trust
+	         is never modified.
 	  play   Services mutate the table from getProfile(). ProfileStore autosaves every 300 s.
-	  leave  EndSession: onProfileReleasing listeners run, then the final save, then the lock is
-	         released.
+	  leave  EndSession, only for the session that leaving Player owns: onProfileReleasing
+	         listeners run, then the final save, then the lock is released.
+	If another server takes the lock outright (its release request unanswered for ~40 s, or no
+	save for 630 s), changes since the last save are dropped and OnLastSave never fires (decision
+	0003): anything that must be durable confirms a save with saveNow first.
 	  close  ProfileStore's own BindToClose saves and releases every session (reason "Shutdown")
 	         and holds the server open until those saves finish. Listeners run first, as on leave.
 	If a profile cannot load, or the lock is lost mid-session, the player is kicked with a clear
@@ -67,11 +71,16 @@ local MESSAGE_SESSION_LOST = "Your save was opened in another server. Please rej
 
 local DataService = {}
 
+-- A loaded session and the Player object it was loaded for. Removal ends a session only if it
+-- belongs to the leaving Player, never a newer session of the same user.
+type Entry = { session: Session, player: Player }
+
 local store: any = nil
-local sessions: { [number]: Session } = {}
+local sessions: { [number]: Entry } = {}
 local loadedListeners: { (Player, PlayerProfile) -> () } = {}
 local releasingListeners: { (number, PlayerProfile) -> () } = {}
 local leaving: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any -- weak: no leak
+local handled: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any -- loading or loaded
 local closing = false
 
 local function keyFor(userId: number): string
@@ -109,6 +118,11 @@ local function runReleasing(userId: number, profile: PlayerProfile)
 end
 
 local function onPlayerAdded(player: Player)
+	-- PlayerAdded and the startup loop in start() can both deliver one player: load it once.
+	if handled[player] then
+		return
+	end
+	handled[player] = true
 	local userId = player.UserId
 	local started = os.clock()
 	local ok, session = pcall(store.StartSessionAsync, store, keyFor(userId), {
@@ -150,7 +164,8 @@ local function onPlayerAdded(player: Player)
 	session.OnSessionEnd:Connect(function()
 		-- PlayerRemoving clears the entry before ending the session, so a match here means the
 		-- lock was lost while the player is still in this server.
-		if sessions[userId] ~= session then
+		local entry = sessions[userId]
+		if entry == nil or entry.session ~= session then
 			return
 		end
 		sessions[userId] = nil
@@ -160,7 +175,7 @@ local function onPlayerAdded(player: Player)
 		end
 	end)
 
-	sessions[userId] = session
+	sessions[userId] = { session = session, player = player }
 	print(`[DataService] loaded {userId} (schema {profile.schemaVersion}, glow {profile.glow})`)
 	for _, fn in table.clone(loadedListeners) do
 		task.spawn(fn, player, profile)
@@ -169,10 +184,11 @@ end
 
 local function onPlayerRemoving(player: Player)
 	leaving[player] = true
-	local session = sessions[player.UserId]
-	if session then
+	local entry = sessions[player.UserId]
+	-- A late removal of an older Player object for this user must not end their newer session.
+	if entry and entry.player == player then
 		sessions[player.UserId] = nil
-		session:EndSession() -- runs onProfileReleasing listeners, then saves and releases
+		entry.session:EndSession() -- runs onProfileReleasing listeners, then saves and releases
 	end
 end
 
@@ -206,9 +222,9 @@ end
 -- or left). Mutations to the returned table are saved. Never cache it across a yield without
 -- calling getProfile again: the session can end while you wait.
 function DataService.getProfile(userId: number): PlayerProfile?
-	local session = sessions[userId]
-	if session and session:IsActive() then
-		return session.Data
+	local entry = sessions[userId]
+	if entry and entry.session:IsActive() then
+		return entry.session.Data
 	end
 	return nil
 end
@@ -217,10 +233,9 @@ end
 -- loaded. Each call runs on its own thread. Returns a function that disconnects.
 function DataService.onProfileLoaded(fn: (Player, PlayerProfile) -> ()): () -> ()
 	table.insert(loadedListeners, fn)
-	for userId, session in sessions do
-		local player = Players:GetPlayerByUserId(userId)
-		if player then
-			task.spawn(fn, player, session.Data)
+	for _, entry in sessions do
+		if not isGone(entry.player) then
+			task.spawn(fn, entry.player, entry.session.Data)
 		end
 	end
 	return function()
@@ -294,7 +309,8 @@ end
 function DataService.saveNow(userId: number, confirm: (savedData: any) -> boolean): (boolean, string?)
 	local backoff = SAVE_NOW_FIRST_BACKOFF_SECONDS
 	for attempt = 1, SAVE_NOW_ATTEMPTS do
-		local session = sessions[userId]
+		local entry = sessions[userId]
+		local session = if entry then entry.session else nil
 		if not session or not session:IsActive() then
 			return false, `profile {userId} is not loaded in this server`
 		end

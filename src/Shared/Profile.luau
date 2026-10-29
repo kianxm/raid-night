@@ -68,8 +68,8 @@ end
 --[[
 	Readies a save the server just loaded, before anything reads it. Runs, in order:
 	migrate; stamp a brand-new save (ProfileStore copies the `Profile.new(0, 0)` template, so
-	createdAt == 0 means "never played"); check the save belongs to `userId`; roll the daily
-	counters; drop expired revenge tokens.
+	createdAt == 0 AND userId == 0 means "never played"); check the save belongs to `userId`;
+	roll the daily counters; drop expired revenge tokens.
 
 	It does NOT prune escrow idempotency entries (appliedTransfers): only EscrowService may, after
 	reading the player's open-escrow index, because an open raid's entry must never be dropped.
@@ -79,7 +79,9 @@ end
 ]]
 function Profile.prepare(data: any, userId: number, now: number): PlayerProfile
 	local profile = Profile.migrate(data)
-	if profile.createdAt == 0 then
+	-- Only a true template copy is stamped. A real save with createdAt 0 keeps its userId, so a
+	-- save that belongs to someone else still hits the ownership check below.
+	if profile.createdAt == 0 and profile.userId == 0 then
 		local fresh = Profile.new(userId, now)
 		profile.userId = userId
 		profile.createdAt = fresh.createdAt
