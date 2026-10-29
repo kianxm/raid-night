@@ -3,6 +3,16 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-069 · 2026-10-29 · New-player shield and the tutorial den
+Context: raid on #139. Decision: a new player's 30-minute live shield
+(`Config.Protection.newPlayerLiveShieldSeconds` = 1800, from createdAt) stays on while they
+live-steal from others, because it's short and covers onboarding only. The tutorial den ignores the
+`raids` kill switch: it takes from no player and only grants the one-time tutorial critter
+(D-064), so onboarding never stalls during an incident. Successful-raid counting goes through a new
+DataService.countSuccessfulRaid, idempotent per raidId (C6c). Opt-in prompt remotes belong to
+notifications (P2.7c), with promptedAt saved only once the client reports it showed. Why: fair to new
+players; one onboarding path. Reversible: yes (Config / one check).
+
 ### D-068 · 2026-10-29 · Gear: lockpick breaks a Lockdown (switchable, Kian to confirm); gear kill switch
 Context: raid on #129. The design names a lockpick (live only) but not what it picks. Decision:
 the lockpick lets one raider through one active Lockdown after 8 s at the border (outside, within
