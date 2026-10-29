@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 8,
+    "parts": 6,
+    "texture": 512,
+    "triangles": 1500
+  },
+  "glow": {
+    "at": "the round lock wheel in the centre of the door",
+    "color": "soft mint green glow"
+  },
+  "group": "den",
+  "id": "vault_door",
+  "name": "Vault door",
+  "notes3d": "Door and frame as one mesh, lock wheel a separate emissive mesh so a script can spin it. Pivot at the bottom centre, front faces -Z. Should read as safe and friendly, not menacing.",
+  "purpose": "The chunky round door to the vault, where critters are safe and earn 50%; raiders cannot touch it.",
+  "sizeStuds": {
+    "x": 8,
+    "y": 10,
+    "z": 2
+  }
+}

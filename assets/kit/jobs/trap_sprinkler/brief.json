@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 12,
+    "parts": 4,
+    "texture": 512,
+    "triangles": 800
+  },
+  "glow": {
+    "at": "the nozzle head",
+    "color": "soft pale blue moonlight glow"
+  },
+  "group": "trap",
+  "id": "trap_sprinkler",
+  "name": "Sprinkler trap",
+  "notes3d": "Nozzle head is a separate mesh so it can spin; the water spray is a particle emitter in-engine, not modeled. Pivot centre of the base.",
+  "purpose": "Pocket-den trap (Sprinkler): sprays and soaks a raider, shoving them off course.",
+  "sizeStuds": {
+    "x": 4,
+    "y": 4,
+    "z": 4
+  }
+}

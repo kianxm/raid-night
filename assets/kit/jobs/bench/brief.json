@@ -1,0 +1,18 @@
+{
+  "budget": {
+    "onScreenAtOnce": 12,
+    "parts": 2,
+    "texture": 512,
+    "triangles": 350
+  },
+  "group": "prop",
+  "id": "bench",
+  "name": "Bench",
+  "notes3d": "No glow material.",
+  "purpose": "Street and den dressing: bench. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 5,
+    "y": 3,
+    "z": 5
+  }
+}

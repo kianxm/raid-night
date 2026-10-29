@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 24,
+    "parts": 2,
+    "texture": 512,
+    "triangles": 300
+  },
+  "glow": {
+    "at": "the few small crystal specks",
+    "color": "soft violet glow"
+  },
+  "group": "prop",
+  "id": "rock_cluster",
+  "name": "Rock cluster",
+  "notes3d": "Crystal specks on their own emissive material.",
+  "purpose": "Street and den dressing: rock cluster. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 5,
+    "y": 3,
+    "z": 5
+  }
+}

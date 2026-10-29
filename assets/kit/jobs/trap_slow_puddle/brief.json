@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 12,
+    "parts": 3,
+    "texture": 512,
+    "triangles": 400
+  },
+  "glow": {
+    "at": "the surface of the puddle",
+    "color": "soft violet glow"
+  },
+  "group": "trap",
+  "id": "trap_slow_puddle",
+  "name": "Slow puddle trap",
+  "notes3d": "Diameter 6 matches Pocket.trapRadius 3. Flat disc with a few bumps; goo surface on its own emissive material, or a Part cylinder plus decal if the mesh costs too much. Pivot centre of the base.",
+  "purpose": "Pocket-den trap (SlowPuddle): a sticky puddle that slows a raider who steps in it.",
+  "sizeStuds": {
+    "x": 6,
+    "y": 0.5,
+    "z": 6
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "budget": {
+    "onScreenAtOnce": 30,
+    "parts": 1,
+    "texture": 512,
+    "triangles": 250
+  },
+  "group": "prop",
+  "id": "shrub",
+  "name": "Shrub",
+  "notes3d": "Single material, no leaf cards; blobs only.",
+  "purpose": "Street and den dressing: shrub. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 4,
+    "y": 3.5,
+    "z": 4
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 8,
+    "parts": 2,
+    "texture": 512,
+    "triangles": 300
+  },
+  "glow": {
+    "at": "the small flag",
+    "color": "bright warning orange glow"
+  },
+  "group": "prop",
+  "id": "mailbox",
+  "name": "Mailbox",
+  "notes3d": "Flag on its own emissive material; a script can raise it when a raid log is waiting.",
+  "purpose": "Street and den dressing: mailbox. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 1.5,
+    "y": 3.5,
+    "z": 1.5
+  }
+}

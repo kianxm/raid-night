@@ -19,6 +19,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "AssetKit",
+		load = function()
+			return require("./specs/AssetKit.spec")
+		end,
+	},
+	{
 		name = "Catalog",
 		load = function()
 			return require("./specs/Catalog.spec")
