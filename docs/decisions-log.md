@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-037 · 2026-10-28 · The live debit also counts the grab-time rate
+Context: data on #79: after a refill reopens a den (D-036), the owner, alerted at carry start,
+could shrink it mid-carry so the debit sees protection and takes nothing. Decision: at the
+escrow debit, protection is measured against max(liveLossBaseRate, current denRate, the record's
+liveBaseRate when finite and >= 0); grabs, the den attribute and prompts are unchanged. Why:
+every accepted carry lands, which keeps D-034's intent (principle 6). Reviewer approved.
+Reversible: yes.
+
 ### D-036 · 2026-10-28 · Live protection measures against max(base, current den rate) (Kian)
 Context: data on #73, reviewer on #73/#71: D-034 doesn't stop a planned shrink (empty the den
 but one Common, lose it to an alt or after a dropped carry, refill: a day of live protection).
