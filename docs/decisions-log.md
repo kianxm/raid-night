@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-046 · 2026-10-29 · P1.3 and P1.4 split so they start before P1.1 lands
+Context: P1.1 (escrow) is the long pole; most of P1.3 and P1.4 doesn't touch escrow. Decision:
+P1.3a builds StartRaid (lock, flags, block and presence re-checks), the pocket den, traps,
+guards, timer and server grabs from integration, ending at one named escape hook; P1.3b wires
+that hook to EscrowService (transfer, shield, revenge token, logs), stacked on P1.1. P1.4a
+writes the replay codec and store in new files; P1.4b records during raids after P1.3. Why:
+fills the idle slots without two agents editing one file. Reversible: yes (process).
+
 ### D-045 · 2026-10-29 · P1.7 tuning waits for Kian; P1.8 prepared
 Context: economy on #95 proposes upgradeCostBase 100→500, eggPriceBase 50→150, eggPriceGrowth
 1.12→1.32. Each serves a quoted design target, but no design-doc numeric range covers them and

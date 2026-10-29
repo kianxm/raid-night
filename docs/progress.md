@@ -49,8 +49,8 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | --- | --- | --- | --- | --- | --- | --- |
 | P1.1 | data | — | In progress | agent/data/P1.1 | 1 | Carries D-008, D-012 #6, D-026 TODOs, C5 day-high check |
 | P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
-| P1.3 | raid | P1.1, P1.2 | Todo | | | |
-| P1.4 | raid | P1.3 | Todo | | | |
+| P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: agent/raid/P1.3a | 1 | Split (D-046): P1.3a = StartRaid, pocket den, traps, guards, timer, grabs (from integration); P1.3b = escrow handoff, shield, revenge token, logs (after P1.1) |
+| P1.4 | raid | P1.3 | In progress | P1.4a: agent/raid/P1.4a | 1 | Split (D-046): P1.4a = codec + store (new files); P1.4b = hook into raids (after P1.3) |
 | P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
 | P1.6 | ui | P1.3, P1.5 | Todo | | | |
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
