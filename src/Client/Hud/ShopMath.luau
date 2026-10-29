@@ -35,4 +35,46 @@ function ShopMath.upgrade(glow: number, cost: number?): Offer
 	return { label = "need", price = cost, missing = math.ceil(cost - glow), enabled = false }
 end
 
+export type RobuxRow = {
+	available: boolean, -- false: product id not set yet, show "Not available yet", never prompt
+	price: number,
+}
+
+-- A Robux row. Product id 0 (or anything not a positive whole number) is never promptable.
+function ShopMath.robux(id: any, price: any): RobuxRow
+	local ok = type(id) == "number" and id > 0 and id == math.floor(id) and id < math.huge
+	return { available = ok, price = if type(price) == "number" then price else 0 }
+end
+
+export type GearRow = {
+	label: "buy" | "upgrade" | "need" | "max" | "off",
+	cost: number,
+	missing: number,
+	enabled: boolean,
+}
+
+-- One gear row: level 0 buys level 1, else upgrades. `cost` nil = switched off (or unpriced).
+function ShopMath.gear(level: number, glow: number, cost: number?, maxed: boolean): GearRow
+	if maxed then
+		return { label = "max", cost = 0, missing = 0, enabled = false }
+	end
+	if cost == nil then
+		return { label = "off", cost = 0, missing = 0, enabled = false }
+	end
+	if glow < cost then
+		return { label = "need", cost = cost, missing = math.ceil(cost - glow), enabled = false }
+	end
+	return { label = if level <= 0 then "buy" else "upgrade", cost = cost, missing = 0, enabled = true }
+end
+
+export type Lantern = { name: string, boosted: boolean }
+
+-- Reads a Lantern Night announcement. Boost is claimed only on a literal `true`.
+function ShopMath.lantern(payload: any): Lantern?
+	if type(payload) ~= "table" or type(payload.buyerName) ~= "string" or payload.buyerName == "" then
+		return nil
+	end
+	return { name = payload.buyerName, boosted = payload.boosted == true }
+end
+
 return ShopMath
