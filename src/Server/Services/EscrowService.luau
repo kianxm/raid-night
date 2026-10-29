@@ -95,8 +95,9 @@
 	New raid: busy lock -> start checks -> index both parties -> create record (with a per-call
 	createNonce, so an attempt that landed but errored is still this call's own) -> Escrow.advance
 	(debit + saveNow, record Debited, credit + saveNow, record Committed) -> index cleanup in the
-	background. Profiles come fresh from DataService.getProfile (accrued first), and a profile
-	save counts only when the written data holds this raid's exact appliedTransfers entry.
+	background. Profiles come fresh from DataService.getProfile, accrued first through the
+	Glow-factor helper (IncomeService.accrue: the player's own factor, P2.8b), and a profile save
+	counts only when the written data holds this raid's exact appliedTransfers entry.
 
 	Async raid: the same lock, checks (asyncRaids) and indexes, then Escrow.recover, which never
 	voids an Async record and delivers its debit: on the defender's profile when it is loaded here
@@ -167,7 +168,6 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local CritterCatalog = require(ReplicatedStorage.Shared.CritterCatalog)
-local Economy = require(ReplicatedStorage.Shared.Economy)
 local Escrow = require(ReplicatedStorage.Shared.Escrow)
 local Types = require(ReplicatedStorage.Shared.Types)
 local AnalyticsService = require(script.Parent.AnalyticsService)
@@ -545,13 +545,13 @@ local function storeFor(raidId: string, last: Seen): Escrow.Store
 				error(`profile {userId} is not loaded in this server`, 0)
 			end
 			last.touched[userId] = true
-			-- Money model: accrue before `stored` changes. P2.8 GATE (D-032; docs/contracts.md, Money
-			-- model): before Config.Flags.purchases turns on, pass the player's
-			-- Economy.glowBoostFactor here, or accrue after a call that did. Factor 1 only under-pays
-			-- a boosted window, never over-pays, and today every factor is 1 (purchases is off).
-			-- An Async debit takes its share of `stored` as accrued here, to the debit.
-			-- P2.8: factor 1 until then.
-			Economy.accrue(profile, os.time())
+			-- Money model: accrue before `stored` changes, through the Glow-factor helper (P2.8b,
+			-- D-032). A profile loaded here is online, so it accrues at the player's own factor,
+			-- which only IncomeService.setGlowInputs changes (accruing at the old factor first); a
+			-- repeat in the same second adds nothing. An Async debit takes its share of `stored` as
+			-- accrued here, to the debit. A defender no server holds goes through debitAbsent below
+			-- instead, at factor 1: offline income is unboosted (VIP is online-only, D-061).
+			IncomeService.accrue(profile, os.time())
 			return profile
 		end,
 		saveProfile = function(profile: PlayerProfile)
@@ -1133,6 +1133,9 @@ function EscrowService.start()
 		task.spawn(driveLocked, raidId, userId)
 	end)
 	DataService.guardTestRelease(openEscrowFor)
+	-- DataService's Studio seed accrues through the Glow-factor helper too (P2.8b). DataService
+	-- cannot require IncomeService (IncomeService requires DataService), so it is handed over here.
+	DataService.setGlowAccrue(IncomeService.accrue)
 	task.spawn(function()
 		while true do
 			task.wait(SWEEP_SECONDS)

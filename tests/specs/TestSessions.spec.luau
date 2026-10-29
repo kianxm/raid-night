@@ -135,6 +135,23 @@ tests["the DataTestHook exists only in Studio and checks the switch and a test i
 	)
 end
 
+tests["the seed accrues through the Glow-factor helper first, and changes nothing without it (P2.8b)"] = function()
+	local code = source.codeOnly(source.read(DATA))
+	local seed = body(code, "seedTestSession")
+	local held = string.find(seed, "local session = testSessions%[userId%]")
+	local hook = string.find(seed, 'local accrue = glowAccrue\n%s*if accrue == nil then%s*return %b""%s*end')
+	local accrued = string.find(seed, "\n%s*accrue%(profile, now%)\n")
+	local firstWrite = string.find(seed, "profile%.critters%[uid%] = ")
+	local stored = string.find(seed, "profile%.stored %+= extra")
+	expect.truthy(held and hook and accrued and firstWrite and stored, "held check, hook, accrue and writes found")
+	expect.truthy((held :: number) < (hook :: number), "a held session first")
+	expect.truthy((hook :: number) < (accrued :: number), "refused before anything when no helper is registered")
+	expect.truthy((accrued :: number) < (firstWrite :: number), "accrued before placements change")
+	expect.truthy((accrued :: number) < (stored :: number), "and before stored changes")
+	expect.eq(count(seed, "accrue%("), 1, "one accrue")
+	expect.eq(count(seed, "Economy%.accrue"), 0, "never a factor-1 accrue")
+end
+
 tests["a player's join and leave never touch test sessions, and live lookups come first"] = function()
 	local code = source.codeOnly(source.read(DATA))
 	for _, name in { "onPlayerAdded", "onPlayerRemoving", "DataService.onProfileLoaded" } do

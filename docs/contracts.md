@@ -57,7 +57,8 @@ Studio-only memory and test profiles (decision D-019, details in `DataService.lu
   for the final save; ProfileStore's BindToClose releases it on stop. Its saves are real: delete
   the `Player_<testId>` (and their `Escrow_`/`Open_`) keys in the Data Stores manager after a
   soak. `ServerStorage.DataTestHook` (Studio only, same switch and id checks) wraps it:
-  `"load"`, `"seed"` (Common critters on free pads plus stored Glow, then a confirmed save),
+  `"load"`, `"seed"` (an accrue through the Glow-factor helper, then Common critters on free pads
+  plus stored Glow, then a confirmed save; refused while no helper is registered, P2.8b),
   `"show"` and `"release"`. Soak and test raids use test ids against test ids only; never a
   test id against a real account in DataStore mode (it would really move that player's critter).
 - **Escrow playtest switches** (P1.1, ServerStorage attributes, read only when
@@ -295,12 +296,17 @@ otherwise on the raider (`attributedTo = "Raider"`), since a profile no server h
   server for its player accrues at factor 1 (offline income is unboosted). A source guard
   (`PurchaseSource.spec`) fails if `Economy.accrue`, `Economy.collect` or their boosted forms
   appear in `src/Server` outside the helper's markers.
-- **P2.8 gate.** Three factor-1 accrues of online players remain, each a handoff listed in the
-  guard's `PENDING` (the guard fails when one lands until it is removed from the list):
-  `EscrowService` (the escrow store's `loadProfile`), `DataService.seedTestSession` (Studio
-  only), and snapshots (`SnapshotService` building through `Matchmaking.buildSnapshot`). The
-  guard also fails if `Config.Flags.purchases` is on while any remain. `Escrow.debitAbsentProfile`
-  accrues an absent (offline) defender at factor 1, which is correct while VIP is online-only.
+- **P2.8 gate.** One factor-1 accrue of online players remains: snapshots (`SnapshotService`
+  building through `Matchmaking.buildSnapshot`, matchmaking's handoff, tracked by the guard on
+  its own). Anything listed in the guard's `PENDING` makes it fail once it lands until it is
+  removed from the list, and the guard also fails if `Config.Flags.purchases` is on while any
+  remain. Landed in P2.8b (data): the escrow store's `loadProfile` accrues through
+  `IncomeService.accrue` (every profile it loads is loaded in that server, so online), and
+  `DataService.seedTestSession` (Studio only) accrues through the same helper, handed to
+  DataService by `EscrowService.start` (`DataService.setGlowAccrue`; DataService cannot require
+  IncomeService), refusing before any change when none is registered.
+  `Escrow.debitAbsentProfile` accrues an absent (offline) defender at factor 1, which is correct
+  while VIP is online-only (D-061 (2)); reversing `vipBoostsOffline` must revisit it.
 
 ## Escrow
 
@@ -316,8 +322,10 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 1. A critter uid exists in exactly one place: one profile, or in flight for one raid.
 2. Glow is conserved. A Live debit takes up to `glowRequested` from `stored`. An Async debit
    (P1.1) takes the raid's share (`RaidRules.lootGlow`'s share, revenge bonus included) of
-   `stored` as it is at the debit, which the server accrues to the debit first (Money model; for
-   a defender no server holds, `Escrow.debitAbsentProfile` inside the one atomic write):
+   `stored` as it is at the debit, which the server accrues to the debit first (Money model: a
+   defender loaded in that server at their own factor, through `IncomeService.accrue` (P2.8b);
+   for a defender no server holds, at factor 1 by `Escrow.debitAbsentProfile` inside the one
+   atomic write):
    the record's `glowRequested` (the snapshot's figure) is only the estimate the raid showed.
    Neither ever takes more than is stored, and the raider is credited exactly what was debited.
 3. Repeating any step changes nothing after the first success.
