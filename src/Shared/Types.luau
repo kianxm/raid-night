@@ -225,6 +225,13 @@ export type EscrowRecord = {
 	-- measurement (records written before it existed, Async): the debit measures the den instead.
 	-- No migration.
 	liveBaseRate: number?,
+	-- Async revenge only (P1.3d): the raider's revenge token this raid uses (its key in the
+	-- raider's revengeTokens: the raidId of the raid on them that granted it), from the raid's
+	-- start. A credit that moved something removes that token (D-054). Set by Escrow.create (checked by
+	-- Escrow.checkRevengeRaidId) and never changed; part of the transfer's identity
+	-- (Escrow.sameTransfer). Missing = no token named (records written before it existed,
+	-- non-revenge, Live): the credit spends none. No migration.
+	revengeRaidId: string?,
 }
 
 -- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.

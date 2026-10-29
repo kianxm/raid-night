@@ -41,7 +41,8 @@
 	                          retry reuses the first call's createNonce: a create that landed with
 	                          its response lost is still that call's own, so the steal continues
 	                          instead of voiding.
-	  transferAsync(raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge?)
+	  transferAsync(raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge?,
+	                revengeRaidId?)
 	                          an async raid's escape (P1.3), from the snapshot the raid was built
 	                          on. The raider must be loaded here; the defender may be offline,
 	                          online in another server, or here. Yields (seconds normally, about 2
@@ -65,6 +66,16 @@
 	                          isRevenge come from server state, never from a remote. Refresh the
 	                          raider after it, as for transferLive; a later commit is pushed from
 	                          here.
+	                          The credit also records the raid on the raider (P1.3d, in the same
+	                          save as the credit, once per raidId; only when something moved):
+	                          their Outgoing raid-log entry, the pair count canRaid's limit reads
+	                          and, for revenge, the named token removed (D-054: one revenge
+	                          raid per token; a failed or empty one keeps it).
+	                          revengeRaidId: the raider's revenge token the raid started with (its
+	                          key in their revengeTokens), from server state; only with isRevenge.
+	                          nil = none named (no token is spent). Anything else that is not a
+	                          raidId-shaped string: "Refused" before any write. Part of the
+	                          transfer: a retry must pass the same one.
 	  studioRecord(raidId)    Studio only: the stored record, read-only (playtests)
 
 	Storage (docs/contracts.md), DataStore "EscrowRecords"; memory instead when
@@ -791,7 +802,8 @@ local function startAsync(
 	defenderUserId: number,
 	critterUid: string?,
 	glowRequested: number,
-	isRevenge: boolean
+	isRevenge: boolean,
+	revengeRaidId: string?
 ): (TransferStatus, string?)
 	if type(raiderUserId) ~= "number" or type(defenderUserId) ~= "number" or raiderUserId == defenderUserId then
 		return "Refused", "raider and defender must be two different players"
@@ -804,7 +816,12 @@ local function startAsync(
 	if type(glowRequested) ~= "number" or not (glowRequested >= 0 and glowRequested < math.huge) then
 		return "Refused", "glowRequested must be a finite number >= 0"
 	end
+	local revengeOk, revengeWhy = Escrow.checkRevengeRaidId("Async", isRevenge, revengeRaidId)
+	if not revengeOk then
+		return "Refused", revengeWhy -- before any write; Escrow.create would assert on it
+	end
 	local now = os.time()
+	-- The raider's revenge token (P1.3d) rides on the record; its credit removes it (D-054).
 	local record = Escrow.create(
 		raidId,
 		raiderUserId,
@@ -813,7 +830,9 @@ local function startAsync(
 		math.floor(glowRequested),
 		isRevenge,
 		now,
-		"Async"
+		"Async",
+		nil,
+		revengeRaidId
 	)
 	record.createNonce = HttpService:GenerateGUID(false)
 
@@ -863,7 +882,8 @@ function EscrowService.transferAsync(
 	defenderUserId: number,
 	critterUid: string?,
 	glowRequested: number,
-	isRevenge: boolean?
+	isRevenge: boolean?,
+	revengeRaidId: string?
 ): (TransferStatus, string?)
 	if type(raidId) ~= "string" or #raidId == 0 or #raidId > MAX_RAID_ID_LENGTH then
 		return "Refused", `raidId must be 1 to {MAX_RAID_ID_LENGTH} characters`
@@ -876,8 +896,16 @@ function EscrowService.transferAsync(
 		return "Refused", "escrow storage not ready"
 	end
 	busy[raidId] = true
-	local ok, status, reason =
-		pcall(startAsync, raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge == true)
+	local ok, status, reason = pcall(
+		startAsync,
+		raidId,
+		raiderUserId,
+		defenderUserId,
+		critterUid,
+		glowRequested,
+		isRevenge == true,
+		revengeRaidId
+	)
 	busy[raidId] = nil
 	if not ok then
 		return "InFlight", `could not confirm the raid's state; retry with the same raidId: {status}`

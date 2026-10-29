@@ -154,6 +154,22 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
    entirely: no shield, no revenge token, no `pairRaidsToday` increment (the raider's pair slot
    is not used up) and no "escaped" incoming raid-log entry. A Live debit that takes only Glow,
    and every Async debit, empty or not, still records all four.
+6. The raider's side of an Async credit (P1.3d). `Escrow.creditRaider` on an Async record that
+   moved something (a critter or Glow) also records, in the same write as its `appliedTransfers`
+   entry and from the record and the credit only:
+   - the raider's Outgoing raid-log entry and one `pairRaidsToday` count against the defender
+     (`RaidRules.recordOutgoing`, with `escaped = true`, the species and Glow credited, and
+     `isRevenge`), so `canRaid`'s pair limit counts async raids;
+   - for a revenge record with a `revengeRaidId`, that token removed from the raider's
+     `revengeTokens`, if it is still there and targets this defender: one revenge raid per token
+     (D-054). Matchmaking's revenge targets, `StartRaid` (`RevengeExpired`) and live revenge
+     (P1.9, `NoToken`) then simply stop offering it.
+
+   An empty Async credit (nothing moved) records none of them (the D-033 pattern; a raid that
+   took nothing never counts toward the pair limit, D-053), so a failed or empty revenge raid
+   keeps its token. A Live credit records none of them
+   either: live raids are unchanged (live token spend is backlog, D-052). A repeat, a late or
+   recovered credit, or a retry changes nothing, since a credit runs once per raidId.
 
 `EscrowRecord.kind` (`"Live"` or `"Async"`) is set when the record is created and never changes
 (`Escrow.canReplace`). Missing means `"Live"`: every record written before the field existed
@@ -179,6 +195,20 @@ floor of the protection line (D-037; Live loss rules, below).
   write fill it in, change it or drop it, and a retry with another value is refused.
 - **Missing means no grab-time measurement:** records written before the field existed, and
   Async records. The debit then measures the den itself, as it did before D-034. No migration.
+
+`EscrowRecord.revengeRaidId: string?` (P1.3d, additive) names the raider's revenge token that an
+Async revenge raid uses: its key in the raider's `revengeTokens`, which is the raidId of the raid
+on them that granted it. A credit that moved something removes that token (invariant 6, D-054).
+
+- **Set once.** `EscrowService.transferAsync` takes it as an optional 7th argument, from the
+  raid's server state (the token StartRaid accepted), and `Escrow.create` as an optional 10th.
+  It must be nil, or a string of 1 to `Config.Escrow.maxRaidIdLength` characters on an Async
+  record with `isRevenge = true` (`Escrow.checkRevengeRaidId`, which `Escrow.create` asserts).
+  `transferAsync` refuses anything else before any read or write.
+- **Never changes.** `Escrow.sameTransfer` compares it, so a retry must pass the same one, and
+  `Escrow.canReplace` never fills it in, changes it or drops it.
+- **Missing means no token is spent:** records written before the field existed, non-revenge
+  and Live records, and a revenge raid whose caller passes none. No migration.
 
 Only the call that creates a Live record, and its same-server retries while the server awaits
 them (kept `createNonce`), debits the defender (`Escrow.advance`). That call sets
@@ -220,9 +250,10 @@ written inside the void proof save); nothing does that today.
 only by EscrowService after reading the player's `Open_` index, and never for a raidId still
 listed there. `Profile.prepare` does not prune them.
 
-If you change `Escrow.luau`, `RaidRules.recordIncoming`, `RaidRules.recordLiveLoss`,
-`RaidRules.liveProtected`, `RaidRules.liveProtectedAtDebit` or anything in `appliedTransfers`,
-the simulation must still pass, and the `reviewer` agent must sign off.
+If you change `Escrow.luau`, `RaidRules.recordIncoming`, `RaidRules.recordOutgoing`,
+`RaidRules.recordLiveLoss`, `RaidRules.liveProtected`, `RaidRules.liveProtectedAtDebit` or
+anything in `appliedTransfers`, the simulation must still pass, and the `reviewer` agent must sign
+off.
 
 ## Matchmaking
 
@@ -411,7 +442,11 @@ own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async ra
 - `Net.Requests.GetRaidLog` `() -> { RaidLogEntry }`: the player's own log, newest first.
 - Raid code never writes a profile. An escape goes to `RaidService.onAsyncEscape`, which calls
   `EscrowService.transferAsync` (Async kind). The escrow debit writes the defender's shield,
-  revenge token, pair count and Incoming log entry (`RaidRules.recordIncoming`).
+  revenge token, pair count and Incoming log entry (`RaidRules.recordIncoming`). The escrow
+  credit writes the raider's Outgoing log entry and pair count (`RaidRules.recordOutgoing`) and,
+  on a revenge raid, removes the named revenge token (Escrow invariant 6, P1.3d, D-054), but
+  only when something moved. A revenge escape passes the raid's `revengeRaidId` as
+  `transferAsync`'s 7th argument.
 - StartRaid fails closed when the owner's presence cannot be read (`PresenceUnknown`), and also
   honours, until the den's next snapshot, the shield of an escape this server just completed.
 

@@ -46,7 +46,19 @@
 	    server's lock on an away one). That server delivers it with the defender loaded, on its
 	    next save; some messages are lost, some arrive twice, all may arrive late
 	  - every repeat delivery, from any server, after crashes before or after the write
+	  - revenge raids (P1.3d): an async raider who holds a revenge token raids its target back,
+	    usually with the token's raidId on the record (revengeRaidId), sometimes without it (a
+	    record from before the raid passed it); tokens expire and are pruned on join, as
+	    Profile.prepare does, so some revenge credits find their token gone
 
+	The raider's side of a credit (P1.3d), checked on every save of any profile: a new Async
+	credit that moved something adds exactly one Outgoing raid-log entry (from the record and the
+	credit: the defender, the species and Glow credited, isRevenge), one pair count against the
+	defender, and, for a revenge record naming a token against that defender, removes the token
+	(D-054: one revenge raid per token). Nothing else does: not an empty Async credit (a failed
+	revenge keeps its token), not a Live credit, not a repeat (redelivery, recovery, a crash
+	before the commit), and no save outside a credit. A token is only ever added by a debit,
+	never changed, and removed only by such a credit or once expired.
 
 	Storage behaves like DataStore: every load returns a copy, and nothing persists until saved,
 	so a crash loses unsaved work exactly as a real server would. The record store enforces the
@@ -121,6 +133,10 @@ local DEAD_LOCK_CHANCE = 0.15 -- per offline write: a crashed server's lock stil
 local DELIVERY_FAIL_CHANCE = 0.1 -- per offline write or message: the DataStore call fails first
 local NUDGE_LOSS_CHANCE = 0.15 -- per message: lost before the defender's server reads it
 local NUDGE_REPEAT_CHANCE = 0.2 -- per message: delivered twice
+-- Revenge raids (P1.3d). Drawn from a third generator, so the other draws are made as before.
+local REVENGE_CHANCE = 0.8 -- per async raid: a raider holding a revenge token raids its target back
+local REVENGE_NO_ID_CHANCE = 0.2 -- per revenge raid: the record carries no revengeRaidId
+local REVENGE_AGAIN_CHANCE = 0.3 -- per revenge raid naming a token: raids back again with it
 
 -- The test's own statement of live protection (decisions D-036, D-037), kept apart from RaidRules
 -- so the simulation checks the rule rather than the implementation against itself: today's live
@@ -159,6 +175,21 @@ local function countKeys(t: { [string]: any }): number
 		n += 1
 	end
 	return n
+end
+
+-- The same fields with the same values (flat tables, such as revenge tokens).
+local function same(a: { [string]: any }, b: { [string]: any }): boolean
+	for k, v in a do
+		if b[k] ~= v then
+			return false
+		end
+	end
+	for k in b do
+		if a[k] == nil then
+			return false
+		end
+	end
+	return true
 end
 
 -- The same raid-log entries, in the same order.
@@ -206,6 +237,7 @@ local function newWorld(seed: number)
 	local world = {
 		rng = rng,
 		arng = rngLib.new(seed * 31 + 7), -- async delivery's draws
+		rrng = rngLib.new(seed * 53 + 11), -- revenge raids' draws (P1.3d)
 		profiles = profiles,
 		records = records,
 		index = index,
@@ -256,6 +288,19 @@ local function newWorld(seed: number)
 			messages = 0,
 			deadLocks = 0,
 			messageDebits = 0,
+			-- P1.3d, the raider's side: Async credits that logged the raid, empty Async credits and
+			-- Live credits that recorded nothing, credits saved again while their record was still
+			-- Debited (a repeat must change nothing), revenge raids, their credits that used a token's
+			-- token (D-054: removed it), found it gone (spent by another revenge, or expired), or
+			-- named none.
+			outgoingLogged = 0,
+			emptyAsyncCredits = 0,
+			liveCredits = 0,
+			creditRepeats = 0,
+			revengeRaids = 0,
+			revengeSpent = 0,
+			revengeTokenGone = 0,
+			revengeNoId = 0,
 		},
 	}
 
@@ -398,6 +443,132 @@ local function newWorld(seed: number)
 		end
 	end
 
+	-- The raider's side of a credit (P1.3d), on every save of any profile. Works out what the save
+	-- may change from the entries it adds (a debit: the pair count against its raider; an Async
+	-- credit that moved something: the pair count against its defender, the Outgoing log entry and
+	-- the revenge token's flag), then checks that exactly that changed. A repeat adds no entry, so
+	-- it must change none of them; neither may any save outside a debit or a credit.
+	local function checkRaiderSide(before: PlayerProfile, after: PlayerProfile)
+		local now = world.now
+		local stats = world.stats
+		local logged: { [string]: AppliedTransfer } = {} -- new credits that must log their raid
+		local counted: { [string]: number } = {} -- other userId -> new pair counts this save adds
+		local spends: { [string]: number } = {} -- revenge token raidId -> the defender it must target
+		for raidId, applied in after.appliedTransfers do
+			local r = records[raidId]
+			if before.appliedTransfers[raidId] ~= nil then
+				if applied.role == "Credit" and r.state == "Debited" then
+					stats.creditRepeats += 1 -- credited before; the record has not caught up yet
+				end
+				continue
+			end
+			local empty = applied.critter == nil and applied.glow == 0
+			local async = Escrow.kindOf(r) == "Async"
+			if applied.role == "Debit" then
+				if async or not empty then -- D-033: an empty live debit counts nothing
+					local key = tostring(r.raiderUserId)
+					counted[key] = (counted[key] or 0) + 1
+				end
+			elseif not async then
+				stats.liveCredits += 1
+			elseif empty then
+				stats.emptyAsyncCredits += 1
+			else
+				logged[raidId] = applied
+				local key = tostring(r.defenderUserId)
+				counted[key] = (counted[key] or 0) + 1
+				if r.revengeRaidId then
+					spends[r.revengeRaidId] = r.defenderUserId
+				elseif r.isRevenge then
+					stats.revengeNoId += 1
+				end
+			end
+		end
+
+		-- Pair counts move only with this save's new debits and credits.
+		local keys: { [string]: true } = {}
+		for _, list in { before.pairRaidsToday, after.pairRaidsToday, counted } :: { { [string]: number } } do
+			for key in list do
+				keys[key] = true
+			end
+		end
+		for key in keys do
+			local other = tonumber(key) :: number
+			expect.eq(
+				RaidRules.pairCount(after, other, now),
+				RaidRules.pairCount(before, other, now) + (counted[key] or 0),
+				`{after.userId}: the pair count with {key} moves only with a new debit or credit`
+			)
+		end
+
+		-- Outgoing entries: one per credit that moved something, from its record and credit, once.
+		local had: { [string]: true } = {}
+		for _, entry in before.raidLog do
+			if entry.direction == "Outgoing" then
+				had[entry.raidId] = true
+			end
+		end
+		local seen: { [string]: true } = {}
+		for _, entry in after.raidLog do
+			if entry.direction ~= "Outgoing" then
+				continue
+			end
+			local raidId = entry.raidId
+			expect.falsy(seen[raidId], `{raidId}: the raider's log holds it once`)
+			seen[raidId] = true
+			if had[raidId] then
+				continue
+			end
+			local applied = logged[raidId]
+			expect.truthy(applied, `{raidId}: an Outgoing entry appears only with its raid's credit`)
+			local r = records[raidId]
+			expect.eq(entry.otherUserId, r.defenderUserId, `{raidId}: logged against the defender`)
+			expect.eq(entry.escaped, true, `{raidId}: logged as escaped`)
+			expect.eq(entry.speciesId, if applied.critter then applied.critter.speciesId else nil, `{raidId}: species`)
+			expect.eq(entry.glow, applied.glow, `{raidId}: the Glow credited, never the estimate`)
+			expect.eq(entry.isRevenge, r.isRevenge, `{raidId}: revenge`)
+			expect.eq(entry.at, applied.at, `{raidId}: logged at the credit`)
+		end
+		for raidId in logged do
+			expect.truthy(seen[raidId] and not had[raidId], `{raidId}: a credit that moved something logs it`)
+			stats.outgoingLogged += 1
+		end
+
+		-- Revenge tokens: added only by a debit and never changed; removed by a revenge credit
+		-- against their target (D-054: one revenge raid per token), which must remove it, or once
+		-- expired (pruning on load), and by nothing else.
+		for id, token in after.revengeTokens do
+			local was = before.revengeTokens[id]
+			if was == nil then
+				local applied = after.appliedTransfers[id]
+				expect.truthy(
+					applied and applied.role == "Debit" and before.appliedTransfers[id] == nil,
+					`{after.userId}: token {id} appears only with its raid's debit`
+				)
+				continue
+			end
+			expect.truthy(same(token, was), `{id}: a kept token never changes`)
+			expect.falsy(spends[id] == was.targetUserId, `{id}: a revenge credit against its target removes it`)
+		end
+		for id, was in before.revengeTokens do
+			if after.revengeTokens[id] == nil then
+				local spend = spends[id] == was.targetUserId
+				expect.truthy(
+					spend or now >= was.expiresAt,
+					`{after.userId}: token {id} removed only by its revenge or expiry`
+				)
+				if spend then
+					stats.revengeSpent += 1
+				end
+			end
+		end
+		for id in spends do
+			if before.revengeTokens[id] == nil then
+				stats.revengeTokenGone += 1
+			end
+		end
+	end
+
 	local function checkSave(profile: PlayerProfile)
 		local before = profiles[profile.userId]
 		for raidId, applied in profile.appliedTransfers do
@@ -408,6 +579,7 @@ local function newWorld(seed: number)
 				end
 			end
 		end
+		checkRaiderSide(before, profile)
 	end
 
 	world.store = {
@@ -684,7 +856,8 @@ local function runSimulation(seed: number)
 		closeIfTerminal(raidId)
 	end
 
-	-- A player loads: prune against their open index, then recover each open raid.
+	-- A player loads: prune against their open index (and expired revenge tokens, as
+	-- Profile.prepare does), then recover each open raid.
 	local function join(userId: number)
 		away[userId] = nil
 		local p = world.store.loadProfile(userId)
@@ -694,6 +867,7 @@ local function runSimulation(seed: number)
 			end
 		end
 		Escrow.pruneApplied(p, world.now, world.index[userId])
+		RaidRules.pruneRevengeTokens(p, world.now)
 		world.store.saveProfile(p)
 		for _, raidId in sortedKeys(world.index[userId]) do
 			drive(raidId, false)
@@ -742,19 +916,34 @@ local function runSimulation(seed: number)
 		snapshot: Types.DenSnapshot,
 		measured: number,
 		raidService: boolean?,
-		offlineRaid: boolean? -- an async raid from the snapshot, its owner online or away
+		offlineRaid: boolean?, -- an async raid from the snapshot, its owner online or away
+		revenge: { id: string? }? -- an async revenge raid (P1.3d), with the token's raidId or none
 	)
 		local kind: Types.TransferKind = if offlineRaid
 			then "Async"
 			elseif rng.chance(ASYNC_CHANCE) and not raidService then "Async"
 			else "Live"
-		local loot = RaidRules.lootGlow(snapshot, false)
+		local isRevenge = revenge ~= nil
+		assert(not isRevenge or kind == "Async", "revenge raids here are async raids")
+		local loot = RaidRules.lootGlow(snapshot, isRevenge)
 		local base: number? = nil
 		if kind == "Live" then
 			loot = if rng.chance(NO_GLOW_CHANCE) then 0 else loot
 			base = if rng.chance(GRAB_BASE_CHANCE) or raidService then measured else nil
 		end
-		local record = Escrow.create(raidId, thisRaider, defenderId, grabbed, loot, false, world.now, kind, base)
+		local revengeRaidId = if revenge then revenge.id else nil
+		local record = Escrow.create(
+			raidId,
+			thisRaider,
+			defenderId,
+			grabbed,
+			loot,
+			isRevenge,
+			world.now,
+			kind,
+			base,
+			revengeRaidId
+		)
 		record.createNonce = `call-{raidId}`
 		world.before[raidId] = deepCopy(world.profiles[defenderId])
 		-- Index both parties before the record exists, as EscrowService does.
@@ -1005,6 +1194,25 @@ local function runSimulation(seed: number)
 		local arng = world.arng
 		local asyncRaider = if arng.chance(OFFLINE_RAID_CHANCE) then pickOnline() else nil
 		local target = arng.int(1, PLAYERS)
+		-- A raider holding an unexpired revenge token sometimes raids its target back instead
+		-- (P1.3d); the record names the token, or does not.
+		local rrng = world.rrng
+		local revenge: { id: string? }? = nil
+		if asyncRaider and rrng.chance(REVENGE_CHANCE) then
+			local held: { Types.RevengeToken } = {}
+			local tokens = world.profiles[asyncRaider].revengeTokens
+			for _, id in sortedKeys(tokens) do
+				local token = tokens[id]
+				if world.now < token.expiresAt and token.targetUserId ~= asyncRaider then
+					table.insert(held, token)
+				end
+			end
+			if #held > 0 then
+				local token = held[rrng.int(1, #held)]
+				target = token.targetUserId
+				revenge = { id = if rrng.chance(REVENGE_NO_ID_CHANCE) then nil else token.raidId }
+			end
+		end
 		if asyncRaider and target ~= asyncRaider then
 			local seen = Matchmaking.buildSnapshot(deepCopy(world.profiles[target]), world.now)
 			local pads = {}
@@ -1015,7 +1223,28 @@ local function runSimulation(seed: number)
 			end
 			if #pads > 0 then
 				local measured = Economy.denRate(world.profiles[target])
-				transfer(`async-{i}`, asyncRaider, target, pads[arng.int(1, #pads)], seen, measured, false, true)
+				if revenge then
+					world.stats.revengeRaids += 1
+				end
+				transfer(
+					`async-{i}`,
+					asyncRaider,
+					target,
+					pads[arng.int(1, #pads)],
+					seen,
+					measured,
+					false,
+					true,
+					revenge
+				)
+				-- The same token again, started while the first raid's credit was still in flight
+				-- (StartRaid still saw the token): whichever credit lands first removes it, and the
+				-- other finds it gone.
+				if revenge and revenge.id and online(asyncRaider) and rrng.chance(REVENGE_AGAIN_CHANCE) then
+					world.stats.revengeRaids += 1
+					local grab = pads[rrng.int(1, #pads)]
+					transfer(`async-{i}-again`, asyncRaider, target, grab, seen, measured, false, true, revenge)
+				end
 			end
 		end
 
@@ -1106,6 +1335,18 @@ tests["1,000 raids with crashes, duplicates, races and long absences never dupli
 	expect.truthy(stats.offlineDebits > 0 and stats.offlineRepeats > 0, "offline debits, and repeats that found them")
 	expect.truthy(stats.messages > 0 and stats.deadLocks > 0, "debits sent by message, past a dead lock too")
 	expect.truthy(stats.messageDebits > 0, "a message's delivery debited the defender in their server")
+	-- Without these it would not prove the raider's side of a credit (P1.3d): logged once when
+	-- something moved, nothing when it did not or the record is Live, nothing again on a repeat.
+	expect.truthy(stats.outgoingLogged > 0, "async credits logged the raid on the raider")
+	expect.truthy(stats.emptyAsyncCredits > 0, "an async credit that moved nothing recorded nothing")
+	expect.truthy(stats.liveCredits > 0, "live credits recorded nothing on the raider")
+	expect.truthy(stats.creditRepeats > 0, "a credit saved again before its commit changed nothing")
+	-- ...and revenge raids in the async half (D-054): a credit removes its token once, a credit
+	-- whose token is already gone (spent or expired) still lands, and a record without the token's
+	-- raidId spends nothing.
+	expect.truthy(stats.revengeRaids > 0 and stats.revengeSpent > 0, "revenge credits removed their token")
+	expect.truthy(stats.revengeTokenGone > 0, "a revenge credit whose token was already gone still landed")
+	expect.truthy(stats.revengeNoId > 0, "a revenge record without a revengeRaidId spent no token")
 end
 
 tests["the same holds across 5 more random seeds"] = function()
@@ -1113,6 +1354,8 @@ tests["the same holds across 5 more random seeds"] = function()
 	for seed = 2, 6 do
 		local _, _, _, _, _, stats = runSimulation(seed * 7919)
 		expect.truthy(stats.refillReopened > 0, `seed {seed * 7919}: a refill reopened a protected den`)
+		expect.truthy(stats.outgoingLogged > 0, `seed {seed * 7919}: async credits logged the raid on the raider`)
+		expect.truthy(stats.revengeSpent > 0, `seed {seed * 7919}: a revenge credit removed its token`)
 		-- Every seed checks that a debit after a mid-carry shrink still takes the critter (mustTake);
 		-- the case where only the grab's rate decides it is rarer, so it is counted over the seeds.
 		defeated += stats.carryShrinkDefeated

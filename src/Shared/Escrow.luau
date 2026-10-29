@@ -32,6 +32,12 @@
 	     critters that day.
 	  5. A Live debit that takes nothing grants nothing (D-033): no shield, revenge token, pair
 	     count or raid-log entry; only its idempotency entry.
+	  6. The raider's side (P1.3d): an Async credit that moved something (a critter or Glow)
+	     records, in the same write as its idempotency entry, the raider's Outgoing raid-log
+	     entry, one pair count against the defender, and for a revenge record naming a token
+	     (revengeRaidId) that token removed (D-054). An empty Async credit and every Live credit
+	     record none of them (D-033, D-052), so a failed revenge keeps its token, and a repeat
+	     changes nothing.
 
 	Transport (server layer, not this module), by the record's kind:
 	  - Live: same-server steals. EscrowService.transferLive runs `advance` with both profiles
@@ -113,9 +119,35 @@ function Escrow.checkLiveBaseRate(kind: TransferKind, liveBaseRate: any): (boole
 	return true, nil
 end
 
+--[[
+	May a record carry this revengeRaidId (P1.3d)? It names the raider's own revenge token (the
+	raidId of the raid on them that granted it), which the record's credit marks used. nil always
+	may (not a revenge raid, or no token named). Otherwise only an Async revenge record, and only a
+	raidId-shaped string (1 to Config.Escrow.maxRaidIdLength characters). Live revenge spends no
+	token yet (D-052). Escrow.create asserts it; EscrowService refuses a call that fails it before
+	writing anything.
+]]
+function Escrow.checkRevengeRaidId(kind: TransferKind, isRevenge: boolean, revengeRaidId: any): (boolean, string?)
+	if revengeRaidId == nil then
+		return true, nil
+	end
+	if kind ~= "Async" then
+		return false, "only an Async transfer carries a revengeRaidId"
+	end
+	if isRevenge ~= true then
+		return false, "only a revenge transfer carries a revengeRaidId"
+	end
+	if type(revengeRaidId) ~= "string" or #revengeRaidId == 0 or #revengeRaidId > Config.Escrow.maxRaidIdLength then
+		return false, `revengeRaidId must be nil or 1 to {Config.Escrow.maxRaidIdLength} characters`
+	end
+	return true, nil
+end
+
 -- `kind` is required: it picks the debit's daily loss rule, so no caller may leave it to chance.
 -- `liveBaseRate` (Live only, D-034): Economy.denRate of the defender's den when the grab was
 -- accepted; stored rounded to the nearest 0.001 Glow/s. nil = not measured.
+-- `revengeRaidId` (Async revenge only, P1.3d): the raider's revenge token this raid uses, from
+-- server state (the raid's start); nil = none named.
 function Escrow.create(
 	raidId: string,
 	raiderUserId: number,
@@ -125,13 +157,16 @@ function Escrow.create(
 	isRevenge: boolean,
 	now: number,
 	kind: TransferKind,
-	liveBaseRate: number?
+	liveBaseRate: number?,
+	revengeRaidId: string?
 ): EscrowRecord
 	assert(raiderUserId ~= defenderUserId, "Escrow.create: raider and defender must differ")
 	assert(glowRequested >= 0, "Escrow.create: glowRequested must be >= 0")
 	assert(kind == "Live" or kind == "Async", `Escrow.create: unknown kind {kind}`)
 	local baseOk, baseWhy = Escrow.checkLiveBaseRate(kind, liveBaseRate)
 	assert(baseOk, `Escrow.create: {baseWhy}`)
+	local revengeOk, revengeWhy = Escrow.checkRevengeRaidId(kind, isRevenge, revengeRaidId)
+	assert(revengeOk, `Escrow.create: {revengeWhy}`)
 	return {
 		raidId = raidId,
 		raiderUserId = raiderUserId,
@@ -146,6 +181,7 @@ function Escrow.create(
 		updatedAt = now,
 		kind = kind,
 		liveBaseRate = if liveBaseRate then math.floor(liveBaseRate * BASE_RATE_STEPS + 0.5) / BASE_RATE_STEPS else nil,
+		revengeRaidId = revengeRaidId,
 	}
 end
 
@@ -272,8 +308,38 @@ function Escrow.markDebited(record: EscrowRecord, applied: AppliedTransfer, now:
 end
 
 --[[
+	The raider-side consequences of an Async credit (P1.3d), from the record and the credit only:
+	the Outgoing raid-log entry and the pair count against the defender (RaidRules.recordOutgoing,
+	the count canRaid's pair limit reads), and, for a revenge record that names a token
+	(revengeRaidId), that token removed (D-054: one revenge raid per token), if it is still there
+	and targets this defender. Only creditRaider calls it, for a fresh credit that moved something, so it lands in
+	the same write as the credit's appliedTransfers entry: once per raidId, never on a repeat.
+]]
+local function recordRaiderSide(raider: PlayerProfile, record: EscrowRecord, given: Critter?, now: number)
+	RaidRules.recordOutgoing(
+		raider,
+		record.raidId,
+		record.defenderUserId,
+		true,
+		if given then given.speciesId else nil,
+		record.glow,
+		record.isRevenge,
+		now
+	)
+	local tokenId = record.revengeRaidId
+	local token = if record.isRevenge and tokenId then raider.revengeTokens[tokenId] else nil
+	if tokenId and token and token.targetUserId == record.defenderUserId then
+		raider.revengeTokens[tokenId] = nil -- one revenge raid per token (D-054)
+	end
+end
+
+--[[
 	Step 3, on the RAIDER's profile. Adds the escrowed critter (to Inventory, trade-locked) and
-	the Glow (banked: loot is safe once home). Idempotent.
+	the Glow (banked: loot is safe once home). An Async credit that moved something also records
+	the raid on the raider (recordRaiderSide: Outgoing log, pair count, revenge token); an empty
+	one (nothing moved: no critter, no Glow) records nothing, like an empty live debit (D-033),
+	and a Live credit records nothing (D-052). Idempotent: a repeat returns the first result and
+	changes nothing.
 ]]
 function Escrow.creditRaider(raider: PlayerProfile, record: EscrowRecord, now: number): AppliedTransfer
 	assert(raider.userId == record.raiderUserId, "creditRaider: wrong profile")
@@ -308,6 +374,10 @@ function Escrow.creditRaider(raider: PlayerProfile, record: EscrowRecord, now: n
 		glow = record.glow,
 	}
 	raider.appliedTransfers[record.raidId] = applied
+
+	if Escrow.kindOf(record) == "Async" and (given ~= nil or record.glow > 0) then
+		recordRaiderSide(raider, record, given, now)
+	end
 	return applied
 end
 
@@ -403,8 +473,9 @@ function Escrow.canStartTransfer(flags: KillSwitches, kind: string, isRevenge: b
 	return true, nil
 end
 
--- Whether two records describe the same transfer (same raid, parties, request, revenge, kind and
--- grab-time base; a missing kind is "Live", a missing liveBaseRate matches only a missing one).
+-- Whether two records describe the same transfer (same raid, parties, request, revenge, kind,
+-- grab-time base and revenge token; a missing kind is "Live", a missing liveBaseRate or
+-- revengeRaidId matches only a missing one).
 function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
 	return a.raidId == b.raidId
 		and a.raiderUserId == b.raiderUserId
@@ -414,6 +485,7 @@ function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
 		and a.isRevenge == b.isRevenge
 		and Escrow.kindOf(a) == Escrow.kindOf(b)
 		and a.liveBaseRate == b.liveBaseRate
+		and a.revengeRaidId == b.revengeRaidId
 end
 
 local FORWARD: { [string]: { [string]: true } } = {
@@ -436,7 +508,8 @@ function Escrow.canReplace(stored: EscrowRecord?, incoming: EscrowRecord): (bool
 		end
 		return false, `no record to move to {incoming.state}`
 	end
-	-- This also pins liveBaseRate exactly: never filled in, changed or dropped (D-034).
+	-- This also pins liveBaseRate (D-034) and revengeRaidId (P1.3d) exactly: never filled in,
+	-- changed or dropped.
 	if not Escrow.sameTransfer(stored, incoming) then
 		return false, "a different transfer already uses this raidId"
 	end
