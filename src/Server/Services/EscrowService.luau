@@ -20,7 +20,9 @@
 	                                         loaded, raidId used by another transfer, or Voided
 	                          A raidId that already has a record (or is busy or awaiting retry here)
 	                          is never re-gated: the call reports its true state and finishes what
-	                          it can. Only the call that creates the record debits the defender.
+	                          it can. Only the call that creates the record debits the defender,
+	                          and its same-server retries while this server awaits them (kept
+	                          createNonce, below).
 	                          critterUid and glowRequested must come from server state (RaidRules
 	                          loot math, the server-tracked carry), never from a remote.
 	                          Retrying (P0.5): pass IDENTICAL arguments every time (raidId, both
@@ -33,7 +35,10 @@
 
 	Storage (docs/contracts.md), DataStore "EscrowRecords"; memory instead when
 	DataService.persistence() is "Memory" (Studio without API access, or Studio's memory switch,
-	the only mode with test profiles):
+	the only mode with test profiles). The mode is taken once from a non-nil persistence(), so it
+	always matches the profiles' whatever order services start in. While persistence() is nil
+	(DataService not started, or ProfileStore still checking) nothing is read or written: every
+	call refuses or fails and is retried later (fail closed).
 	  Escrow_<raidId>  EscrowRecord: created once, then forward only (Escrow.canReplace runs
 	                   inside every UpdateAsync)
 	  Open_<userId>    Types.EscrowOpenIndex, for BOTH parties: written before the record, removed
@@ -124,16 +129,33 @@ local function backoff(previous: Retry?, from: number, need: number): Retry
 	return { from = from, need = need, delay = delay, nextAt = os.clock() + delay, nonce = nonce }
 end
 
+-- Where escrow records live: the profiles' mode (D-019), decided once from a non-nil
+-- DataService.persistence(). nil until then, and nil is never cached or defaulted, so escrow can
+-- never pick DataStore while profiles turn out to be in memory (or the reverse).
 local function storage(): ("DataStore" | "Memory")?
-	if mode == nil then
-		mode = DataService.persistence()
-		if mode == "DataStore" then
-			dataStore = DataStoreService:GetDataStore(STORE_NAME)
-		elseif mode == "Memory" then
-			warn("[EscrowService] memory persistence: escrow records live in memory for this session")
-		end
+	if mode ~= nil then
+		return mode
 	end
+	local decided = DataService.persistence()
+	if decided == nil then
+		return nil
+	end
+	if decided == "DataStore" then
+		dataStore = DataStoreService:GetDataStore(STORE_NAME)
+	else
+		warn("[EscrowService] memory persistence: escrow records live in memory for this session")
+	end
+	mode = decided
 	return mode
+end
+
+-- storage(), or an error when it is not decided yet: no read or write ever guesses a backend.
+local function backend(): "DataStore" | "Memory"
+	local decided = storage()
+	if decided == nil then
+		error("escrow storage not ready: DataService has not decided where profiles live", 0)
+	end
+	return decided
 end
 
 local function withRetries<T>(what: string, fn: () -> T): T
@@ -152,7 +174,7 @@ local function withRetries<T>(what: string, fn: () -> T): T
 end
 
 local function read(key: string): any
-	if storage() == "Memory" then
+	if backend() == "Memory" then
 		return deepCopy(memory[key])
 	end
 	local store = assert(dataStore, "escrow storage not ready")
@@ -163,7 +185,7 @@ end
 
 -- transform(stored) returns the new value, or nil to leave the key unchanged.
 local function update(key: string, transform: (any) -> any)
-	if storage() == "Memory" then
+	if backend() == "Memory" then
 		local result = transform(deepCopy(memory[key]))
 		if result ~= nil then
 			memory[key] = deepCopy(result)
@@ -535,8 +557,12 @@ end
 -- Why a Studio test profile must not be released yet (an escrow for it is open here), or nil.
 -- Test profiles exist only with memory persistence, where this server's Open_ index is the whole
 -- truth: an entry is written (with no yield after busy is taken) before the record, and removed
--- only once the record is terminal. Retry entries are checked too, belt and braces.
+-- only once the record is terminal. Retry entries are checked too, belt and braces. Any other
+-- storage mode fails closed: then memory is not the whole truth.
 local function openEscrowFor(userId: number): string?
+	if storage() ~= "Memory" then
+		return "escrow storage is not in memory, so open escrows cannot be ruled out"
+	end
 	local open = memory[indexKey(userId)]
 	local raidId: string? = if open then next(open) else nil
 	if raidId == nil then
