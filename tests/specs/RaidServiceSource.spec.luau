@@ -13,6 +13,7 @@ local expect = require("../lib/expect")
 
 local FILES = {
 	"src/Server/Services/RaidService.luau",
+	"src/Server/Raid/Lockdown.luau",
 }
 
 local function codeOnly(source: string): string
@@ -36,9 +37,25 @@ end
 local tests = {}
 
 tests["RaidService reads Config.Flags only through Escrow.canStartTransfer"] = function()
+	for i = 2, #FILES do
+		expect.eq(count(codeOnly(fs.readFile(FILES[i])), "Flags"), 0, `{FILES[i]} reads a flag`)
+	end
 	local code = codeOnly(fs.readFile(FILES[1]))
 	expect.eq(count(code, "Flags"), 1, "exactly one flag read")
 	expect.eq(count(code, 'Escrow.canStartTransfer(Config.Flags, "Live"'), 1, "and it is the kill-switch check")
+end
+
+tests["a Lockdown push-back shifts the carry sample by the server's move only"] = function()
+	local service = codeOnly(fs.readFile(FILES[1]))
+	-- Only the carry constructor sets lastPos outright; the per-sample update assigns it in a tuple.
+	-- Any `.lastPos = ...` would let a push (or anything else) forgive the client's own move.
+	expect.falsy(string.find(service, "%.lastPos%s*=[^=]"), "a push must never forgive the client's own move")
+	expect.eq(count(service, "carry.lastPos += delta"), 1, "the push callback shifts lastPos by the push")
+	local lockdown = codeOnly(fs.readFile("src/Server/Raid/Lockdown.luau"))
+	expect.truthy(
+		string.find(lockdown, "onPushed%(player, Vector3%.new%(x %- pos%.X, 0, z %- pos%.Z%)%)"),
+		"Lockdown reports the push delta from the pre-push server position"
+	)
 end
 
 tests["raid server code never reads an attribute"] = function()

@@ -35,6 +35,8 @@
 	                                  the InFlight case recovery may still commit it later; the
 	                                  raider's DenChanged/Inventory shows the truth when it lands.
 
+	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
+
 	Server API:
 	  requestGrab(player, plot, padIndex) -> (ok, reason?)  start a server-timed grab hold
 	  cancelGrab(player)                                     stop a hold (prompt released)
@@ -67,6 +69,8 @@ local DataService = require(script.Parent.DataService)
 local EscrowService = require(script.Parent.EscrowService)
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 local IncomeService = require(script.Parent.IncomeService) :: any
+local RaidFolder = script.Parent.Parent.Raid
+local Lockdown = require(RaidFolder.Lockdown)
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
@@ -184,14 +188,8 @@ local function refreshUser(userId: number)
 	end
 end
 
--- Part C replaces these with the den's Lockdown state.
-local function lockdownActive(_plot: number): boolean
-	return false
-end
-
-local function lockdownBlocks(_player: Player, _plot: number): boolean
-	return false
-end
+local lockdownActive = Lockdown.isActive
+local lockdownBlocks = Lockdown.blocks
 
 -- Grab --------------------------------------------------------------------------------------------
 
@@ -618,6 +616,21 @@ function RaidService.start()
 
 	IncomeService.setCritterLock(isLocked)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	Lockdown.start(
+		remotes :: Folder,
+		function(plot: number): number?
+			return (ownerOf(plot))
+		end,
+		rootOf,
+		function(player: Player, delta: Vector3)
+			-- Shift the last sample by exactly the server's push: the next sample then charges the
+			-- client for what it moved, and never for what the server moved.
+			local carry = carries[player]
+			if carry then
+				carry.lastPos += delta
+			end
+		end
+	)
 
 	local carryClock, promptClock = 0, PROMPT_TICK
 	RunService.Heartbeat:Connect(function(dt: number)
@@ -626,6 +639,7 @@ function RaidService.start()
 		promptClock += dt
 		if carryClock >= CARRY_TICK then
 			carryClock = 0
+			guard("lockdown", Lockdown.step)
 			guard("carries", stepCarries)
 		end
 		if promptClock >= PROMPT_TICK then
