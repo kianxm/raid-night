@@ -300,13 +300,17 @@ function Prompts.colorName(hex: string): string
 	return if sat < 0.4 then `dusty {name}` else `bright {name}`
 end
 
+-- Tiers whose glow is strong rather than soft (the wow ladder).
+Prompts.NO_SOFT_GLOW = { Legendary = true, Mythic = true, Secret = true }
+
 local function colorLine(species): string
 	local others = {}
 	for i = 2, #species.palette do
 		table.insert(others, Prompts.colorName(species.palette[i]))
 	end
 	local glow = Prompts.ART[species.id].glow
-	return `Its one glowing feature is {glow}, which glows softly in {Prompts.colorName(species.palette[1])}, with `
+	local strength = if Prompts.NO_SOFT_GLOW[species.tier] then "strongly" else "softly"
+	return `Its one glowing feature is {glow}, which glows {strength} in {Prompts.colorName(species.palette[1])}, with `
 		.. `no other glowing parts. Other colors: {table.concat(others, " and ")}. No extra props or accessories beyond the `
 		.. `ones named.`
 end
