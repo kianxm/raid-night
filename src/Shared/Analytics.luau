@@ -25,6 +25,7 @@
 ]]
 
 local CritterCatalog = require("./CritterCatalog")
+local Profile = require("./Profile")
 
 local Analytics = {}
 
@@ -69,7 +70,16 @@ Analytics.MAX_SLOTS = 3
 Analytics.MAX_EVENTS = 100 -- Roblox: custom event names per experience
 Analytics.MAX_COMBINATIONS = 8000 -- Roblox: unique custom-field combinations before "Other"
 Analytics.MAX_ID_LENGTH = 32
-Analytics.ONBOARDING_STEPS = 5 -- Appendix C steps 1-5 (Profile.ONBOARDING_LAST_STEP)
+
+-- Onboarding steps come from Profile.ONBOARDING_STEPS, the persisted list, so a step added there
+-- (always at the end) widens onboarding_step without an edit here. Step n is labelled "<n> <id>".
+Analytics.ONBOARDING_LAST_STEP = Profile.ONBOARDING_LAST_STEP
+local ONBOARDING_STEP_BOUNDS: { number } = {}
+local ONBOARDING_STEP_LABELS: { string } = {}
+for index, step in Profile.ONBOARDING_STEPS do
+	table.insert(ONBOARDING_STEP_BOUNDS, index)
+	table.insert(ONBOARDING_STEP_LABELS, `{index} {step.id}`)
+end
 
 local MODES = { "Async", "Live" }
 
@@ -103,12 +113,13 @@ local COUNT: FieldSpec = { kind = "number", whole = true }
 local EVENTS: { [string]: EventSpec } = {
 	onboarding_step = {
 		fields = {
-			step = { kind = "number", whole = true, min = 1, max = Analytics.ONBOARDING_STEPS },
+			-- The step's position in Profile.ONBOARDING_STEPS (1..ONBOARDING_LAST_STEP).
+			step = { kind = "number", whole = true, min = 1, max = Analytics.ONBOARDING_LAST_STEP },
 			secondsSinceJoin = AMOUNT, -- since the account's first join (profile.createdAt)
 		},
 		value = "secondsSinceJoin",
 		slots = {
-			bucketed("step", "Step", { 1, 2, 3, 4, 5 }, { "1", "2", "3", "4", "5" }),
+			bucketed("step", "Step", ONBOARDING_STEP_BOUNDS, ONBOARDING_STEP_LABELS),
 			bucketed(
 				"secondsSinceJoin",
 				"Since join",
@@ -286,6 +297,24 @@ Analytics.FUNNELS = table.freeze({
 	RaidFlow = table.freeze({ "Portal", "TargetPicked", "RaidStarted", "Escaped" }),
 })
 
+-- The onboarding steps (Profile.ONBOARDING_STEPS ids) whose onboarding_step completes an
+-- Onboarding funnel step. FirstRaid has none: an async raid starting completes it (raid_started).
+Analytics.ONBOARDING_FUNNEL = table.freeze({
+	hatch = "FirstHatch",
+	collect = "FirstCollect",
+	stealHome = "FirstSteal",
+}) :: { [string]: string }
+
+-- The same, by step position. An id Profile does not have is skipped, never an error: DataService
+-- and EscrowService require this module, so it must always load (Analytics.spec fails instead).
+local FUNNEL_BY_STEP: { [number]: string } = {}
+for id, name in Analytics.ONBOARDING_FUNNEL do
+	local index = Profile.onboardingStepIndex(id)
+	if index then
+		FUNNEL_BY_STEP[index] = name
+	end
+end
+
 -- An account is in the onboarding funnel for this long after its first join (profile.createdAt).
 Analytics.ONBOARDING_FUNNEL_SECONDS = 7 * 24 * 60 * 60
 
@@ -455,15 +484,15 @@ function Analytics.encode(event: string, fields: { [string]: any }): (Payload?, 
 end
 
 -- The funnel steps an event completes (callers fire only the event). Empty for most events.
--- Onboarding: Appendix C step 1 (the free hatch) or an egg -> FirstHatch; step 2 or a collect ->
--- FirstCollect; step 4 (the guided steal) or any escape with a critter -> FirstSteal; an async
--- raid starting -> FirstRaid. RaidFlow: portal -> Portal, raid_started -> RaidStarted, an escape ->
--- Escaped. RaidFlow.TargetPicked has no event: the raid owner logs it as a step directly.
+-- Onboarding: the onboarding steps in ONBOARDING_FUNNEL (hatch -> FirstHatch, collect ->
+-- FirstCollect, stealHome -> FirstSteal); also an egg -> FirstHatch, a collect -> FirstCollect, any
+-- escape with a critter -> FirstSteal, and an async raid starting -> FirstRaid. RaidFlow: portal ->
+-- Portal, raid_started -> RaidStarted, an escape -> Escaped. RaidFlow.TargetPicked has no event:
+-- the raid owner logs it as a step directly.
 function Analytics.funnelSteps(event: string, fields: { [string]: any }): { FunnelStep }
 	local names: { { string } } = {}
 	if event == "onboarding_step" then
-		local byStep = { [1] = "FirstHatch", [2] = "FirstCollect", [4] = "FirstSteal" }
-		local name = byStep[fields.step]
+		local name = FUNNEL_BY_STEP[fields.step]
 		if name then
 			table.insert(names, { "Onboarding", name })
 		end
@@ -515,6 +544,31 @@ function Analytics.inOnboardingWindow(createdAt: any, now: any): boolean
 	end
 	local age = now - createdAt
 	return age >= 0 and age < Analytics.ONBOARDING_FUNNEL_SECONDS
+end
+
+local function isStepCount(value: any): boolean
+	return isFinite(value) and value % 1 == 0 and value >= 0 and value <= Analytics.ONBOARDING_LAST_STEP
+end
+
+--[[
+	The onboarding_step fields to log when one advance moved a player's onboarding from `before` to
+	`after` steps done (Profile.onboardingStep, read before and after it): one per step completed,
+	in order, so a server event that jumps over earlier steps still logs each step exactly once.
+	Each carries the seconds since the account's first join (`createdAt`) at `now`, 0 if the clock
+	is behind it. Empty when nothing moved forward, for a step count that is not a whole number in
+	0..ONBOARDING_LAST_STEP, or for a NaN or infinite time: nothing trustworthy to log.
+]]
+function Analytics.onboardingStepEvents(before: any, after: any, createdAt: any, now: any): { { [string]: number } }
+	local events: { { [string]: number } } = {}
+	if not isStepCount(before) or not isStepCount(after) or not isFinite(createdAt) or not isFinite(now) then
+		return events
+	end
+	local seconds = math.max(0, now - createdAt)
+	for step = before + 1, after do
+		local fields: { [string]: number } = { step = step, secondsSinceJoin = seconds }
+		table.insert(events, fields)
+	end
+	return events
 end
 
 -- Session counters for session_end ----------------------------------------------------------------

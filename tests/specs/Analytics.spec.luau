@@ -2,6 +2,7 @@
 -- Analytics schema (P2.9): every Appendix A event, its validation, the funnels, the economy flows
 -- and the budget. Roblox limits used below are from the public AnalyticsService docs.
 local expect = require("../lib/expect")
+local rng = require("../lib/rng")
 local source = require("../lib/source")
 local Analytics = require("../../src/Shared/Analytics")
 local CritterCatalog = require("../../src/Shared/CritterCatalog")
@@ -97,7 +98,40 @@ tests["shared vocabularies match the catalog and the profile"] = function()
 	for index, tier in CritterCatalog.TIER_ORDER do
 		expect.eq(Analytics.TIERS[index], tier, "same tier order")
 	end
-	expect.eq(Analytics.ONBOARDING_STEPS, Profile.ONBOARDING_LAST_STEP, "Appendix C steps")
+	expect.eq(Analytics.ONBOARDING_LAST_STEP, Profile.ONBOARDING_LAST_STEP, "every onboarding step")
+end
+
+tests["onboarding_step takes exactly the profile's onboarding steps, labelled by position and id"] = function()
+	local spec = Analytics.EVENTS.onboarding_step
+	expect.eq(spec.fields.step.min, 1, "the first step")
+	expect.eq(spec.fields.step.max, Profile.ONBOARDING_LAST_STEP, "the last step")
+	local slot = spec.slots[1]
+	expect.eq(slot.field, "step")
+	local bounds, labels = slot.bounds :: { number }, slot.labels :: { string }
+	expect.eq(#bounds, #Profile.ONBOARDING_STEPS, "one bucket per step")
+	for index, step in Profile.ONBOARDING_STEPS do
+		expect.eq(bounds[index], index, `bucket {index} is step {index}`)
+		expect.eq(labels[index], `{index} {step.id}`, `step {index} is labelled with its id`)
+		local fields = { step = index, secondsSinceJoin = 10 }
+		expect.truthy((Analytics.validate("onboarding_step", fields)), `step {index} ({step.id}) validates`)
+		local payload = Analytics.encode("onboarding_step", fields) :: Analytics.Payload
+		expect.eq(payload.slots[1], `Step - {index} {step.id}`)
+	end
+end
+
+tests["the onboarding funnel names real onboarding steps, and FirstRaid stays raid-driven"] = function()
+	local mapped: { [string]: boolean } = {}
+	for id, name in Analytics.ONBOARDING_FUNNEL do
+		expect.truthy(Profile.onboardingStepIndex(id), `{id} is a Profile onboarding step`)
+		expect.truthy(Analytics.funnelStep("Onboarding", name), `{name} is an Onboarding funnel step`)
+		expect.falsy(mapped[name], `{name} comes from one step`)
+		mapped[name] = true
+	end
+	expect.eq(Analytics.ONBOARDING_FUNNEL.hatch, "FirstHatch")
+	expect.eq(Analytics.ONBOARDING_FUNNEL.collect, "FirstCollect")
+	expect.eq(Analytics.ONBOARDING_FUNNEL.stealHome, "FirstSteal")
+	expect.falsy(mapped.FirstRaid, "FirstRaid comes from an async raid_started, not onboarding")
+	expect.falsy(mapped.Join, "Join comes from the session start")
 end
 
 -- Schema shape (Roblox limits) -----------------------------------------------------------------
@@ -213,7 +247,11 @@ tests["validate refuses wrong types, bad numbers and values outside an enum"] = 
 	expect.falsy((Analytics.validate("raid_ended", with(ended, "mode", "Solo"))), "not a mode")
 	local step = EXAMPLES.onboarding_step
 	expect.falsy((Analytics.validate("onboarding_step", with(step, "step", 0))), "below the first step")
-	expect.falsy((Analytics.validate("onboarding_step", with(step, "step", 6))), "past the last step")
+	expect.truthy((Analytics.validate("onboarding_step", with(step, "step", 6))), "the last step (raidLogTip)")
+	expect.falsy(
+		(Analytics.validate("onboarding_step", with(step, "step", Profile.ONBOARDING_LAST_STEP + 1))),
+		"past the last step"
+	)
 	expect.falsy((Analytics.validate("onboarding_step", with(step, "step", 2.5))), "not whole")
 	expect.falsy((Analytics.validate("session_end", with(EXAMPLES.session_end, "raids", 1.5))), "count not whole")
 	expect.falsy((Analytics.validate("rebirth", with(EXAMPLES.rebirth, "count", 0))), "rebirth count from 1")
@@ -270,7 +308,7 @@ tests["buckets put edge values in the right place"] = function()
 	expect.eq(count(4), "New entries - 4-7")
 	expect.eq(count(500), "New entries - 16+")
 	local step = Analytics.encode("onboarding_step", { step = 5, secondsSinceJoin = 200 }) :: Analytics.Payload
-	expect.eq(step.slots[1], "Step - 5")
+	expect.eq(step.slots[1], "Step - 5 stealHome")
 	expect.eq(step.slots[2], "Since join - 3-5m")
 	expect.eq(step.value, 200)
 end
@@ -298,10 +336,24 @@ local function stepNames(event: string, fields: { [string]: any }): string
 end
 
 tests["events complete their funnel steps"] = function()
+	-- Onboarding steps by id, wherever they sit in Profile.ONBOARDING_STEPS (C6b: 6 steps).
+	local expected = {
+		hatch = "Onboarding.FirstHatch",
+		place = "",
+		collect = "Onboarding.FirstCollect",
+		buyEgg = "",
+		stealHome = "Onboarding.FirstSteal",
+		raidLogTip = "",
+	}
+	for index, step in Profile.ONBOARDING_STEPS do
+		local want = expected[step.id]
+		expect.truthy(want, `{step.id} has an expected funnel step`)
+		local got = stepNames("onboarding_step", { step = index, secondsSinceJoin = 5 })
+		expect.eq(got, want, `onboarding step {index} ({step.id})`)
+	end
 	expect.eq(stepNames("onboarding_step", { step = 1, secondsSinceJoin = 5 }), "Onboarding.FirstHatch")
-	expect.eq(stepNames("onboarding_step", { step = 2, secondsSinceJoin = 5 }), "Onboarding.FirstCollect")
-	expect.eq(stepNames("onboarding_step", { step = 3, secondsSinceJoin = 5 }), "", "step 3 is no funnel step")
-	expect.eq(stepNames("onboarding_step", { step = 4, secondsSinceJoin = 5 }), "Onboarding.FirstSteal")
+	expect.eq(stepNames("onboarding_step", { step = 3, secondsSinceJoin = 5 }), "Onboarding.FirstCollect")
+	expect.eq(stepNames("onboarding_step", { step = 5, secondsSinceJoin = 5 }), "Onboarding.FirstSteal")
 	expect.eq(stepNames("egg_bought", EXAMPLES.egg_bought), "Onboarding.FirstHatch")
 	expect.eq(stepNames("glow_collected", EXAMPLES.glow_collected), "Onboarding.FirstCollect")
 	expect.eq(stepNames("raid_portal_opened", EXAMPLES.raid_portal_opened), "RaidFlow.Portal")
@@ -341,6 +393,67 @@ tests["the onboarding funnel window is the first 7 days after the first join"] =
 	expect.falsy(Analytics.inOnboardingWindow(0 / 0, NOW), "NaN createdAt")
 	expect.falsy(Analytics.inOnboardingWindow(nil, NOW), "missing createdAt")
 	expect.falsy(Analytics.inOnboardingWindow(NOW, math.huge), "inf now")
+end
+
+tests["an advance logs one onboarding_step per step it completed, with seconds since join"] = function()
+	local created = NOW - 75
+	local one = Analytics.onboardingStepEvents(0, 1, created, NOW)
+	expect.eq(#one, 1, "one step")
+	expect.eq(one[1].step, 1)
+	expect.eq(one[1].secondsSinceJoin, 75)
+	local jump = Analytics.onboardingStepEvents(1, 4, created, NOW)
+	expect.eq(#jump, 3, "a jump logs every step it passed")
+	for offset, fields in jump do
+		expect.eq(fields.step, 1 + offset, "in order")
+		expect.eq(fields.secondsSinceJoin, 75)
+		local ok, why = Analytics.validate("onboarding_step", fields)
+		expect.truthy(ok, `step {fields.step} validates: {why}`)
+	end
+	local last = Profile.ONBOARDING_LAST_STEP
+	local finish = Analytics.onboardingStepEvents(last - 1, last, created, NOW)
+	expect.eq(#finish, 1)
+	expect.eq(finish[1].step, last, "the last step (the client's raid log tip) is logged too")
+	expect.eq(Analytics.onboardingStepEvents(0, 1, NOW + 30, NOW)[1].secondsSinceJoin, 0, "a clock behind join")
+	-- Nothing moved, or nothing trustworthy: no events.
+	expect.eq(#Analytics.onboardingStepEvents(2, 2, created, NOW), 0, "a repeat")
+	expect.eq(#Analytics.onboardingStepEvents(3, 2, created, NOW), 0, "backwards")
+	expect.eq(#Analytics.onboardingStepEvents(-1, 2, created, NOW), 0, "below zero")
+	expect.eq(#Analytics.onboardingStepEvents(0, last + 1, created, NOW), 0, "past the last step")
+	expect.eq(#Analytics.onboardingStepEvents(0, 1.5, created, NOW), 0, "not whole")
+	expect.eq(#Analytics.onboardingStepEvents(nil, 1, created, NOW), 0, "no step count")
+	expect.eq(#Analytics.onboardingStepEvents(0, 1, 0 / 0, NOW), 0, "NaN createdAt")
+	expect.eq(#Analytics.onboardingStepEvents(0, 1, nil, NOW), 0, "missing createdAt")
+	expect.eq(#Analytics.onboardingStepEvents(0, 1, created, math.huge), 0, "inf now")
+end
+
+tests["every onboarding path, step by step or jumping, logs each step exactly once"] = function()
+	-- Random server events and acks against the real Profile rules, as DataService drives them.
+	local last = Profile.ONBOARDING_LAST_STEP
+	for seed = 1, 50 do
+		local r = rng.new(seed)
+		local profile = Profile.new(seed, NOW)
+		local logged: { [number]: number } = {}
+		local now = NOW
+		for _ = 1, 40 do
+			now += r.int(0, 30)
+			local step = Profile.ONBOARDING_STEPS[r.int(1, last)]
+			local before = Profile.onboardingStep(profile)
+			local wrote = if step.by == "Server"
+				then Profile.advanceOnboardingTo(profile, step.id, now)
+				else Profile.acknowledgeOnboarding(profile, step.id, now) == "Advanced"
+			if wrote then
+				for _, fields in Analytics.onboardingStepEvents(before, Profile.onboardingStep(profile), NOW, now) do
+					logged[fields.step] = (logged[fields.step] or 0) + 1
+				end
+			end
+		end
+		for index = 1, Profile.onboardingStep(profile) do
+			expect.eq(logged[index], 1, `seed {seed}: step {index} logged once`)
+		end
+		for index = Profile.onboardingStep(profile) + 1, last do
+			expect.eq(logged[index], nil, `seed {seed}: step {index} not reached, not logged`)
+		end
+	end
 end
 
 -- Session, raid log, budget -----------------------------------------------------------------

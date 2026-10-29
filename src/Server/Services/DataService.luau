@@ -25,6 +25,8 @@
 	Analytics (P2.9, AnalyticsService): a load opens the player's analytics session (and the
 	onboarding funnel's Join step for an account under 7 days old); a leave logs session_end
 	before EndSession, while the Player is still valid. Neither yields, throws or delays a join.
+	Every onboarding advance that wrote (a server event or an ack) logs onboarding_step once per
+	step it completed (P2.9b), after the write and fire-and-forget.
 
 	Public API (everything else is private):
 	  getProfile(userId)      the live profile for a player in THIS server, or nil
@@ -35,7 +37,8 @@
 	                          Logs raid_log_opened (entries newer than the last visit) first
 	  advanceOnboarding(userId, stepId)  a server event completed onboarding step stepId (a
 	                          "Server" step of Profile.ONBOARDING_STEPS): forward only, pushes
-	                          OnboardingChanged. Never yields. No-op if not loaded here (C6b)
+	                          OnboardingChanged, logs onboarding_step per step completed (P2.9b).
+	                          Never yields. No-op if not loaded here (C6b)
 	  saveNow(userId, confirm)  saves now and yields until a save whose written data passes
 	                          confirm(savedData) lands: (true) or (false, reason). Bounded: 3 tries
 	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
@@ -493,6 +496,17 @@ local function pushOnboarding(userId: number, profile: PlayerProfile)
 	end
 end
 
+-- onboarding_step (P2.9b): after an advance wrote, one event per step it completed (`before` is
+-- Profile.onboardingStep read just before it), with the seconds since the account's first join at
+-- the advance's `now`. Only ever called after a write, which happens once per step (forward only),
+-- so each step logs once. Never yields or throws: AnalyticsService.track is fire-and-forget.
+local function trackOnboarding(userId: number, profile: PlayerProfile, before: number, now: number)
+	local after = Profile.onboardingStep(profile)
+	for _, fields in Analytics.onboardingStepEvents(before, after, profile.createdAt, now) do
+		AnalyticsService.track(userId, "onboarding_step", fields)
+	end
+end
+
 -- Applies (and forgets) the player's deferred SaveSettings request, if any. Pure and no yield, so
 -- it is also the onProfileReleasing listener that lands it before the final save.
 local function applyDeferredSettings(userId: number, profile: PlayerProfile?)
@@ -554,9 +568,12 @@ local function onAckOnboarding(player: Player, stepId: any): boolean
 	if profile == nil then
 		return false
 	end
-	local outcome = Profile.acknowledgeOnboarding(profile, stepId, os.time())
+	local now = os.time()
+	local before = Profile.onboardingStep(profile)
+	local outcome = Profile.acknowledgeOnboarding(profile, stepId, now)
 	if outcome == "Advanced" then
 		pushOnboarding(userId, profile)
+		trackOnboarding(userId, profile, before, now)
 	end
 	return outcome ~= "Refused"
 end
@@ -567,16 +584,23 @@ end
 	Profile.ONBOARDING_STEPS, such as "collect") asks for. Moves their onboarding forward to it at
 	the server's os.time() (Profile.advanceOnboardingTo: forward only, may jump over earlier steps,
 	never once onboarding is over, which every save from before onboarding is), then pushes
-	OnboardingChanged. Call it after the event succeeded; calling it again, or for a step already
-	passed, changes nothing. It never yields or saves, and does nothing when the profile is not
-	loaded in this server. Returns whether it wrote.
+	OnboardingChanged and logs onboarding_step once for each step it completed (P2.9b). Call it
+	after the event succeeded; calling it again, or for a step already passed, changes and logs
+	nothing. It never yields or saves, and does nothing when the profile is not loaded in this
+	server. Returns whether it wrote.
 ]]
 function DataService.advanceOnboarding(userId: number, stepId: string): boolean
 	local profile = DataService.getProfile(userId)
-	if profile == nil or not Profile.advanceOnboardingTo(profile, stepId, os.time()) then
+	if profile == nil then
+		return false
+	end
+	local now = os.time()
+	local before = Profile.onboardingStep(profile)
+	if not Profile.advanceOnboardingTo(profile, stepId, now) then
 		return false
 	end
 	pushOnboarding(userId, profile)
+	trackOnboarding(userId, profile, before, now)
 	return true
 end
 
