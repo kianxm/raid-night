@@ -4,7 +4,8 @@
 	(decision D-010). install() does nothing unless RunService:IsStudio(), so it is never active in
 	a live server, and nothing a client sends can reach it.
 
-	It seeds a stand-in defender den: a fake owner (userId -1) with an in-memory profile, one pad
+	It seeds a stand-in defender den: a fake owner (reserved test userId -1_000_001, which no
+	player and no Studio test client can have) with an in-memory profile, one pad
 	critter per weight on pads 1-4 plus a Vault and an Inventory critter, and a red "StandInOwner"
 	block that tags like a real owner. One client can then grab, carry, get tagged, escape, and
 	watch a Lockdown block entry. The real rules run unchanged: the stand-in is only another
@@ -21,10 +22,12 @@
 	  hook:Invoke("teleportHome")      --> teleport the client into their own den (exploit check)
 	  hook:Invoke("clear")             --> remove the stand-in and free its den
 
-	Escrow: transferLive needs BOTH profiles loaded in DataService. If DataService offers
-	loadTestProfile(userId, profile) / releaseTestProfile(userId) (requested from the data owner),
-	the stand-in profile is handed to it and an escape can commit. Without them an escape reports
-	"Refused" (nothing moves) and the critter goes back to its pad.
+	Escrow (decision D-019): an escape against the stand-in can commit only when the whole server
+	keeps profiles and escrow in memory. Set the ServerStorage attribute StudioMemoryProfiles = true
+	BEFORE Play; then DataService.persistence() is "Memory" and seed hands the stand-in profile to
+	DataService.loadTestProfile first (a refused load refuses the seed, so no den is taken).
+	Without Memory mode seed still works for grab, carry, tag and Lockdown, and an escape reports
+	"test escape needs Memory persistence" without calling transferLive (nothing moves).
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -51,13 +54,20 @@ export type Api = {
 	describe: () -> string,
 }
 
-local STAND_IN_USER_ID = -1
+local STAND_IN_USER_ID = -1_000_001 -- reserved test id (<= -1_000_000, Profile.isTestUserId)
+local MEMORY_HINT = "set the ServerStorage attribute StudioMemoryProfiles = true before Play"
 local CHASE_SPEED = 18 -- faster than any carrier (16 * 0.9), so a chase always ends in a tag
 local WEIGHTS = { "Light", "Medium", "Heavy", "VeryHeavy" }
 
 local TestHook = {}
 
-type Seeded = { plot: number, profile: PlayerProfile, owner: Part, chase: RBXScriptConnection? }
+type Seeded = {
+	plot: number,
+	profile: PlayerProfile,
+	loaded: boolean, -- handed to DataService.loadTestProfile (Memory mode)
+	owner: Part,
+	chase: RBXScriptConnection?,
+}
 local seeded: Seeded? = nil
 local api: Api
 
@@ -143,17 +153,40 @@ local function stopChase()
 	end
 end
 
+local function releaseProfile(): (boolean, string?)
+	if type(DataService.releaseTestProfile) ~= "function" then
+		return false, "DataService has no releaseTestProfile"
+	end
+	local ok, released, why = pcall(DataService.releaseTestProfile, STAND_IN_USER_ID)
+	if not ok then
+		return false, tostring(released)
+	end
+	return released == true, why
+end
+
 local function seed(): (number?, string?)
 	if seeded then
 		return seeded.plot, nil
 	end
-	local plot = DenWorldService.assignStandIn(STAND_IN_USER_ID, "Stand-in")
-	if not plot then
-		return nil, "no free den"
-	end
 	local profile = buildProfile()
-	if type(DataService.loadTestProfile) == "function" then
-		DataService.loadTestProfile(STAND_IN_USER_ID, profile)
+	-- The profile goes to DataService before any den is taken, so a refused load leaves nothing.
+	local loaded = false
+	if DataService.persistence() == "Memory" then
+		if type(DataService.loadTestProfile) ~= "function" then
+			return nil, "DataService has no loadTestProfile (data P0.5e)"
+		end
+		local ok, result, why = pcall(DataService.loadTestProfile, STAND_IN_USER_ID, profile)
+		if not ok or result ~= true then
+			return nil, `stand-in profile refused by DataService: {if ok then why or "refused" else result}`
+		end
+		loaded = true
+	end
+	local assignedOk, plot = pcall(DenWorldService.assignStandIn, STAND_IN_USER_ID, "Stand-in")
+	if not assignedOk or not plot then
+		if loaded then
+			releaseProfile()
+		end
+		return nil, if assignedOk then "no free den" else `no den for the stand-in: {plot}`
 	end
 	local owner = Instance.new("Part")
 	owner.Name = "StandInOwner"
@@ -164,7 +197,7 @@ local function seed(): (number?, string?)
 	owner.Color = Color3.fromRGB(255, 80, 80)
 	owner.CFrame = ownerHome(plot)
 	owner.Parent = DenWorldService.getContents(plot)
-	seeded = { plot = plot, profile = profile, owner = owner }
+	seeded = { plot = plot, profile = profile, loaded = loaded, owner = owner }
 	api.setStandIn(plot, {
 		userId = STAND_IN_USER_ID,
 		profile = profile,
@@ -174,6 +207,9 @@ local function seed(): (number?, string?)
 		end,
 	})
 	draw(plot, profile)
+	if not loaded then
+		return plot, `escapes against the stand-in will report "test escape needs Memory persistence"; {MEMORY_HINT}`
+	end
 	return plot, nil
 end
 
@@ -206,12 +242,20 @@ local function clear(): (boolean, string?)
 	if not s then
 		return true, nil
 	end
+	for uid in s.profile.critters do
+		if api.isLocked(STAND_IN_USER_ID, uid) then
+			return false, "a stand-in critter is being carried or is in escrow; try again when it lands"
+		end
+	end
+	if s.loaded then
+		local released, why = releaseProfile()
+		if not released then
+			return false, `DataService kept the stand-in profile: {why or "refused"}`
+		end
+	end
 	stopChase()
 	api.setStandIn(s.plot, nil)
 	DenWorldService.releaseStandIn(STAND_IN_USER_ID)
-	if type(DataService.releaseTestProfile) == "function" then
-		DataService.releaseTestProfile(STAND_IN_USER_ID)
-	end
 	s.owner:Destroy()
 	seeded = nil
 	return true, nil
@@ -227,7 +271,11 @@ local function status(): string
 		end
 		table.sort(pads)
 		local loaded = DataService.getProfile(STAND_IN_USER_ID) ~= nil
-		table.insert(lines, `stand-in den {s.plot} (DataService loaded: {loaded}): {table.concat(pads, ", ")}`)
+		local persistence = DataService.persistence()
+		table.insert(
+			lines,
+			`stand-in den {s.plot} (persistence {persistence}, DataService loaded: {loaded}): {table.concat(pads, ", ")}`
+		)
 		table.insert(lines, `stand-in Lockdown active: {Lockdown.isActive(s.plot)}`)
 	else
 		table.insert(lines, "no stand-in (run seed)")

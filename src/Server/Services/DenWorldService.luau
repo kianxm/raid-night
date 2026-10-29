@@ -408,13 +408,16 @@ end
 
 -- Studio test stand-ins (RaidService's TestHook, decision D-010) --------------------------------
 
--- Gives a free den to a fake owner (a negative userId, never a real player) so one client has a
--- den to raid. Never queues: returns nil when no den is free. Listeners are not called (they
--- expect a Player), and getOwner(plot) stays nil.
+-- Gives a free den to a fake owner so one client has a den to raid. The id must be a reserved
+-- test id (<= -1_000_000): Studio's Local Server players are -1, -2, ... and must never be
+-- matched. Never queues: returns nil when no den is free. Listeners are not called (they expect a
+-- Player), and getOwner(plot) stays nil.
 function DenWorldService.assignStandIn(userId: number, displayName: string): number?
 	assert(RunService:IsStudio(), "stand-in dens are Studio-only")
-	assert(userId < 0, "stand-in userIds are negative")
-	if Plots.plotOf(state, userId) == nil and Plots.freeCount(state) == 0 then
+	assert(userId <= -1_000_000, "stand-in userIds are reserved test ids (<= -1000000)")
+	assert(Players:GetPlayerByUserId(userId) == nil, "a player has this userId")
+	assert(Plots.plotOf(state, userId) == nil, "this stand-in already has a den")
+	if Plots.freeCount(state) == 0 then
 		return nil
 	end
 	local plot = Plots.assign(state, userId) :: number
@@ -424,6 +427,8 @@ function DenWorldService.assignStandIn(userId: number, displayName: string): num
 end
 
 function DenWorldService.releaseStandIn(userId: number)
+	assert(RunService:IsStudio(), "stand-in dens are Studio-only")
+	assert(userId < 0, "stand-in userIds are negative")
 	local plot, nextUserId = Plots.release(state, userId)
 	if plot then
 		freePlot(plot, nextUserId)

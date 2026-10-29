@@ -55,8 +55,29 @@ tests["the test hook only ever installs in Studio"] = function()
 		string.find(code, "function TestHook.install%(raidApi: Api%)%s+if not RunService:IsStudio%(%) then%s+return")
 	)
 	local service = codeOnly(fs.readFile(FILES[1]))
-	expect.truthy(string.find(service, "if RunService:IsStudio%(%) then%s+TestHook.install%("))
+	expect.truthy(
+		string.find(service, "if RunService:IsStudio%(%) then%s+local TestHook = require%(RaidFolder%.TestHook%)"),
+		"TestHook is required lazily, inside the Studio check"
+	)
+	expect.eq(count(service, "RaidFolder.TestHook"), 1, "and nowhere else")
 	expect.truthy(string.find(service, 'assert%(RunService:IsStudio%(%), "stand%-ins are Studio%-only"%)'))
+end
+
+tests["the stand-in uses a reserved test id that no player, Studio test client included, can have"] = function()
+	local hook = codeOnly(fs.readFile("src/Server/Raid/TestHook.luau"))
+	expect.truthy(string.find(hook, "local STAND_IN_USER_ID = %-1_000_001%s"), "reserved id")
+	local world = codeOnly(fs.readFile("src/Server/Services/DenWorldService.luau"))
+	local first = string.find(world, "function DenWorldService.assignStandIn", 1, true)
+	local last = string.find(world, "function DenWorldService.releaseStandIn", 1, true)
+	expect.truthy(first and last, "stand-in functions found")
+	local assign = string.sub(world, first :: number, last :: number)
+	local release = string.sub(world, last :: number, string.find(world, "\nend\n", last :: number) :: number)
+	expect.truthy(string.find(assign, "assert%(RunService:IsStudio%(%)"), "assign: Studio only")
+	expect.truthy(string.find(assign, "assert%(userId <= %-1_000_000"), "assign: reserved ids only")
+	expect.truthy(string.find(assign, "assert%(Players:GetPlayerByUserId%(userId%) == nil"), "assign: no player")
+	expect.truthy(string.find(assign, "assert%(Plots%.plotOf%(state, userId%) == nil"), "assign: no den yet")
+	expect.truthy(string.find(release, "assert%(RunService:IsStudio%(%)"), "release: Studio only")
+	expect.truthy(string.find(release, "assert%(userId < 0"), "release: negative ids only")
 end
 
 tests["raid server code never reads an attribute"] = function()

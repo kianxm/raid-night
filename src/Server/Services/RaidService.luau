@@ -66,7 +66,6 @@ local DenWorldService = require(script.Parent.DenWorldService) :: any
 local IncomeService = require(script.Parent.IncomeService) :: any
 local RaidFolder = script.Parent.Parent.Raid
 local Lockdown = require(RaidFolder.Lockdown)
-local TestHook = require(RaidFolder.TestHook)
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
@@ -184,6 +183,17 @@ local function ownerOf(plot: number): (number?, PlayerProfile?, BasePart?)
 		return nil, nil, nil
 	end
 	return owner.UserId, DataService.getProfile(owner.UserId), rootOf(owner)
+end
+
+-- Studio stand-ins only: their escrow may run only while the whole server keeps profiles and
+-- escrow in memory (decision D-019). Real players are never stand-ins.
+local function standInEscrowBlocked(userId: number): boolean
+	for _, standIn in standIns do
+		if standIn.userId == userId then
+			return DataService.persistence() ~= "Memory"
+		end
+	end
+	return false
 end
 
 local function refreshUser(userId: number)
@@ -435,7 +445,11 @@ local function escape(player: Player, carry: Carry)
 	debugLog(`{player.Name} escaped with {carry.speciesId}; raid {raidId} handed to EscrowService`)
 	task.spawn(function()
 		local status, reason = "InFlight", nil
-		for attempt = 1, #ESCAPE_RETRY_DELAYS + 1 do
+		local attempts = #ESCAPE_RETRY_DELAYS + 1
+		if standInEscrowBlocked(defenderUserId) then
+			status, reason, attempts = "Refused", "test escape needs Memory persistence; transferLive not called", 0
+		end
+		for attempt = 1, attempts do
 			local ok, s, r =
 				pcall(EscrowService.transferLive, raidId, raiderUserId, defenderUserId, critterUid, LIVE_GLOW, false)
 			status, reason = if ok then s else "InFlight", if ok then r else tostring(s)
@@ -669,6 +683,7 @@ function RaidService.start()
 		end
 	)
 	if RunService:IsStudio() then
+		local TestHook = require(RaidFolder.TestHook)
 		TestHook.install({
 			setStandIn = setStandIn,
 			requestGrab = RaidService.requestGrab,
