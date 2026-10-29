@@ -35,6 +35,9 @@
 	       Tag, Escape and Timeout events (Shared/Replay recorder, P1.4b). At every end the replay
 	       goes to ReplayStore.save, which never yields or errors; every recorder call is pcall'd,
 	       so a replay failure can never change a raid or its result.
+	Report (P2.6r, Raid/RaidEvents.luau): RaidFlow TargetPicked for a well-formed StartRaid,
+	       raid_started (and revenge_started) once the raider is in the pocket, raid_ended at every
+	       end with escrow's answer. Never yields or throws.
 	Never writes a profile.
 ]]
 
@@ -53,6 +56,7 @@ local Net = require(Shared.Net)
 local RaidRules = require(Shared.RaidRules)
 local Replay = require(Shared.Replay)
 local Types = require(Shared.Types)
+local RaidEvents = require(script.Parent.RaidEvents)
 local Services = script.Parent.Parent.Services
 local DataService = require(Services.DataService) :: any
 local DenWorldService = require(Services.DenWorldService) :: any
@@ -96,6 +100,7 @@ type Raid = {
 	layout: RaidRules.PocketLayout,
 	revengeRaidId: string?,
 	endsAt: number, -- workspace:GetServerTimeNow()
+	startedAt: number, -- workspace:GetServerTimeNow() at entry (raid_ended's duration)
 	pocket: PocketT,
 	carry: Carry?,
 	guards: { RaidRules.GuardState },
@@ -300,6 +305,7 @@ local function endRaid(raid: Raid, reason: string)
 			end
 		end
 		pcall(MatchmakingService.releaseLock, raid.defenderUserId, raid.raidId)
+		RaidEvents.asyncEnded(player, outcome, workspace:GetServerTimeNow() - raid.startedAt)
 		debugLog(`raid {raid.raidId} on {raid.defenderUserId} ended: {reason}`)
 		if player.Parent then
 			local payload: Net.RaidEnd = {
@@ -494,6 +500,7 @@ local function enterPocket(
 			layout = layout,
 			revengeRaidId = revengeRaidId,
 			endsAt = startedAt + Config.Raid.durationSeconds,
+			startedAt = startedAt,
 			replay = if recOk then rec else nil,
 			pocket = pocket,
 			carry = nil,
@@ -584,6 +591,7 @@ local function startRaid(player: Player, targetUserId: number, revengeRaidId: st
 		return nil, if entered then refusal else "Error"
 	end
 	debugLog(`{player.Name} started raid {raidId} on {targetUserId}{if isRevenge then " (revenge)" else ""}`)
+	RaidEvents.asyncStarted(player, snapshot.power, revengeRaidId)
 	return result, nil
 end
 
@@ -600,6 +608,7 @@ local function onStartRaid(player: Player, targetUserId: any, revengeRaidId: any
 	if not (idOk and revengeOk) then
 		return nil
 	end
+	RaidEvents.targetPicked(player) -- RaidFlow (P2.9): the portal pick reached the server
 	starting[player] = true
 	local ok, result, reason = pcall(startRaid, player, targetUserId, revengeRaidId)
 	starting[player] = nil
@@ -627,6 +636,11 @@ local function onGetRaidLog(player: Player): { Types.RaidLogEntry }
 		pcall(mark, player.UserId, os.time())
 	end
 	return list
+end
+
+-- Whether the player is in an async raid or starting one (the tutorial den waits for it to end).
+function AsyncRaid.isRaiding(player: Player): boolean
+	return raids[player] ~= nil or starting[player] == true
 end
 
 -- Studio only: start a raid without the UI. Same path as StartRaid minus the rate limit.

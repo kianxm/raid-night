@@ -47,6 +47,9 @@ local Config = {
 	Protection = {
 		newPlayerSeconds = 48 * HOUR,
 		minDenLevel = 5, -- dens below this level cannot be raided async
+		-- Appendix C step 6 (D-063): no live steal from a player whose first join (profile
+		-- createdAt) is younger than this. Async raids are already blocked for newPlayerSeconds.
+		newPlayerLiveShieldSeconds = 30 * 60,
 	},
 
 	Limits = {

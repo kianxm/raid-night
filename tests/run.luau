@@ -181,6 +181,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "RaidOnboarding",
+		load = function()
+			return require("./specs/RaidOnboarding.spec")
+		end,
+	},
+	{
 		name = "RateLimit",
 		load = function()
 			return require("./specs/RateLimit.spec")

@@ -136,7 +136,12 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
   three, replacing what was saved. A key never set reads as its default.
 - **Successful raids.** The lifetime count of raids and live steals the player escaped from,
   counted once per raid by the raider's own server (`countSuccessfulRaid` returns the new count;
-  1 is the first, the notification opt-in trigger). Old saves start at 0.
+  1 is the first, the notification opt-in trigger). Old saves start at 0. Raid counts it
+  (`Raid/RaidEvents.succeeded`, P2.6r) after a live escape that moved the critter and after an
+  async escape whose loot is credited (not while `pending`), through
+  `DataService.countSuccessfulRaid(userId, raidId) -> number?` (data's API, idempotent per raidId;
+  until it exists the count is skipped), after the raider's `RaidEnded` push, then calls `NotificationService.onSuccessfulRaid(player, count)`. The tutorial den
+  steal is never counted: the opt-in prompt follows the first real raid (Appendix C step 7).
 - **Receipts.** The ProcessReceipt idempotency rule: grant only when `recordReceipt(profile,
   PurchaseId, productId, now)` returns true, in the same step with no yield between, then confirm
   the save (`DataService.saveNow`) before returning `PurchaseGranted`. false on an existing
@@ -149,7 +154,7 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
   Rebirth vault slots: `vaultSlots`; the vault slot game pass needs no field (ownership is a
   MarketplaceService check). Raid log visits: `raidLogSeenAt`. Appendix C's 30-minute new-player shield is
   derived from `createdAt` and needs no field (async raids are already blocked for 48 hours by
-  new-player protection).
+  new-player protection); see Raid onboarding.
 - **Not on the profile.** Notification state (daily send slot, pending Glow loss, opt-in prompt
   time) lives in NotificationService's own `NotificationState_v1` DataStore (D-062): the daily cap
   is written by the raider's server for an offline defender, and a profile field would need a
@@ -190,7 +195,8 @@ an id; a new step goes at the end.
 | 5 | `stealHome` | 4-5 | Server | A stolen critter reached the player's profile (the guided steal's escape) |
 | 6 | `raidLogTip` | 5 | Client | The player dismissed the one-line raid log explanation |
 
-Appendix C line 6 (the 30-minute shield) needs no saved state (from `createdAt`; raid's P2.6r) and
+Appendix C line 6 (the 30-minute shield) needs no saved state (from `createdAt`; raid's P2.6r, see
+Raid onboarding) and
 line 7 (notification opt-in) is not onboarding.
 
 - **Server events.** Services call `DataService.advanceOnboarding(userId, stepId)` after the real
@@ -261,6 +267,15 @@ Schema: `src/Shared/Analytics.luau` (pure, tested in `Analytics.spec`). Sender:
 | `purchase` | price (Robux); product (server key) | economy (PurchaseService) |
 | `rebirth` | count; daysSinceJoin (from `createdAt`) | economy |
 | `session_end` | sessionSeconds; raids (started), steals (escapes with a critter) | DataService / AnalyticsService on leave |
+
+Raid's moments (P2.6r, `Raid/RaidEvents.luau`): `raid_started` when a live carry starts (the grab
+hold completed; `targetPower` = `Matchmaking.denPower` of the owner's den) or when an async raider
+lands in the pocket (the snapshot's power), with `revenge_started` at the same moment for a
+revenge (`hoursSinceRaided` from the revenge token, `fromNotification` = the join's launch raidId
+is that token); `raid_ended` at every live drop or escape (`escaped` only when the critter moved)
+and every async end (`escaped` when credited or `pending`; tier and Glow are escrow's answer).
+`RaidFlow.TargetPicked` is logged for every well-formed `StartRaid`. Onboarding `FirstRaid` follows
+from an async `raid_started`. The tutorial den logs no raid event.
 
 `raided_offline` is logged on the defender when they are in the server that saved the debit,
 otherwise on the raider (`attributedTo = "Raider"`), since a profile no server holds has no Player.
@@ -828,6 +843,32 @@ grab request (before the hold starts and before `BeingRaidedLive` reaches the ow
 it as `transferLive`'s last argument on every attempt. It shows the state with the display-only
 den attributes `LiveProtected` and `LiveGrabReadyAt` (Replicated attributes).
 
+## Raid onboarding: new-player shield and tutorial den (P2.6r, D-063, D-064)
+
+- **New-player shield** (Appendix C step 6). `Config.Protection.newPlayerLiveShieldSeconds` (30
+  min): `RaidRules.canGrabLive` refuses `NewPlayerShield` while the den owner's `createdAt` is
+  younger (`RaidRules.newPlayerShielded`; a corrupt `createdAt` reads as an old account). It comes
+  right after the owner checks, is absolute (revenge does not break it), and hides the den's steal
+  prompts. It only protects the new player's den; they can still steal. Nothing is saved. Async
+  raids need nothing new: new-player protection (48 h, `RaidRules.protectedUntil`) already keeps
+  them out of `Matchmaking.pickCandidates` and fails `RaidRules.canRaid` at `StartRaid`.
+- **Tutorial den** (Appendix C step 4, `Raid/TutorialDen.luau`). A server-owned den with no
+  defender profile and one `Economy.TUTORIAL_CRITTER_SPECIES` critter, built for a player only
+  while `RaidRules.tutorialDenOpen(Profile.onboardingStatus(profile))` (the next step is
+  `stealHome`) and `IncomeService.tutorialCritterAvailable(player)`, and destroyed when either
+  stops. Placement: on the street in front of the player's own den, den-local
+  (`Plots.Layout.tutorialX`, `tutorialZ`) = (0, 42), radius `tutorialRadius` 5
+  (`Plots.tutorialPosition`), clear of the 8 dens, the plaza, lamps and props (tested); about 4
+  parts. Grab: its pad's `StealPrompt`, a server-timed hold, `RaidRules.canGrabTutorial` (its own
+  player only, still open, not busy, `Config.LiveRaid.grabRange`), `Net.Limits.GrabCritter`.
+  Carry: the live carry rules (`carryWalkSpeed`, `carryStep`) with no owner (no tag), no Lockdown,
+  no live loss rule and no kill switch. Escape into the player's own den calls only
+  `IncomeService.grantTutorialCritter(player)` (no Escrow; it claims `stealHome` itself, once per
+  player ever, so it cannot be farmed). `RaidEnded` without `reason`: a drop is
+  `{ raidId = "", escaped = false }` like a live drop; the escape is
+  `{ raidId = RaidRules.TUTORIAL_RAID_ID ("tutorial"), escaped = <granted>, speciesId, glow = 0 }`.
+  `"tutorial"` is never an escrow raidId or a replay.
+
 ## Replicated attributes
 
 Attributes the server sets on Instances so clients can draw state without a remote. All are
@@ -843,16 +884,19 @@ server-written and display-only:
 | Instance | Attribute | Type | Meaning |
 | --- | --- | --- | --- |
 | Player | `Plot` | number | Plot index of the player's den; absent when they have none |
-| Player | `CarryingUid` | string | uid of the critter being carried; `""` (or absent) when not carrying |
+| Player | `CarryingUid` | string | uid of the critter being carried (`"tutorial"` for the tutorial den's); `""` (or absent) when not carrying |
 | Player | `CarryingSpecies` | string | Species id of that critter; `""` (or absent) when not carrying |
+| Player | `TutorialDenPosition` | Vector3 | Top of the player's tutorial den pad while it is open (guidance); absent otherwise (P2.6r) |
 | Player | `RaidLogSeenAt` | number | Unix seconds the player last opened their raid log, as of this session's profile load; 0 = never |
 | Den Model `Den<plot>` | `Plot` | number | The den's plot index |
 | Den Model | `OwnerUserId` | number | Owner's userId; 0 when unowned |
 | Den Model | `LockdownUntil` | number | When the current Lockdown ends; absent or past = none active |
 | Den Model | `LockdownReadyAt` | number | When the owner can start the next Lockdown; absent or past = ready |
 | Den Model | `LiveProtected` | boolean | `RaidRules.liveProtected` for the owner now: no live steals while true. Can flip during the day (D-036); false from the UTC day roll; absent = false |
+| Den Model | `NewPlayerShieldUntil` | number | When the owner's 30-minute new-player shield ends (D-063); absent once over |
 | Den Model | `LiveGrabReadyAt` | number | When grabs reopen after the den's last live loss (`RaidRules.liveGrabReadyAt`, D-031); absent or past = open |
 | Pad Part | `PadIndex` | number | The pad's number |
+| Model `workspace.TutorialDens.TutorialDen<userId>` | `OwnerUserId` | number | The one player who can use this tutorial den (P2.6r) |
 | Critter Model | `CritterUid`, `SpeciesId`, `Tier` | string | Which critter this model draws |
 | Critter Model | `PadIndex`, `OwnerUserId` | number | Where it sits and whose it is |
 

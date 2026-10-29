@@ -40,6 +40,11 @@ Plots.Layout = table.freeze({
 	vaultZ = -24,
 	lanternX = -15, -- the den's one lamp, back left of the sign
 	lanternZ = -24,
+	-- The tutorial den (P2.6r, D-064): a small round den on the street in front of each den, at
+	-- den-local (tutorialX, tutorialZ), clear of every den, the plaza, lamps and street props.
+	tutorialX = 0,
+	tutorialZ = 42, -- 14 studs past the den's front border (local z = plotSize / 2)
+	tutorialRadius = 5,
 })
 
 local L = Plots.Layout
@@ -152,6 +157,12 @@ end
 function Plots.padPosition(plot: number, pad: number): (number, number)
 	local lx, lz = Plots.padLocal(pad)
 	return Plots.toWorld(plot, lx, lz)
+end
+
+-- World x, z of the centre of this den's tutorial den (its one pad). Outside every plot, so a
+-- carry from it always crosses the street before it reaches the owner's den.
+function Plots.tutorialPosition(plot: number): (number, number)
+	return Plots.toWorld(plot, L.tutorialX, L.tutorialZ)
 end
 
 function Plots.spawnPosition(plot: number): (number, number)

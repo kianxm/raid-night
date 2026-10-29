@@ -63,6 +63,18 @@
 	(Gear.liveTagRange); Lockdown honours lockpick passes. Grapple and lockpick never run while
 	carrying, so a carry's budget and street checks never see a server move from gear.
 
+	Onboarding (P2.6r, D-063, D-064):
+	  New-player shield  RaidRules.canGrabLive refuses a den whose owner first joined less than
+	          Config.Protection.newPlayerLiveShieldSeconds ago (NewPlayerShield); its prompts hide and
+	          the den shows NewPlayerShieldUntil (server time, display only).
+	  Tutorial den  Raid/TutorialDen.luau: the guided first steal from a server-owned den in front
+	          of the player's own, carried home under the live carry rules, granted by
+	          IncomeService.grantTutorialCritter (no Escrow). A tutorial carry counts as carrying here.
+	  Reporting  Raid/RaidEvents.luau: raid_started / raid_ended / revenge_started analytics, and
+	          after a live escape that moved the critter (or a credited async escape) the successful
+	          raid count and NotificationService.onSuccessfulRaid. The carried critter is drawn by
+	          Raid/CarryProp.luau (CritterView: tier and mutation look).
+
 	Async raids (P1.3a): Raid/AsyncRaid.luau runs StartRaid, pocket dens (Raid/Pocket.luau), traps,
 	guards, the timer, grabs and GetRaidLog. An escape ends in RaidService.onAsyncEscape below,
 	which hands it to EscrowService.transferAsync (P1.3b).
@@ -102,6 +114,9 @@ local DataService = require(script.Parent.DataService)
 local EscrowService = require(script.Parent.EscrowService)
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 local IncomeService = require(script.Parent.IncomeService) :: any
+local CarryProp = require(script.Parent.Parent.Raid.CarryProp)
+local RaidEvents = require(script.Parent.Parent.Raid.RaidEvents)
+local TutorialDen = require(script.Parent.Parent.Raid.TutorialDen)
 local MatchmakingService = require(script.Parent.MatchmakingService) :: any
 local RaidFolder = script.Parent.Parent.Raid
 local Lockdown = require(RaidFolder.Lockdown)
@@ -137,7 +152,8 @@ type Carry = {
 	floorY: number, -- top of the den floor, for the carry height check
 	wasInsideDefenderDen: boolean,
 	crossedStreet: boolean,
-	prop: BasePart,
+	prop: Instance, -- CarryProp: the critter over the carrier's head
+	startedAt: number?, -- os.clock() once the carry started (raid_started logged), for raid_ended
 }
 
 local LIVE_GLOW = 0 -- Phase 0 live steals take the critter only (decision D-015)
@@ -167,7 +183,7 @@ local locked: { [string]: { owner: number, raider: number } } = {}
 -- when the owner leaves.
 local lastLoss: { [number]: { at: number, serverAt: number } } = {}
 -- What each den's LiveProtected / LiveGrabReadyAt attributes show (written on change only).
-local shownDen: { [number]: { protected: boolean?, readyAt: number? } } = {}
+local shownDen: { [number]: { protected: boolean?, readyAt: number?, shieldUntil: number? } } = {}
 local prompts: { [BasePart]: ProximityPrompt } = {}
 local windows: { [Player]: { start: number, count: number } } = {}
 local standIns: { [number]: StandIn } = {} -- plot -> stand-in; stays empty outside Studio
@@ -287,12 +303,22 @@ local function refreshDen(plot: number)
 	local readyAt = if loss then RaidRules.liveGrabReadyAt(loss.serverAt) else nil
 	-- Pads shown (and usable, through Economy.usablePadCount) follow the owner's den level (P2.3).
 	DenWorldService.setShownPads(plot, WorldKit.shownPads(if ownerProfile then ownerProfile.denLevel else 1))
+	-- The new-player shield (D-063) on the server clock, whole seconds; absent once it is over.
+	local shieldLeft = if ownerProfile then RaidRules.newPlayerShieldUntil(ownerProfile) - os.time() else 0
+	local shieldUntil = if shieldLeft > 0 then math.ceil(workspace:GetServerTimeNow() + shieldLeft) else nil
 	local shown = shownDen[plot]
-	if not shown or shown.protected ~= protected or shown.readyAt ~= readyAt then
-		shownDen[plot] = { protected = protected, readyAt = readyAt }
+	if
+		not shown
+		or shown.protected ~= protected
+		or shown.readyAt ~= readyAt
+		or (shown.shieldUntil == nil) ~= (shieldUntil == nil)
+		or (shown.shieldUntil and shieldUntil and math.abs(shown.shieldUntil - shieldUntil) > 1)
+	then
+		shownDen[plot] = { protected = protected, readyAt = readyAt, shieldUntil = shieldUntil }
 		local model = DenWorldService.getModel(plot)
 		model:SetAttribute("LiveProtected", protected)
 		model:SetAttribute("LiveGrabReadyAt", readyAt)
+		model:SetAttribute("NewPlayerShieldUntil", shieldUntil)
 	end
 end
 
@@ -353,7 +379,7 @@ local function checkGrab(player: Player, plot: number, padIndex: number): (boole
 		ownerProfile = ownerProfile,
 		lockdownBlocked = lockdownBlocks(player, plot),
 		padIndex = padIndex,
-		carrying = carries[player] ~= nil,
+		carrying = carries[player] ~= nil or TutorialDen.isCarrying(player),
 		isLocked = function(uid: string): boolean
 			return ownerUserId ~= nil and isLocked(ownerUserId, uid)
 		end,
@@ -387,42 +413,6 @@ local function hidePadModel(plot: number, padIndex: number)
 	end
 end
 
-local function buildProp(root: BasePart, species: Types.CritterSpecies): BasePart
-	local prop = Instance.new("Part")
-	prop.Name = "CarriedCritter"
-	prop.Shape = Enum.PartType.Ball
-	prop.Size = Vector3.one * 2
-	prop.Color = Color3.fromHex(species.palette[1])
-	prop.Material = Enum.Material.Neon
-	prop.CanCollide = false
-	prop.CanTouch = false
-	prop.CanQuery = false
-	prop.CastShadow = false
-	prop.Massless = true
-	prop.CFrame = root.CFrame * CFrame.new(0, 4.5, 0)
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = root
-	weld.Part1 = prop
-	weld.Parent = prop
-	local tag = Instance.new("BillboardGui")
-	tag.Size = UDim2.fromOffset(140, 28)
-	tag.StudsOffset = Vector3.new(0, 1.8, 0)
-	tag.MaxDistance = 60
-	tag.LightInfluence = 0
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = prop.Color
-	label.TextStrokeTransparency = 0.4
-	label.Text = species.name
-	label.Parent = tag
-	tag.Parent = prop
-	prop.Parent = root.Parent
-	return prop
-end
-
 local function sendEnded(player: Player, raidId: string, escaped: boolean, speciesId: string)
 	if player.Parent ~= nil then
 		local payload: Net.RaidEnd = { raidId = raidId, escaped = escaped, speciesId = speciesId, glow = LIVE_GLOW }
@@ -451,6 +441,9 @@ local function drop(player: Player, carry: Carry, why: string)
 		clearCarrier(player, carry)
 		refreshUser(carry.defenderUserId)
 		sendEnded(player, "", false, carry.speciesId)
+		if carry.startedAt then
+			RaidEvents.liveEnded(player, false, carry.speciesId, os.clock() - carry.startedAt)
+		end
 	end)
 	if not ok then
 		warn(`[RaidService] cleanup after a drop failed: {err}`)
@@ -466,7 +459,7 @@ local function startCarry(
 	revengeRaidId: string?,
 	liveBaseRate: number
 )
-	local ownerUserId = ownerOf(plot)
+	local ownerUserId, ownerProfile = ownerOf(plot)
 	local species = CritterCatalog.get(critter.speciesId)
 	local root = rootOf(player)
 	local humanoid = humanoidOf(player)
@@ -476,7 +469,7 @@ local function startCarry(
 	end
 	-- Everything that can fail before the lock is taken happens first: a broken prop can never
 	-- leave a critter locked.
-	local prop = buildProp(root, species)
+	local prop = CarryProp.attach(root, species, critter.mutation)
 	local walkSpeed = RaidRules.carryWalkSpeed(StarterPlayer.CharacterWalkSpeed, species.weight)
 	local carry: Carry = {
 		defenderUserId = ownerUserId,
@@ -513,6 +506,8 @@ local function startCarry(
 		drop(player, carry, "start failed")
 		return
 	end
+	carry.startedAt = os.clock()
+	RaidEvents.liveStarted(player, ownerProfile, revengeRaidId) -- never yields or throws
 	local tag = if revengeRaidId then ` (revenge {revengeRaidId})` else ""
 	debugLog(`{player.Name} grabbed {species.id} from den {plot} pad {padIndex}{tag}`)
 end
@@ -550,7 +545,7 @@ function RaidService.cancelGrab(player: Player)
 end
 
 function RaidService.isCarrying(player: Player): boolean
-	return carries[player] ~= nil
+	return carries[player] ~= nil or TutorialDen.isCarrying(player)
 end
 
 -- Called every frame: a hold completes on the server's clock, with every check passing the
@@ -660,7 +655,14 @@ local function escape(player: Player, carry: Carry)
 		else
 			warn(`[RaidService] {line}`)
 		end
+		-- The raider hears first: nothing below (analytics, data's count) may delay or lose it.
 		pcall(sendEnded, player, raidId, escaped, speciesId)
+		if carry.startedAt then
+			RaidEvents.liveEnded(player, escaped, speciesId, os.clock() - carry.startedAt)
+		end
+		if escaped then
+			RaidEvents.succeeded(raiderUserId, raidId) -- the count and the opt-in prompt (P2.7)
+		end
 	end)
 end
 
@@ -767,6 +769,9 @@ function RaidService.onAsyncEscape(run: AsyncRaid.Escape): RaidRules.EscapeOutco
 	if status == "Committed" and player then
 		pcall(IncomeService.refresh, player)
 	end
+	if outcome.escaped then
+		RaidEvents.succeeded(run.raiderUserId, run.raidId) -- credited only; a pending escape is not counted
+	end
 	local said = if status == "Committed"
 		then `moved {outcome.speciesId or "no critter"} and {outcome.glow} Glow`
 		elseif status == "InFlight" then `in flight ({reason}); it lands on its own`
@@ -816,6 +821,7 @@ local function denClosed(ownerUserId: number, ownerProfile: PlayerProfile): bool
 	local now = os.time()
 	local loss = lastLoss[ownerUserId]
 	return RaidRules.liveProtected(ownerProfile, now)
+		or RaidRules.newPlayerShielded(ownerProfile, now)
 		or (loss ~= nil and now < RaidRules.liveGrabReadyAt(loss.at))
 		or (inFlight(ownerUserId, 0)) > 0
 end
@@ -873,6 +879,7 @@ local function describe(): string
 		lockCount += 1
 	end
 	table.insert(parts, `{lockCount} critter lock(s)`)
+	table.insert(parts, TutorialDen.describe())
 	if lastEscape then
 		table.insert(parts, `last escape: {lastEscape}`)
 	end
@@ -965,6 +972,17 @@ function RaidService.start()
 			end
 		end
 	)
+	-- The guided first steal (P2.6r). A throw here must never stop raids.
+	local tutorialStarted, tutorialError = pcall(TutorialDen.start, {
+		rootOf = rootOf,
+		busy = function(player: Player): boolean
+			return carries[player] ~= nil or AsyncRaid.isRaiding(player)
+		end,
+		raidEnded = raidEnded,
+	})
+	if not tutorialStarted then
+		warn(`[RaidService] tutorial den failed to start (raids go on): {tutorialError}`)
+	end
 	-- GetReplay; AsyncRaid records and saves (P1.4b). A throw here must never stop async raids.
 	local replayStarted, replayError = pcall(ReplayStore.start, remotes :: Folder)
 	if not replayStarted then
