@@ -84,24 +84,114 @@ local function nextOdds(rescue: boolean): ({ { tier: string, chance: number } },
 	return tiers, HudMath.percentLabels(chances)
 end
 
-local function oddsPanelText(tiers: { { tier: string, chance: number } }, labels: { string }, rescue: boolean): string
-	local lines = { if rescue then Strings.oddsRescue else Strings.oddsEqual }
-	for i, t in tiers do
-		table.insert(lines, "")
-		table.insert(lines, `<b>{t.tier}  {labels[i]}</b>`)
-		local species = Economy.speciesOdds(t.tier)
-		if #species > 0 then
-			local names = {}
-			for _, sp in species do
-				local info = CritterCatalog.get(sp.speciesId)
-				table.insert(names, if info then info.name else "?")
-			end
-			local each = HudMath.eachLabel(#species)
-			table.insert(lines, table.concat(names, ", "))
-			table.insert(lines, Strings.format(Strings.oddsEach, { pct = each }))
+-- One odds row: tier tag, Glow/s range, chance; species names under it. Tiers an egg cannot
+-- roll yet are shown dimmed so nothing is a surprise (design: Egg odds).
+local function oddsRow(parent: Instance, order: number, tier: string, rate: string, chance: string?, names: string?)
+	local row = Instance.new("Frame")
+	row.Name = tier
+	row.LayoutOrder = order
+	row.Size = UDim2.fromScale(1, 0)
+	row.Parent = parent
+	row.AutomaticSize = Enum.AutomaticSize.Y
+	row.BackgroundColor3 = if chance then C.panelRaised else C.panelSunken
+	row.BackgroundTransparency = if chance then 0 else 0.45
+	row.BorderSizePixel = 0
+	row.ZIndex = 9
+	Theme.corner(row, Theme.radius.md)
+	Theme.padding(row, Theme.space.s2, Theme.space.s1)
+	local col = Instance.new("UIListLayout")
+	col.SortOrder = Enum.SortOrder.LayoutOrder
+	col.Parent = row
+	local top = Instance.new("Frame")
+	top.BackgroundTransparency = 1
+	top.Size = UDim2.new(1, 0, 0, 26)
+	top.ZIndex = 9
+	top.Parent = row
+	local tag, tagText = Theme.chip(top, "Tag", tier, C.tier[tier] or C.line, C.onAccent)
+	tag.Size = UDim2.new(0, 92, 1, -2)
+	tag.Position = UDim2.fromOffset(0, 1)
+	tag.ZIndex = 9
+	tagText.ZIndex = 10
+	tagText.TextColor3 = C.onAccent
+	local rateText = Theme.bodyText(top, Theme.type.caption, C.inkDim)
+	rateText.Text = rate
+	rateText.TextXAlignment = Enum.TextXAlignment.Left
+	rateText.Size = UDim2.new(1, -170, 1, 0)
+	rateText.Position = UDim2.fromOffset(100, 0)
+	rateText.ZIndex = 10
+	local pct = Theme.text(top, Theme.type.numberSm, if chance then C.ink else C.inkMute)
+	pct.Text = chance or Strings.oddsNotInEggs
+	pct.Font = if chance then DISPLAY_FONT else BODY_FONT
+	pct.TextXAlignment = Enum.TextXAlignment.Right
+	pct.Size = UDim2.new(0, 70, 1, 0)
+	pct.Position = UDim2.new(1, -70, 0, 0)
+	pct.ZIndex = 10
+	if names then
+		local n = Theme.bodyText(row, Theme.type.caption, C.inkDim)
+		n.TextScaled = false
+		n.TextSize = Theme.type.caption
+		n.TextWrapped = true
+		n.TextXAlignment = Enum.TextXAlignment.Left
+		n.Size = UDim2.fromScale(1, 0)
+		n.AutomaticSize = Enum.AutomaticSize.Y
+		n.Text = names
+		n.ZIndex = 10
+		n.LayoutOrder = 2
+	end
+end
+
+local function fillOdds(body: Frame, tiers: { { tier: string, chance: number } }, labels: { string }, rescue: boolean)
+	for _, child in body:GetChildren() do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
 		end
 	end
-	return table.concat(lines, "\n")
+	local note = Theme.bodyText(body, Theme.type.caption, C.inkDim)
+	note.TextScaled = false
+	note.TextSize = Theme.type.caption
+	note.TextWrapped = true
+	note.TextXAlignment = Enum.TextXAlignment.Left
+	note.Size = UDim2.fromScale(1, 0)
+	note.AutomaticSize = Enum.AutomaticSize.Y
+	note.Text = if rescue then Strings.oddsRescue else Strings.oddsEqual
+	note.ZIndex = 9
+	local live: { [string]: boolean } = {}
+	for i, t in tiers do
+		live[t.tier] = true
+		local species = Economy.speciesOdds(t.tier)
+		local names = {}
+		for _, sp in species do
+			local info = CritterCatalog.get(sp.speciesId)
+			table.insert(names, if info then info.name else "?")
+		end
+		local each = if #species > 0
+			then `{table.concat(names, ", ")} ({Strings.format(Strings.oddsEach, { pct = HudMath.eachLabel(#species) })})`
+			else nil
+		local range = CritterCatalog.TIER_GLOW_RANGE[t.tier]
+		oddsRow(
+			body,
+			i,
+			t.tier,
+			Strings.format(Strings.oddsGlowRate, { lo = tostring(range[1]), hi = tostring(range[2]) }),
+			labels[i],
+			each
+		)
+	end
+	local order = #tiers
+	for _, tier in CritterCatalog.TIER_ORDER do
+		if tier ~= "Secret" and not live[tier] then
+			order += 1
+			local range = CritterCatalog.TIER_GLOW_RANGE[tier]
+			oddsRow(
+				body,
+				order,
+				tier,
+				Strings.format(Strings.oddsGlowRate, { lo = tostring(range[1]), hi = tostring(range[2]) }),
+				nil,
+				nil
+			)
+		end
+	end
 end
 
 local function setSub(b: TextButton, text: string)
@@ -319,7 +409,7 @@ local function build(): { [string]: any }
 	oddsChip.LayoutOrder = 2
 	oddsChip.Size = UDim2.fromScale(1, 0)
 	oddsChip.AutomaticSize = Enum.AutomaticSize.Y
-	oddsChip.BackgroundColor3 = COLOR.panel
+	oddsChip.BackgroundColor3 = C.panelRaised
 	oddsChip.AutoButtonColor = false
 	oddsChip.Font = BODY_FONT
 	oddsChip.TextSize = 14
@@ -329,6 +419,7 @@ local function build(): { [string]: any }
 	oddsChip.Text = ""
 	round(oddsChip, Theme.radius.md)
 	outline(oddsChip, Theme.stroke.thin)
+	Theme.gradient(oddsChip, 0.08)
 	local chipPad = Instance.new("UIPadding")
 	chipPad.PaddingTop = UDim.new(0, 6)
 	chipPad.PaddingBottom = UDim.new(0, 6)
@@ -341,53 +432,68 @@ local function build(): { [string]: any }
 		compact = applyLayout()
 	end)
 
-	-- Odds panel: centered, scrolls, 48 px close button. Hidden until the chip is tapped.
-	local oddsPanel = panel(gui, "OddsPanel", UDim2.new(0, 300, 0.8, 0), UDim2.fromScale(0.5, 0.5))
+	-- Odds panel: centered popup (gold accent, ribbon-less), scrolls, 48 px close button.
+	local oddsPanel = panel(gui, "OddsPanel", UDim2.new(0, 340, 0.86, 0), UDim2.fromScale(0.5, 0.5))
 	oddsPanel.AnchorPoint = Vector2.new(0.5, 0.5)
 	oddsPanel.Visible = false
 	oddsPanel.ZIndex = 8
-	local oddsTitle = label(oddsPanel, DISPLAY_FONT, 24)
-	oddsTitle.Size = UDim2.new(1, -16, 0, 34)
-	oddsTitle.Position = UDim2.fromOffset(8, 6)
+	local oddsRim = oddsPanel:FindFirstChildOfClass("UIStroke")
+	if oddsRim then
+		oddsRim.Thickness = Theme.stroke.heavy
+	end
+	local oddsCorner = oddsPanel:FindFirstChildOfClass("UICorner")
+	if oddsCorner then
+		oddsCorner.CornerRadius = UDim.new(0, Theme.radius.xl2)
+	end
+	local oddsAccent = Instance.new("Frame")
+	oddsAccent.Name = "AccentBar"
+	oddsAccent.Size = UDim2.new(1, 0, 0, 6)
+	oddsAccent.BackgroundColor3 = C.gold
+	oddsAccent.BorderSizePixel = 0
+	oddsAccent.ZIndex = 9
+	oddsAccent.Parent = oddsPanel
+	local oddsTitle = label(oddsPanel, DISPLAY_FONT, Theme.type.title)
+	oddsTitle.Size = UDim2.new(1, -16, 0, 30)
+	oddsTitle.Position = UDim2.fromOffset(8, 12)
+	oddsTitle.TextXAlignment = Enum.TextXAlignment.Left
 	oddsTitle.Text = Strings.oddsTitle
 	oddsTitle.ZIndex = 9
+	local oddsSub = Theme.bodyText(oddsPanel, Theme.type.label, C.inkDim)
+	oddsSub.Size = UDim2.new(1, -16, 0, 18)
+	oddsSub.Position = UDim2.fromOffset(8, 42)
+	oddsSub.TextXAlignment = Enum.TextXAlignment.Left
+	oddsSub.Text = Strings.oddsSub
+	oddsSub.ZIndex = 9
 	local oddsScroll = Instance.new("ScrollingFrame")
 	oddsScroll.BackgroundTransparency = 1
 	oddsScroll.BorderSizePixel = 0
-	oddsScroll.Size = UDim2.new(1, -16, 1, -108)
-	oddsScroll.Position = UDim2.fromOffset(8, 44)
+	oddsScroll.Size = UDim2.new(1, -16, 1, -134)
+	oddsScroll.Position = UDim2.fromOffset(8, 66)
 	oddsScroll.CanvasSize = UDim2.new()
 	oddsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	oddsScroll.ScrollBarThickness = 6
 	oddsScroll.ZIndex = 9
 	oddsScroll.Parent = oddsPanel
-	local oddsBody = Instance.new("TextLabel")
+	local oddsBody = Instance.new("Frame")
+	oddsBody.Name = "OddsBody"
 	oddsBody.BackgroundTransparency = 1
 	oddsBody.Size = UDim2.new(1, -8, 0, 0)
 	oddsBody.AutomaticSize = Enum.AutomaticSize.Y
-	oddsBody.Font = BODY_FONT
-	oddsBody.TextSize = 16
-	oddsBody.TextColor3 = COLOR.text
-	oddsBody.TextXAlignment = Enum.TextXAlignment.Left
-	oddsBody.TextYAlignment = Enum.TextYAlignment.Top
-	oddsBody.TextWrapped = true
-	oddsBody.RichText = true
 	oddsBody.ZIndex = 9
 	oddsBody.Parent = oddsScroll
-	local oddsClose = Instance.new("TextButton")
-	oddsClose.Name = "Close"
+	local oddsList = Instance.new("UIListLayout")
+	oddsList.SortOrder = Enum.SortOrder.LayoutOrder
+	oddsList.Padding = UDim.new(0, Theme.space.s1)
+	oddsList.Parent = oddsBody
+	local oddsClose = Theme.button(oddsPanel, "Close", Strings.oddsClose, C.gold, UDim2.new(1, -16, 0, 48))
 	oddsClose.AnchorPoint = Vector2.new(0.5, 1)
-	oddsClose.Size = UDim2.new(1, -16, 0, 48)
 	oddsClose.Position = UDim2.new(0.5, 0, 1, -8)
-	oddsClose.BackgroundColor3 = COLOR.buy
-	oddsClose.Font = DISPLAY_FONT
-	oddsClose.TextSize = 22
-	oddsClose.TextColor3 = C.onAccent
-	oddsClose.Text = Strings.oddsClose
 	oddsClose.ZIndex = 9
-	round(oddsClose, Theme.radius.lg)
-	outline(oddsClose, Theme.stroke.normal)
-	oddsClose.Parent = oddsPanel
+	for _, d in oddsClose:GetDescendants() do
+		if d:IsA("GuiObject") then
+			d.ZIndex = 10
+		end
+	end
 
 	return {
 		hotbar = if DESKTOP then buildHotbar(gui) else {},
@@ -495,8 +601,12 @@ function HudController.start()
 	ui.collect.Activated:Connect(function()
 		request(Net.Requests.Collect, busy)
 	end)
+	local lastFree = false -- set by refresh; picks the hatch popup ribbon
+	local showHatch: (critter: any) -> () = function() end
 	ui.buy.Activated:Connect(function()
-		request(Net.Requests.BuyEgg, busy)
+		request(Net.Requests.BuyEgg, busy, function(result)
+			showHatch(result)
+		end)
 	end)
 	ui.oddsChip.Activated:Connect(function()
 		ui.oddsPanel.Visible = not ui.oddsPanel.Visible
@@ -520,6 +630,66 @@ function HudController.start()
 				ui.toast.Visible = false
 			end
 		end)
+	end
+
+	-- Hatch moment (design: First hatch). Shown from the server's answer only; it never decides
+	-- anything. Tier-coloured critter blob, name, tier tag, income pill, one big button.
+	do
+		local hatchGui = Ui.screenGui("HatchPopup", 9, player:WaitForChild("PlayerGui"))
+		local scrim = Theme.scrim(hatchGui, "Scrim")
+		scrim.Visible = false
+		scrim.Active = true
+		local pop = Theme.panel(scrim, "Popup", UDim2.fromOffset(320, 300), UDim2.fromScale(0.5, 0.5))
+		pop.AnchorPoint = Vector2.new(0.5, 0.5)
+		local ribbon, ribbonText = Theme.chip(pop, "Ribbon", Strings.freeEggRibbon, C.gold, C.onAccent)
+		ribbon.AnchorPoint = Vector2.new(0.5, 0.5)
+		ribbon.Position = UDim2.new(0.5, 0, 0, 0)
+		ribbon.Size = UDim2.fromOffset(220, 28)
+		ribbonText.Font = DISPLAY_FONT
+		local blob = Instance.new("Frame")
+		blob.Name = "Critter"
+		blob.AnchorPoint = Vector2.new(0.5, 0)
+		blob.Position = UDim2.new(0.5, 0, 0, 24)
+		blob.Size = UDim2.fromOffset(84, 84)
+		blob.BorderSizePixel = 0
+		Theme.corner(blob, Theme.radius.full)
+		Theme.outline(blob, Theme.stroke.heavy)
+		Theme.gradient(blob, 0.2)
+		blob.Parent = pop
+		local tag, tagText = Theme.chip(pop, "Tier", "", C.tier.Common, C.onAccent)
+		tag.AnchorPoint = Vector2.new(0.5, 0)
+		tag.Position = UDim2.new(0.5, 0, 0, 118)
+		tag.Size = UDim2.fromOffset(100, 24)
+		tagText.TextColor3 = C.onAccent
+		local title = Theme.text(pop, Theme.type.title, C.ink)
+		title.Position = UDim2.fromOffset(8, 148)
+		title.Size = UDim2.new(1, -16, 0, 34)
+		local rate = Theme.chip(pop, "Rate", "", C.panelRaised, C.ink)
+		rate.AnchorPoint = Vector2.new(0.5, 0)
+		rate.Position = UDim2.new(0.5, 0, 0, 190)
+		rate.Size = UDim2.fromOffset(140, 26)
+		local rateLabel = rate:FindFirstChild("Text") :: TextLabel
+		local place = Theme.button(pop, "Place", Strings.hatchPlace, C.gold, UDim2.new(1, -32, 0, 56))
+		place.AnchorPoint = Vector2.new(0.5, 1)
+		place.Position = UDim2.new(0.5, 0, 1, -16)
+		place.Activated:Connect(function()
+			scrim.Visible = false
+		end)
+		showHatch = function(critter)
+			local species = if type(critter) == "table" then CritterCatalog.get(critter.speciesId) else nil
+			if not species then
+				return
+			end
+			local color = C.tier[species.tier] or C.tier.Common
+			blob.BackgroundColor3 = color
+			tag.BackgroundColor3 = color
+			tagText.Text = Theme.upper(species.tier)
+			title.Text = Strings.format(Strings.hatchedTitle, { name = species.name })
+			rateLabel.Text = Strings.format(Strings.hatchRate, { n = tostring(species.glowPerSecond) })
+			ribbon.Visible = lastFree
+			scrim.Visible = true
+			Ui.pop(pop)
+		end
 	end
 
 	-- No optimistic state: the result only picks a toast; the button follows the den attributes.
@@ -654,6 +824,7 @@ function HudController.start()
 			end
 
 			-- Egg odds for THIS egg: compact tier lines always visible, species in the panel.
+			lastFree = free
 			local tiers, labels = nextOdds(free)
 			local isCompact = ui.isCompact()
 			local chipText
@@ -674,7 +845,7 @@ function HudController.start()
 			if chipText ~= ui.oddsChipText then
 				ui.oddsChipText = chipText
 				ui.oddsChip.Text = chipText
-				ui.oddsBody.Text = oddsPanelText(tiers, labels, free)
+				fillOdds(ui.oddsBody, tiers, labels, free)
 			end
 		end
 
