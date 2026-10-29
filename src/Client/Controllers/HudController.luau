@@ -138,10 +138,7 @@ local function oddsPanelText(tiers: { { tier: string, chance: number } }, labels
 				local info = CritterCatalog.get(sp.speciesId)
 				table.insert(names, if info then info.name else "?")
 			end
-			local each = HudMath.percentLabels({ 1 })[1]
-			if #species > 1 then
-				each = HudMath.percentLabels(table.create(#species, 1 / #species))[1]
-			end
+			local each = HudMath.eachLabel(#species)
 			table.insert(lines, table.concat(names, ", "))
 			table.insert(lines, Strings.format(Strings.oddsEach, { pct = each }))
 		end
@@ -221,7 +218,7 @@ local function build(): { [string]: any }
 	local column = Instance.new("Frame")
 	column.Name = "Actions"
 	column.AnchorPoint = Vector2.new(1, 1)
-	column.Position = UDim2.new(1, -12, 1, -150)
+	column.Position = UDim2.new(1, -12, 1, -HudMath.columnLayout(math.huge).reserve)
 	column.Size = UDim2.fromOffset(130, 0)
 	column.AutomaticSize = Enum.AutomaticSize.Y
 	column.BackgroundTransparency = 1
@@ -231,6 +228,37 @@ local function build(): { [string]: any }
 	list.VerticalAlignment = Enum.VerticalAlignment.Bottom
 	list.Padding = UDim.new(0, 8)
 	list.Parent = column
+
+	-- Re-fit on size changes (#54): full layout on tall screens, compact on phone landscape.
+	local function applyLayout()
+		local layout = HudMath.columnLayout(gui.AbsoluteSize.Y)
+		column.Position = UDim2.new(1, -12, 1, -layout.reserve)
+		list.Padding = UDim.new(0, layout.gap)
+		for _, child in column:GetChildren() do
+			if child:IsA("TextButton") then
+				if child.Name == "OddsChip" then
+					if layout.compact then
+						child.AutomaticSize = Enum.AutomaticSize.None
+						child.Size = UDim2.new(1, 0, 0, layout.chip)
+					else
+						child.AutomaticSize = Enum.AutomaticSize.Y
+						child.Size = UDim2.fromScale(1, 0)
+					end
+					local pad = child:FindFirstChildOfClass("UIPadding")
+					if pad then
+						local px = if layout.compact then 3 else 6
+						pad.PaddingTop = UDim.new(0, px)
+						pad.PaddingBottom = UDim.new(0, px)
+					end
+					child.TextSize = if layout.compact then 12 else 14
+					child.TextTruncate = if layout.compact then Enum.TextTruncate.AtEnd else Enum.TextTruncate.None
+				else
+					child.Size = UDim2.new(1, 0, 0, layout.button)
+				end
+			end
+		end
+		return layout.compact
+	end
 
 	local collect, collectTitle, collectSub = makeButton(column, "Collect", 4, COLOR.collect)
 	local buy, buyTitle, buySub = makeButton(column, "BuyEgg", 3, COLOR.buy)
@@ -260,6 +288,10 @@ local function build(): { [string]: any }
 	chipPad.PaddingRight = UDim.new(0, 6)
 	chipPad.Parent = oddsChip
 	oddsChip.Parent = column
+	local compact = applyLayout()
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		compact = applyLayout()
+	end)
 
 	-- Odds panel: centered, scrolls, 48 px close button. Hidden until the chip is tapped.
 	local oddsPanel = panel(gui, "OddsPanel", UDim2.new(0, 300, 0.8, 0), UDim2.fromScale(0.5, 0.5))
@@ -328,6 +360,9 @@ local function build(): { [string]: any }
 		lockTitle = lockTitle,
 		lockSub = lockSub,
 		oddsChip = oddsChip,
+		isCompact = function()
+			return compact
+		end,
 		oddsPanel = oddsPanel,
 		oddsBody = oddsBody,
 		oddsClose = oddsClose,
@@ -504,11 +539,22 @@ function HudController.start()
 
 			-- Egg odds for THIS egg: compact tier lines always visible, species in the panel.
 			local tiers, labels = nextOdds(free)
-			local chipLines = { `<b>{Strings.odds}</b>` }
-			for i, t in tiers do
-				table.insert(chipLines, `{t.tier} {labels[i]}`)
+			local isCompact = ui.isCompact()
+			local chipText
+			if isCompact then
+				-- One short line (wraps to two at 130 px): "Odds: C 68.75% · U 31.25%".
+				local parts = {}
+				for i, t in tiers do
+					table.insert(parts, `{string.sub(t.tier, 1, 1)} {labels[i]}`)
+				end
+				chipText = `<b>{Strings.odds}:</b> ` .. table.concat(parts, " · ")
+			else
+				local chipLines = { `<b>{Strings.odds}</b>` }
+				for i, t in tiers do
+					table.insert(chipLines, `{t.tier} {labels[i]}`)
+				end
+				chipText = table.concat(chipLines, "\n")
 			end
-			local chipText = table.concat(chipLines, "\n")
 			if chipText ~= ui.oddsChipText then
 				ui.oddsChipText = chipText
 				ui.oddsChip.Text = chipText

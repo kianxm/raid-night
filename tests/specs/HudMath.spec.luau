@@ -39,6 +39,36 @@ tests["labels sum to 100 for every cap"] = function()
 	expect.near(sum(HudMath.percentLabels({ 1 / 3, 1 / 3, 1 / 3 })), 100, 1e-6, "thirds")
 end
 
+tests["each label shows the true rounded value (#55)"] = function()
+	expect.eq(HudMath.eachLabel(9), "11.11%", "nine")
+	expect.eq(HudMath.eachLabel(10), "10%", "ten")
+	expect.eq(HudMath.eachLabel(3), "33.33%", "three")
+	expect.eq(HudMath.eachLabel(1), "100%", "one")
+end
+
+tests["actions column fits phone landscape and portrait (#54)"] = function()
+	-- 852x393 landscape minus 36 px top bar = 357 usable.
+	local land = HudMath.columnLayout(357)
+	expect.eq(land.name, "compact", "landscape layout")
+	expect.eq(HudMath.columnHeight(land), 192, "landscape column height")
+	expect.eq(HudMath.columnTop(357, land), 45, "landscape top")
+	expect.truthy(HudMath.columnTop(357, land) >= HudMath.COLUMN_TOP_MARGIN, "clear of top bar")
+	-- Portrait (~393x852, ~760 usable) and default Studio (854) get the roomy layout.
+	for _, h in { 760, 854 } do
+		local layout = HudMath.columnLayout(h)
+		expect.eq(layout.name, "full", `full at {h}`)
+		expect.eq(HudMath.columnHeight(layout), 252, "full height")
+		expect.truthy(HudMath.columnTop(h, layout) >= HudMath.COLUMN_TOP_MARGIN, `fits at {h}`)
+	end
+	-- Every height from 320 up fits (compact floor needs 320).
+	for h = 320, 900 do
+		local layout = HudMath.columnLayout(h)
+		expect.truthy(HudMath.columnTop(h, layout) >= HudMath.COLUMN_TOP_MARGIN, `fits at {h}`)
+	end
+	-- Buttons stay thumb-sized and text readable.
+	expect.truthy(land.button >= 44, "compact button >= 44")
+end
+
 tests["rescue rule needs no critters and low Glow"] = function()
 	expect.eq(HudMath.isRescue(0, 0, 0, 100), true, "fresh")
 	expect.eq(HudMath.isRescue(1, 0, 0, 100), false, "has critter")
