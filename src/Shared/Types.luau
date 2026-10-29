@@ -188,6 +188,10 @@ export type EscrowRecord = {
 	isRevenge: boolean,
 	createdAt: number,
 	updatedAt: number,
+	-- A unique id (GUID) set by the call that creates the record and never changed, so that call
+	-- recognises its own create when the write landed but the response was lost. Missing on
+	-- records written before it existed; no migration (they are simply never "ours").
+	createNonce: string?,
 }
 
 -- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.
