@@ -32,6 +32,7 @@ Current phase: 0 → 1 (Phase 0 gate approved, follow-ups done, main promoted; P
 | P0.5g | data | — | Done | #64, #65 | 1 | Reviewer APPROVED both. Value-based live protection, postLossSafetySeconds, live pair limit, EscrowRecord.kind, simulation reaches protection 53-65x per seed. 225 tests on integration. Follow-ups: D-033 (data), base-measurement question (Kian) |
 | C4 | data | P0.5g | Done | #73, #74 | 1 | Reviewer APPROVED. D-033, D-034 (`EscrowRecord.liveBaseRate`, transferLive 7th arg), NaN test, contracts.md mirror of #62. P2.8 gate: the factor-1 accrue in EscrowService/Matchmaking must be fixed before `purchases` turns on. Studio-verified (D-033 empty commit, D-034 shrink mid-carry) |
 | P0.5h | raid | P0.5g, C4 | Done | #71 | 1 | Reviewer APPROVED. Base measured at grab-hold accept; source guard pins it; loss time keeps fractional seconds; server hides prompts on closed dens. Studio-verified (single client). 242 tests on integration (f50ab1c) |
+| C5 | data | C4 | In progress | agent/data/C5 | 1 | D-036: liveProtected compares against max(base, current denRate); tests, simulation, contracts.md |
 | P0.5i | ui | — | Done | #70 | 1 | Den marker "Protected today" / "Safe for m:ss", own-den chip, steal prompt hidden while protected. Refusal copy built but no channel to show it (D-035). Cosmetic edge: a prompt the server disabled while protection hid it comes back on when protection ends (server still refuses) |
 
 ## Resume here (for a fresh session)
@@ -67,16 +68,6 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
-
-Not urgent (before Go public; live steals only, async unaffected):
-- Planned self-protection (data on #73): D-034 stops shrinking the den after the alert, not a
-  planned one. The owner moves every earner but one Common to Inventory, has an alt/friend steal
-  it, then puts everything back: protected from live steals for the rest of the UTC day for one
-  Common. Options: (a) base = the den's peak rate earlier that day/session, (b) protection lifts
-  when the den earns more again, (c) losses to friends don't count. Loss-rule change, so yours.
-  Reviewer adds a no-alt variant: after a dropped carry (BeingRaidedLive already fired) the owner
-  moves earners off and the next grab measures the shrunk den. Reviewer recommends (b): compare
-  protection against max(base, current denRate), which closes every variant.
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
