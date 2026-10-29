@@ -109,7 +109,7 @@ end
 
 function Lockdown.blocks(player: Player, plot: number): boolean
 	local ownerUserId, lockdown = stateOf(plot)
-	-- isRevenge is false: Phase 0 has no live revenge, and it would not bypass anyway (D-013).
+	-- isRevenge is false: a live revenge (P1.9b) never bypasses a Lockdown (D-013).
 	return RaidRules.entryBlocked(lockdown, now(), ownerUserId == player.UserId, false, lastPlot[player] == plot, true)
 end
 
