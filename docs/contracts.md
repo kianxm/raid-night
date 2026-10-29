@@ -28,7 +28,8 @@ Escrow storage: DataStore `EscrowRecords`.
   inside every `UpdateAsync`.
 - `Open_<userId>`: that player's `EscrowOpenIndex` (`{ [raidId]: { role, createdAt } }`), for the
   raider and the defender alike. An entry with no record is removed only once it is older than
-  15 minutes (its create may still be in progress).
+  15 minutes (its create may still be in progress). Re-adding a listed raid (a retry) moves its
+  `createdAt` forward, never back (`Escrow.indexAdd`), so the retry is protected too.
 - In Studio without API access (`DataService.persistence() == "Memory"`) both live in server
   memory, like profiles do.
 
@@ -54,13 +55,27 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 3. Repeating any step changes nothing after the first success.
 4. No defender loses more than `Config.Limits.maxLossesPerDay` critters per UTC day.
 
-Only the call that creates a record debits the defender (`Escrow.advance`). Every later path is
-`Escrow.recover`, which never debits afresh. It runs on either party's load, with the parties
-loaded in that server:
+Only the call that creates a record debits the defender (`Escrow.advance`). That call sets
+`EscrowRecord.createNonce` (a GUID; optional, missing on older records, no migration) so that a
+create which landed but whose response was lost is still recognised as its own on retry
+(`Escrow.decideCreate`) and driven forward instead of voided. The nonce never changes once
+written (`Escrow.canReplace`). Every later path is `Escrow.recover`, which never debits afresh.
+It runs on either party's load, with the parties loaded in that server:
 
-- `Pending`, defender loaded: their saved debit moves the record to `Debited`. No debit means
-  `Voided` (nothing moved).
+- `Pending`, defender loaded: their saved debit moves the record to `Debited`. No debit: first a
+  confirmed save by the session that still holds the defender's lock, without an entry for the
+  raid (`Store.saveProfileWithoutEntry`), then `Voided` (nothing moved). A server whose lock was
+  taken by another server cannot produce that save, so it never voids.
 - `Debited`, raider loaded: credit, then `Committed`.
+
+Retrying `EscrowService.transferLive` (P0.5): call again with IDENTICAL arguments (raidId,
+raider, defender, critterUid, glowRequested, isRevenge). Once a record is stored, the same raidId
+with any other argument returns `Refused` ("raidId already used by a different transfer").
+
+Phase 1 (P1.1, decision D-012): the void rule assumes only the creating call debits. A debit
+delivered by ProfileStore message, or applied to an offline profile, could land after a void and
+strand the loot, and `EscrowRecord` has no `kind` field to tell live from async. Both must be
+solved before any async transport ships.
 
 `appliedTransfers` entries are pruned after `Config.Escrow.appliedTransferRetentionSeconds`, but
 only by EscrowService after reading the player's `Open_` index, and never for a raidId still
