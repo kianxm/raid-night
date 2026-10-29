@@ -198,6 +198,10 @@ Net.Requests = table.freeze({
 	-- (gearId) -> boolean. Buy (level 0 -> 1) or upgrade one gear item with Glow. Not served yet:
 	-- economy owns the Glow spend (handoff, P2.10); clients must not call it until it ships.
 	UpgradeGear = "UpgradeGear",
+	-- RemoteEvent: ({ shown: boolean, accepted: boolean }). After the client tried
+	-- ExperienceNotificationService:PromptOptIn for a PromptNotificationOptIn push. Accepted only
+	-- once per push (one pending prompt per player); the 30-day clock starts only when shown = true.
+	ReportOptInResult = "ReportOptInResult",
 })
 
 -- Server -> client pushes (RemoteEvents).
@@ -212,6 +216,9 @@ Net.Pushes = table.freeze({
 	OnboardingChanged = "OnboardingChanged",
 	-- (GearEvent) gear effects: to every player for the shared world, to the raider for a pocket
 	GearUsed = "GearUsed",
+	-- () a player's first successful raid landed and the server wants the opt-in prompt shown. The
+	-- client checks CanPromptOptInAsync, calls PromptOptIn, then answers with ReportOptInResult.
+	PromptNotificationOptIn = "PromptNotificationOptIn",
 })
 
 -- Max requests per player per 10 seconds, enforced server-side.
@@ -232,6 +239,7 @@ Net.Limits = table.freeze({
 	UseGear = 6,
 	GetGear = 5,
 	UpgradeGear = 5,
+	ReportOptInResult = 3,
 })
 
 --[[

@@ -33,10 +33,13 @@
 	                                      screen must still verify the revenge token for it.
 
 	Opt-in prompt: ExperienceNotificationService:PromptOptIn is client-only. The server decides
-	when (state + rules) and tells the client through `setPromptOptInHook` (a function the ui /
-	net owner wires to a RemoteEvent; no new remote is added here, Net.luau is a contract). Until
-	a hook is set the decision is made and logged but nothing is shown and the 30-day clock does
-	not start.
+	when (state + rules) and pushes Net.Pushes.PromptNotificationOptIn (no payload) to that player;
+	one prompt may be pending per player. The client checks CanPromptOptInAsync, prompts, then
+	sends Net.Requests.ReportOptInResult ({ shown, accepted }). The server accepts it only while a
+	prompt is pending (cleared on use or leave), validates the types
+	(Rules.cleanOptInReport) and rate-limits it (Net.Limits.ReportOptInResult). promptedAt (the
+	30-day clock) is saved only when shown = true. optin_prompted is tracked at the push,
+	optin_result when the client reports shown = true.
 
 	Persistence: its own DataStore ("NotificationState_v1", one small record per user, written
 	with UpdateAsync) so it works for offline defenders without touching another player's
@@ -53,6 +56,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Net = require(Shared:WaitForChild("Net")) :: any
+local RateLimit = require(Shared:WaitForChild("RateLimit")) :: any
 local Config = require(Shared:WaitForChild("Config")) :: any
 local Rules = require(Shared:WaitForChild("NotificationRules")) :: any
 local AnalyticsService = require(script.Parent:WaitForChild("AnalyticsService")) :: any
@@ -80,7 +85,9 @@ local NotificationService = {}
 local store: DataStore? = nil
 local cache: { [number]: Rules.State } = {}
 local busy: { [number]: boolean } = {} -- one in-flight decision per user; drops overlaps
-local promptOptInHook: ((player: Player) -> ())? = nil
+local promptEvent: RemoteEvent? = nil
+local pendingPrompt: { [number]: boolean } = {} -- pushed, not yet answered
+local reportLimits: { [number]: any } = {} -- RateLimit state per user
 
 local function enabled(): boolean
 	return Config.Flags.notifications == true
@@ -398,11 +405,6 @@ function NotificationService.onStorageSample(userId: number, stored: number, cap
 	end)
 end
 
--- Wired by the ui / net owner: show ExperienceNotificationService:PromptOptIn on this client.
-function NotificationService.setPromptOptInHook(hook: (player: Player) -> ())
-	promptOptInHook = hook
-end
-
 function NotificationService.onSuccessfulRaid(player: Player, successfulRaids: number)
 	if not enabled() then
 		return
@@ -416,18 +418,57 @@ function NotificationService.onSuccessfulRaid(player: Player, successfulRaids: n
 		if not Rules.shouldPromptOptIn(state, successfulRaids, now, true) then
 			return
 		end
-		local hook = promptOptInHook
-		if not hook then
-			warn("[Notifications] opt-in prompt due but no hook is set")
+		local event = promptEvent
+		if not event or pendingPrompt[player.UserId] then
 			return
 		end
-		hook(player)
-		saveState(player.UserId, Rules.afterPrompt(state, now))
+		pendingPrompt[player.UserId] = true
+		local ok, err = pcall(function()
+			event:FireClient(player)
+		end)
+		if not ok then
+			pendingPrompt[player.UserId] = nil
+			warn(`[Notifications] opt-in push failed: {err}`)
+			return
+		end
 		track("optin_prompted", { userId = player.UserId })
 	end)
 end
 
--- Called by the client path when PromptOptIn resolves (via the same hook owner), for analytics.
+-- The client's answer to a push. Not saved unless the prompt was actually shown.
+local function onReportOptInResult(player: Player, payload: any)
+	local userId = player.UserId
+	if not enabled() then
+		return
+	end
+	local state = reportLimits[userId]
+	if not state then
+		state = {}
+		reportLimits[userId] = state
+	end
+	if not RateLimit.take(state, "ReportOptInResult", Net.Limits.ReportOptInResult, os.clock()) then
+		return
+	end
+	if not pendingPrompt[userId] then
+		return -- nothing was pushed to this player
+	end
+	local report = Rules.cleanOptInReport(payload)
+	if not report then
+		return -- malformed: the prompt stays pending
+	end
+	pendingPrompt[userId] = nil
+	if not report.shown then
+		return -- never reached the player (can't prompt, dismissed early): no clock, no event
+	end
+	NotificationService.recordOptInResult(player, report.accepted)
+	task.spawn(withLock, userId, function()
+		local current = loadState(userId)
+		if current then
+			saveState(userId, Rules.afterPrompt(current, os.time()))
+		end
+	end)
+end
+
 function NotificationService.recordOptInResult(player: Player, accepted: boolean)
 	track("optin_result", { userId = player.UserId, accepted = accepted })
 end
@@ -446,7 +487,30 @@ function NotificationService.launchRaidId(player: Player): string?
 	return raidId
 end
 
+local function installRemotes()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	if not remotes then
+		remotes = Instance.new("Folder")
+		remotes.Name = "Remotes"
+		remotes.Parent = ReplicatedStorage
+	end
+	local push = Instance.new("RemoteEvent")
+	push.Name = Net.Pushes.PromptNotificationOptIn
+	push.Parent = remotes
+	promptEvent = push
+	local report = Instance.new("RemoteEvent")
+	report.Name = Net.Requests.ReportOptInResult
+	report.OnServerEvent:Connect(function(player: Player, payload: any)
+		local ok, err = pcall(onReportOptInResult, player, payload)
+		if not ok then
+			warn(`[Notifications] ReportOptInResult failed: {err}`)
+		end
+	end)
+	report.Parent = remotes
+end
+
 function NotificationService.start()
+	installRemotes() -- created even when the flag is off, so clients can WaitForChild safely
 	if not enabled() then
 		return
 	end
@@ -460,6 +524,8 @@ function NotificationService.start()
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		cache[player.UserId] = nil
+		pendingPrompt[player.UserId] = nil
+		reportLimits[player.UserId] = nil
 	end)
 end
 

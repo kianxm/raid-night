@@ -126,4 +126,34 @@ tests["noteRaid dedupes a raidId, stays bounded, and state transitions keep the 
 	expect.eq(Rules.afterPrompt(state, NOW).seenRaids, list)
 end
 
+tests["cleanOptInReport accepts two booleans and nothing else"] = function()
+	local ok = Rules.cleanOptInReport({ shown = true, accepted = false, extra = 1 })
+	expect.truthy(ok)
+	expect.eq((ok :: any).shown, true)
+	expect.eq((ok :: any).accepted, false)
+	expect.truthy(Rules.cleanOptInReport({ shown = false, accepted = false }))
+	expect.eq(Rules.cleanOptInReport({ shown = false, accepted = true }), nil, "accepted needs shown")
+	expect.eq(Rules.cleanOptInReport({ shown = true }), nil, "missing field")
+	expect.eq(Rules.cleanOptInReport({ shown = "true", accepted = false }), nil, "string")
+	expect.eq(Rules.cleanOptInReport(true), nil)
+	expect.eq(Rules.cleanOptInReport(nil), nil)
+end
+
+tests["opt-in remotes are named and limited in Net"] = function()
+	local Net = require("../../src/Shared/Net")
+	expect.eq(Net.Pushes.PromptNotificationOptIn, "PromptNotificationOptIn")
+	expect.eq(Net.Requests.ReportOptInResult, "ReportOptInResult")
+	expect.eq(Net.Limits.ReportOptInResult, 3)
+end
+
+tests["NotificationService saves promptedAt only from a shown report"] = function()
+	local source = require("../lib/source")
+	local code = source.codeOnly(source.read("src/Server/Services/NotificationService.luau"))
+	-- The only afterPrompt call sits after the shown check in the report handler.
+	expect.eq(select(2, string.gsub(code, "Rules%.afterPrompt", "")), 1)
+	local shownAt = string.find(code, "not report.shown", 1, true)
+	local saveAt = string.find(code, "Rules.afterPrompt", 1, true)
+	expect.truthy(shownAt and saveAt and shownAt < saveAt)
+end
+
 return tests
