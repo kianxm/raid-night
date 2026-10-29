@@ -111,7 +111,11 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 `tests/specs/EscrowSimulation.spec.luau`:
 
 1. A critter uid exists in exactly one place: one profile, or in flight for one raid.
-2. Glow is conserved.
+2. Glow is conserved. A Live debit takes up to `glowRequested` from `stored`. An Async debit
+   (P1.1) takes the raid's share (`RaidRules.lootGlow`'s share, revenge bonus included) of
+   `stored` as it is at the debit, which the server accrues to the debit first (Money model):
+   the record's `glowRequested` (the snapshot's figure) is only the estimate the raid showed.
+   Neither ever takes more than is stored, and the raider is credited exactly what was debited.
 3. Repeating any step changes nothing after the first success.
 4. Daily loss limits hold at the debit, by the record's `kind` (decision D-031):
    - Live: a live debit takes a critter that is still on its pad exactly when the den is not
@@ -151,18 +155,26 @@ floor of the protection line (D-037; Live loss rules, below).
 - **Missing means no grab-time measurement:** records written before the field existed, and
   Async records. The debit then measures the den itself, as it did before D-034. No migration.
 
-Only the call that creates a record, and its same-server retries while the server awaits them
-(kept `createNonce`), debits the defender (`Escrow.advance`). That call sets
+Only the call that creates a Live record, and its same-server retries while the server awaits
+them (kept `createNonce`), debits the defender (`Escrow.advance`). That call sets
 `EscrowRecord.createNonce` (a GUID; optional, missing on older records, no migration) so that a
 create which landed but whose response was lost is still recognised as its own on retry
 (`Escrow.decideCreate`) and driven forward instead of voided. The nonce never changes once
-written (`Escrow.canReplace`). Every later path is `Escrow.recover`, which never debits afresh.
-It runs on either party's load, with the parties loaded in that server:
+written (`Escrow.canReplace`). Every later path is `Escrow.recover`, which never debits a Live
+record afresh. It runs on either party's load, with the parties loaded in that server:
 
-- `Pending`, defender loaded: their saved debit moves the record to `Debited`. No debit: first a
-  confirmed save by the session that still holds the defender's lock, without an entry for the
-  raid (`Store.saveProfileWithoutEntry`), then `Voided` (nothing moved). A server whose lock was
-  taken by another server cannot produce that save, so it never voids.
+- Live `Pending`, defender loaded: their saved debit moves the record to `Debited`. No debit:
+  first a confirmed save by the session that still holds the defender's lock, without an entry
+  for the raid (`Store.saveProfileWithoutEntry`), then `Voided` (nothing moved). A server whose
+  lock was taken by another server cannot produce that save, so it never voids.
+- Async `Pending` (P1.1): never voided. Any path, from any server, as often as it runs, delivers
+  the debit: with the defender loaded there, debit and save their profile; otherwise
+  `Store.debitAbsent` (optional in `Escrow.Store`, required for Async records), which writes the
+  debit to the defender's saved profile in one atomic write that lands only while no server
+  holds it and returns the saved entry, or, when a server holds it, asks that server by message
+  and returns nil (that server's recovery delivers it). Then `Debited` as above.
+  `Escrow.debitDefender` is idempotent by raidId, so a debit delivered twice, late, or by two
+  servers lands once, and its daily loss rule is judged where it lands.
 - `Debited`, raider loaded: credit, then `Committed`.
 
 Retrying `EscrowService.transferLive` (P0.5): call again with IDENTICAL arguments (raidId,
@@ -173,10 +185,11 @@ the server still waits on a retry of the raid (an earlier call returned `InFligh
 reuses that call's `createNonce`. So a create that landed but lost its response is still the
 call's own, and the steal continues (`Escrow.advance`) instead of being voided.
 
-Phase 1 (P1.1, decision D-012): the void rule assumes only the creating call debits. A debit
-delivered by ProfileStore message, or applied to an offline profile, could land after a void and
-strand the loot. This must be solved before any async transport ships. Recovery can now tell
-live from async by `EscrowRecord.kind` (D-031).
+Decision D-012's race (a debit by message, or to an offline profile, landing after a void) is
+closed by the Async rule above: no Async record is ever voided, so a late debit has no void to
+race. Live records keep the void, and only their creating call debits them. Cancelling an async
+raid after its record exists would need a void that a later debit must refuse (a tombstone
+written inside the void proof save); nothing does that today.
 
 `appliedTransfers` entries are pruned after `Config.Escrow.appliedTransferRetentionSeconds`, but
 only by EscrowService after reading the player's `Open_` index, and never for a raidId still
@@ -263,7 +276,7 @@ The last three are Kian's launch values, tuned in Phase 3 from live data (P3.9).
 ## Live loss rules
 
 Live steals only (D-031, amended by D-034, D-036, D-037). They replace the daily count cap for
-live steals; async raids keep `Config.Limits.maxLossesPerDay` until Phase 1. `lossesToday` still
+live steals; async raids keep `Config.Limits.maxLossesPerDay` (D-031). `lossesToday` still
 counts every loss, live and async. Values live in `Config.LiveRaid` (table above).
 
 1. **Post-loss safety.** After a live loss, nobody can grab from that den for
@@ -291,7 +304,7 @@ counts every loss, live and async. Values live in `Config.LiveRaid` (table above
      change protection (D-032).
    - The steal that crosses the line lands; nothing after it does while the line holds.
 4. **Escrow.** Live steals move critters through `Escrow.luau` via `EscrowService.transferLive`,
-   on two profiles loaded in one server (the cross-server path comes with P1.1). The rules are
+   on two profiles loaded in one server (only async debits cross servers, P1.1). The rules are
    checked at the grab and again at the debit. A live debit that takes nothing grants nothing
    (Escrow invariant 5, D-033).
 
