@@ -99,8 +99,8 @@ These are copied into prompts by the builder script. Keep them in sync with
 > carried: sneaky walk while carried: tiptoes in the air and glances side to side, in on the
 > heist, never struggling
 >
-> stolen: gotcha pose when stolen: a quick cheeky {personality} pose, in on the joke, never sad
-> or scared
+> stolen: gotcha pose when stolen: a quick {personality} gotcha, in on the joke, never sad or
+> scared
 
 **TURNAROUND VIEW** (one image per view: front, side, back)
 > {STYLE} Character: {name}, {look}. {EXPRESSION} {view} view, neutral standing pose, full

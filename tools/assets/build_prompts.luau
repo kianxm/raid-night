@@ -38,7 +38,7 @@ local EXPRESSION_RARE_AND_ABOVE = "with lots of character that still reads as cu
 local CARRIED_ANIMATION = "sneaky walk while carried: tiptoes in the air and glances side to side, in on the "
 	.. "heist, never struggling"
 local function stolenAnimation(species): string
-	return `gotcha pose when stolen: a quick cheeky {species.personality} pose, in on the joke, never sad or scared`
+	return `gotcha pose when stolen: a quick {species.personality} gotcha, in on the joke, never sad or scared`
 end
 
 local BUDGETS = {
