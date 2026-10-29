@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: tries to stretch and ties itself into a knot",
+    "stolen": "gotcha pose when stolen: a quick cheeky pose in its personality, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2.5,
     "texture": 1024,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "noodle_weasel",
-  "idleAnimation": "tries to stretch and ties itself into a knot",
   "look": "extremely long cream weasel with a glowing collar",
   "name": "Noodle Weasel",
   "notes": "",
@@ -16,6 +20,7 @@
     "#EADBC8",
     "#24202A"
   ],
+  "personality": "mischievous",
   "status": "prompts-ready",
   "tier": "Rare"
 }

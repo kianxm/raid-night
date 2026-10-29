@@ -39,6 +39,21 @@ CritterCatalog.TIER_GLOW_RANGE = table.freeze({
 	Secret = { 10000, math.huge },
 }) :: { [string]: { number } }
 
+-- Personality rules from the style bible (D-038): variety, and never a distressed critter.
+CritterCatalog.MAX_SHARED_PERSONALITY = 6
+CritterCatalog.FORBIDDEN_PERSONALITY_WORDS = table.freeze({
+	sad = true,
+	crying = true,
+	tearful = true,
+	injured = true,
+	hurt = true,
+	frightened = true,
+	scared = true,
+	afraid = true,
+	terrified = true,
+	panicked = true,
+}) :: { [string]: boolean }
+
 local byId: { [string]: CritterSpecies } = {}
 for _, species in critterList do
 	byId[species.id] = species
@@ -71,6 +86,7 @@ end
 function CritterCatalog.validate(): { string }
 	local problems: { string } = {}
 	local seen: { [string]: boolean } = {}
+	local personalityCount: { [string]: number } = {}
 
 	for index, species in critterList do
 		local label = `#{index} {species.id}`
@@ -105,6 +121,29 @@ function CritterCatalog.validate(): { string }
 
 		if #species.look < 20 then
 			table.insert(problems, `{label}: look is too short to prompt an artist or model`)
+		end
+
+		local personality = species.personality
+		local wellFormed = type(personality) == "string"
+			and (string.match(personality, "^[a-z%-]+$") or string.match(personality, "^[a-z%-]+ [a-z%-]+$"))
+		if not wellFormed then
+			table.insert(problems, `{label}: personality must be one or two lowercase words`)
+		else
+			personalityCount[personality] = (personalityCount[personality] or 0) + 1
+			for word in string.gmatch(personality, "[a-z]+") do
+				if CritterCatalog.FORBIDDEN_PERSONALITY_WORDS[word] then
+					table.insert(problems, `{label}: personality "{personality}" is distressed (style bible)`)
+				end
+			end
+		end
+	end
+
+	for personality, count in personalityCount do
+		if count > CritterCatalog.MAX_SHARED_PERSONALITY then
+			table.insert(
+				problems,
+				`personality "{personality}" is shared by {count} critters (max {CritterCatalog.MAX_SHARED_PERSONALITY})`
+			)
 		end
 	end
 

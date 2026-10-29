@@ -28,6 +28,16 @@ Chunky, toy-like night critters glowing softly in a dark navy moonlit town.
   mouse and will otherwise pull every critter upright.
 - **Silhouette:** recognizable as a black shape at phone size. Test by filling it solid black.
 - **One idea per critter:** the `look` line in Critters.luau. Do not add extra props.
+- **Personality** (Kian, 2026-10-28, D-038). Every critter has a distinct personality expression
+  (sleepy, smug, suspicious, grumpy, mischievous and so on) that still reads as cute. Commons are
+  simple and cheerful. Rarity raises attitude: Rare and above get more character, such as a
+  smirk, a cool stare or an air of mystery. No critter is ever sad, crying, injured or
+  frightened. The word is the `personality` field in Critters.luau (one or two words, at most 6
+  critters share one, checked by `CritterCatalog.validate`). The base art shows one charming
+  expression; it does not change between views.
+- **Animation set** (every critter): a **happy idle** in the den (its `idle` line), a **sneaky
+  walk** while carried, and a **gotcha pose** when stolen. The critter is always in on the joke:
+  never generate or animate a distressed pose (struggling, cowering, crying, hurt).
 - **Palette:** from Critters.luau; the first color is the glow.
 - **Tier reads from across the map:** glow intensity and particles scale with tier. Common:
   soft glow, no particles. Rare: brighter glow, a few motes. Legendary+: strong glow, trail
@@ -73,13 +83,29 @@ These are copied into prompts by the builder script. Keep them in sync with
 
 **AVOID**
 > Avoid photorealism, realistic fur strands, text, letters, logos, watermarks, existing cartoon
-> characters, franchise mascots, human faces, weapons, gore, scary or sexualized features.
+> characters, franchise mascots, human faces, weapons, gore, scary or sexualized features, sad,
+> crying, injured or frightened expressions or poses.
+
+**EXPRESSION** (Common and Uncommon / Rare and above)
+> Expression: a simple, cheerful {personality} face that reads as cute and friendly.
+>
+> Expression: a {personality} face with real attitude that still reads as cute and charming.
+
+**ANIMATIONS** (written to `brief.json`, not to image prompts)
+> denIdle: happy idle in the den: {idle}
+>
+> carried: sneaky walk while carried: tiptoes in the air and glances side to side, in on the
+> heist, never struggling
+>
+> stolen: gotcha pose when stolen: a quick cheeky pose in its personality, in on the joke, never
+> sad or scared
 
 **TURNAROUND VIEW** (one image per view: front, side, back)
-> {STYLE} Character: {name}, {look}. {view} view, neutral standing pose, full body, centered,
-> orthographic camera, evenly lit, plain mid-grey background. Main glow color {glow}; other
-> colors {palette}. {AVOID}
+> {STYLE} Character: {name}, {look}. {EXPRESSION} {view} view, neutral standing pose, full
+> body, centered, orthographic camera, evenly lit, plain mid-grey background. Main glow color
+> {glow}; other colors {palette}. {AVOID}
 
 **ICON**
-> {STYLE} Inventory icon of {name}, {look}. Three-quarter view, head and body centered and
-> filling the frame, soft rim light, glow color {glow}, plain background for removal. {AVOID}
+> {STYLE} Inventory icon of {name}, {look}. {EXPRESSION} Three-quarter view, head and body
+> centered and filling the frame, soft rim light, glow color {glow}, plain background for
+> removal. {AVOID}

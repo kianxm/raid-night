@@ -31,6 +31,7 @@ export type CritterSpecies = {
 	weight: Weight,
 	look: string, -- one-line visual description; feeds asset prompts (tools/assets)
 	idle: string, -- the funny idle animation, one line; feeds animation briefs
+	personality: string, -- one or two words, e.g. "smug"; the face in every prompt (style bible)
 	palette: { string }, -- 2-4 hex colors; first is the glow color
 	eventOnly: boolean, -- true = never in eggs; only from events
 }

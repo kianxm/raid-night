@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: sneezes a tiny bolt of lightning",
+    "stolen": "gotcha pose when stolen: a quick cheeky pose in its personality, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "nimbus_lamb",
-  "idleAnimation": "sneezes a tiny bolt of lightning",
   "look": "little lamb whose wool is a small dark storm cloud",
   "name": "Nimbus Lamb",
   "notes": "",
@@ -16,6 +20,7 @@
     "#4A5578",
     "#141A2E"
   ],
+  "personality": "grumpy",
   "status": "prompts-ready",
   "tier": "Uncommon"
 }

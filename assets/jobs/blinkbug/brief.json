@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: its glow cuts out, it taps its tail until it flickers back on",
+    "stolen": "gotcha pose when stolen: a quick cheeky pose in its personality, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "blinkbug",
-  "idleAnimation": "its glow cuts out, it taps its tail until it flickers back on",
   "look": "round firefly with a lightbulb-shaped glowing tail",
   "name": "Blinkbug",
   "notes": "",
@@ -16,6 +20,7 @@
     "#3D3A2A",
     "#121626"
   ],
+  "personality": "cheerful",
   "status": "prompts-ready",
   "tier": "Common"
 }

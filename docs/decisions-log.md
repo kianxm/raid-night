@@ -3,6 +3,17 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-038 · 2026-10-28 · Critter personalities and the three-animation set (Kian)
+Context: art direction change before Asset Gate 1 (no concept images generated yet). Decision:
+every critter has a distinct personality expression that still reads as cute; Commons simple and
+cheerful, Rare and above more attitude; never sad, crying, injured or frightened. New required
+`CritterSpecies.personality` (one or two words, at most 6 share one), assigned for all 40 and
+checked by `CritterCatalog.validate`; every prompt gets a tier-aware expression line and AVOID
+names distressed expressions. Each critter animates a happy den idle, a sneaky carried walk and
+a gotcha pose when stolen; base art keeps one expression. Three idle lines that read as fear
+(crumb_rat, mirror_cat, abyss_angler "panics"/"startles") were reworded. Why: a style decision
+inside the approved direction (0006). Reversible: yes (static design data; no persisted change).
+
 ### D-037 · 2026-10-28 · The live debit also counts the grab-time rate
 Context: data on #79: after a refill reopens a den (D-036), the owner, alerted at carry start,
 could shrink it mid-carry so the debit sees protection and takes nothing. Decision: at the
