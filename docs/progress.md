@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 1 → 2 (Phase 1 gate approved; Phase 2 not started, waiting for Kian) · Last updated: 2026-10-29
+Current phase: 1 → 2 (Phase 1 gate approved, main promoted; Phase 2 not started, waiting for Kian) · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -223,6 +223,8 @@ Full log with reasons: `docs/decisions-log.md`.
 - Live revenge needs `asyncRaids` too (follows the 2026-10-28 kill-switch wording literally).
 
 ## Gate history
+
+- Promotion: integration → main after the Phase 1 gate, 2026-10-29 (#117, 1a877da).
 
 - Phase 1 exit checks: tests green on integration (348, EscrowSimulation included); soak clean
   (P1.10g); multi-person checks deferred to the playtest per Kian. 2026-10-29.
