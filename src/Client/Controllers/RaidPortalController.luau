@@ -158,7 +158,6 @@ function RaidPortalController.start()
 	portal = Ui.panel(gui, "Portal", UDim2.fromScale(0.86, 0.9), UDim2.fromScale(0.5, 0.5))
 	portal.AnchorPoint = Vector2.new(0.5, 0.5)
 	portal.Visible = false
-	portal.ZIndex = 10
 	local cap = Instance.new("UISizeConstraint")
 	cap.MaxSize = Vector2.new(480, 330)
 	cap.Parent = portal
