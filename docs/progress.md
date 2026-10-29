@@ -76,7 +76,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.7 | notifications | — | In review | #118 | 1 | Reviewer APPROVED; fail-closed reads + atomic day claim + merged saveState folded in. 359 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
 | P2.8 | economy | C6 | In review | #127 (stacked on #123) | 1 | 396 tests. Receipts exactly-once (40 seeds x 60 forced-shutdown sim, mutation caught), factor helper in IncomeService + source guard, Config.Purchases (D-061 defaults, ids 0), products + audit table for Kian. Reviewer (xhigh) running. Handoffs P2.8b/m/c, ui (D-065). Was: Passes/products, glow-factor helper, policy audit; products for Kian |
 | P2.9 | data | C6 | In review | #128 (stacked on #123) | 1 | 395 tests. Analytics.luau schema (17 events, 2 funnels, sources/sinks), AnalyticsService sender, data events, EscrowService → NotificationService.onLoss by name (D-066). Reviewer (xhigh) running. Call points handed to economy/raid/matchmaking/notifications/C6b. Live check needs a published place. Was: Analytics events (Appendix A) + funnels |
-| P2.10 | raid | C6, P2.3 | In progress | agent/raid/P2.10 (stacked on C6) | 1 | Gear (live only for lockpick) |
+| P2.10 | raid | C6, P2.3 | In review | #129 (stacked on #123) | 1 | 394 tests (28 GearRules incl. exploits). Server-validated use; buying waits on P2.8c. Lockpick vs Lockdown + switches (D-068). Reviewer next. Was: Gear (live only for lockpick) |
 | P2.11 | assets | — | Blocked | | 0 | No credits (D-057); sound hooks ship empty in P2.5 |
 | C6b | data | C6 | In review | #126 (stacked on #123) | 1 | 396 tests. Settings + onboarding remotes, RateLimit.luau, steps 0-6 server-advanced (raidLogTip client ack only). Reviewer (xhigh) APPROVED. D-064 |
 | P2.6r | raid | C6b, P2.3, P2.6e | Todo | | 0 | Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
@@ -84,8 +84,8 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.6e | economy | C6b | In progress | agent/economy/P2.6e (stacked on C6b) | 1 | advanceOnboarding call points, one-time untradeable tutorial critter grant, setShownPads (D-064) |
 | P2.8b | data | P2.8 | In progress | agent/data/P2.8b (stacked on #127) | 1 | EscrowService loadProfile + seedTestSession through the factor helper |
 | P2.8m | matchmaking | P2.8 | Todo | | 0 | SnapshotService build accrues through the helper; raid scout perk |
-| P2.8c | economy | P2.8 | Todo | | 0 | DenState.vaultSlots, GetShopOffers remote (additive Net, D-059) |
-| P2.5d | ui | P2.5, C6b, P2.8c | Todo | | 0 | ui handoffs: settings/onboarding wiring, shop offers, Lantern Night announcement, critter idle animator, odds chip 6 tiers. Settings: never SaveSettings before GetSettings has answered (reviewer #126) |
+| P2.8c | economy | P2.8, P2.9, P2.10 | Todo | | 0 | DenState.vaultSlots, GetShopOffers remote (additive Net, D-059); Economy.buyGear + UpgradeGear; economy analytics call points (P2.9) |
+| P2.5d | ui | P2.5, C6b, P2.8c | Todo | | 0 | ui handoffs: settings/onboarding wiring, shop offers, Lantern Night announcement, critter idle animator, odds chip 6 tiers, gear HUD (GetGear/UseGear, GearUsed fx, gear shop). Settings: never SaveSettings before GetSettings has answered (reviewer #126) |
 | P2.12a | integration | — | In progress | preview/phase2 | 1 | Build preview/phase2 from all Phase 2 PRs, run checks (D-067) |
 | P2.12 | integration | all | Todo | | 0 | Closed-test build + kit; access setup is Kian's |
 

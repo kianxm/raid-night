@@ -3,6 +3,16 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-068 · 2026-10-29 · Gear: lockpick breaks a Lockdown (switchable, Kian to confirm); gear kill switch
+Context: raid on #129. The design names a lockpick (live only) but not what it picks. Decision:
+the lockpick lets one raider through one active Lockdown after 8 s at the border (outside, within
+6 studs); a carried critter still drops at the border. This narrows Kian's lockdown rule (D-013),
+so it ships behind `Config.Gear.lockpick.enabled` and is on the gate list. All gear also has
+`Config.Gear.enabled` and follows `raids`. Grapple, smoke, decoy and speed coil work in async raids
+(1 use per raid, 2 at level 5); speed coil never lifts a carrier past walk speed; grapple never
+while carrying. Buying/upgrading gear: economy (Economy.buyGear, UpgradeGear) in P2.8c.
+Why: follows the design's intent, fair to defenders, one value to turn off. Reversible: yes.
+
 ### D-067 · 2026-10-29 · Phase 2 follow-ups land on preview/phase2
 Context: hand-offs now cross several stacked PR chains (C6, C6b, P2.8, P2.9, P2.7) that can't merge
 (D-058). Decision: the integration agent builds `preview/phase2` from every Phase 2 PR in order;
