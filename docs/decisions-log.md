@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-070 · 2026-10-29 · Onboarding's second egg is discounted
+Context: Studio pass P2.12b: join → tutorial steal took ~3:51; the floor is ~3:00, because the second
+egg costs 150 Glow at 1 Glow/s (P1.8 prices). Exit check: under 3 min. Decision: while onboarding
+is at the buyEgg step, that one egg costs `Config.Onboarding.buyEggPrice` (~40); onboarding only
+moves forward, so it's once per player; odds unchanged. Why: meet Appendix C's timeline without
+retuning the economy Kian approved. Reversible: yes (Config).
+
 ### D-069 · 2026-10-29 · New-player shield and the tutorial den
 Context: raid on #139. Decision: a new player's 30-minute live shield
 (`Config.Protection.newPlayerLiveShieldSeconds` = 1800, from createdAt) stays on while they
