@@ -45,6 +45,7 @@ local Strings = {
 	hintSmall = "Small stash",
 	hintSolid = "Solid stash",
 	hintRich = "Rich stash",
+	hintUnknown = "Stash unknown",
 	close = "Close",
 
 	-- In-raid HUD
@@ -55,6 +56,12 @@ local Strings = {
 	raidEscapedNone = "Made it out!",
 	raidCaught = "Caught!",
 	raidGlow = "+{n} Glow",
+	raidCritters = "{n} critters inside",
+	raidRevengeGrab = "Revenge! Grab a critter",
+	raidTimeout = "Time's up!",
+	raidRetreat = "Left empty-handed",
+	raidLeft = "You left the raid",
+	raidError = "Raid ended early",
 
 	-- Raid log
 	logTitle = "While you were away",
@@ -70,6 +77,26 @@ local Strings = {
 	replay = "Replay",
 	replayNone = "Replay not ready",
 	revenge = "Revenge",
+
+	-- Revenge choice and live join
+	revengeTitle = "Revenge on {name}",
+	revengeJoin = "Join their server",
+	revengeDen = "Raid their den",
+	revengeDenInstead = "Raid their den instead",
+	revengeJoining = "Joining {name}...",
+	revengeSlow = "Taking a while",
+	revengeArrived = "You're at {name}'s den",
+	failSwitchedOff = "Live revenge is off right now",
+	failInvalid = "That revenge isn't valid",
+	failNoToken = "That revenge is used up",
+	failExpired = "That revenge window closed",
+	failUnavailable = "Can't revenge that player",
+	failPairLimit = "You've raided them enough for now",
+	failBusy = "They're busy right now",
+	failRaiderOffline = "They just went offline",
+	failServerFull = "Their server is full",
+	failServerGone = "Their server closed",
+	failTeleport = "Couldn't join. Try again",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string

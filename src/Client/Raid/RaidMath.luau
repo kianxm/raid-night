@@ -6,15 +6,61 @@
 
 local RaidMath = {}
 
--- Power buckets for the "what is inside" hint. Placeholder until RaidTarget carries real loot
--- info (see PR handoff). Thresholds are display-only.
-function RaidMath.hintKey(power: number): string
-	if power >= 5000 then
-		return "hintRich"
-	elseif power >= 1000 then
+-- Loot hint from RaidTarget.topTier (highest tier on the den's pads). nil = nothing known.
+-- Never an exact Glow number.
+function RaidMath.hintKey(topTier: string?): string
+	if topTier == nil then
+		return "hintUnknown"
+	elseif topTier == "Common" or topTier == "Uncommon" then
+		return "hintSmall"
+	elseif topTier == "Rare" or topTier == "Epic" then
 		return "hintSolid"
 	end
-	return "hintSmall"
+	return "hintRich"
+end
+
+-- Why a live revenge join failed: the Strings key, and whether the async revenge raid is still
+-- on offer (Net.luau: not for SwitchedOff, Invalid, NoToken, Expired, Unavailable, PairLimit).
+local NO_FALLBACK: { [string]: boolean } =
+	{ SwitchedOff = true, Invalid = true, NoToken = true, Expired = true, Unavailable = true, PairLimit = true }
+local FAIL_KEYS: { [string]: string } = {
+	SwitchedOff = "failSwitchedOff",
+	Invalid = "failInvalid",
+	NoToken = "failNoToken",
+	Expired = "failExpired",
+	Unavailable = "failUnavailable",
+	PairLimit = "failPairLimit",
+	Busy = "failBusy",
+	RaiderOffline = "failRaiderOffline",
+	ServerFull = "failServerFull",
+	ServerGone = "failServerGone",
+	TeleportFailed = "failTeleport",
+}
+
+function RaidMath.failKey(reason: string?): string
+	return FAIL_KEYS[reason or ""] or "failTeleport"
+end
+
+function RaidMath.fallbackOffered(reason: string?): boolean
+	return NO_FALLBACK[reason or ""] ~= true
+end
+
+-- Outcome card title key for RaidEnd. `escaped` is true only once the loot has moved.
+function RaidMath.outcomeKey(reason: string?, escaped: boolean): string
+	if escaped then
+		return "raidEscaped"
+	elseif reason == "Timeout" then
+		return "raidTimeout"
+	elseif reason == "Retreat" then
+		return "raidRetreat"
+	elseif reason == "Left" then
+		return "raidLeft"
+	elseif reason == "Error" then
+		return "raidError"
+	elseif reason == "Escaped" then
+		return "stealUnconfirmed" -- reached the gate but the move is not confirmed
+	end
+	return "raidCaught" -- Tagged, or anything unknown
 end
 
 -- 125 -> "2:05". Never negative.
