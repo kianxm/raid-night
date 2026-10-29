@@ -53,8 +53,8 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.4 | raid | P1.3 | Todo | | | |
 | P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
 | P1.6 | ui | P1.3, P1.5 | Todo | | | |
-| P1.7 | economy | — | In progress | agent/economy/P1.7 | 1 | Tuning approved by orchestrator within design-doc ranges (D-041) |
-| P1.8 | economy | P1.7 | Todo | | | |
+| P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
+| P1.8 | economy | P1.7 | In progress | agent/economy/P1.8 | 1 | Prepared, stacked on #95; merge only on Kian's approval (D-045) |
 | P1.9 | matchmaking | P1.2 | In review | #94 | 1 | Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
 
@@ -86,6 +86,11 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 - PR #92 (P1.5b, fixes #90 blank Raid Portal): reviewed, CI green, src/Client only, but the
   permission check refused `gh pr merge 92` twice ("Merge Without Review"). Merge it yourself, or
   allow the integration agent to merge reviewed PRs. Not worked around.
+
+- P1.7 tuning (#95, applied in P1.8's stacked PR): upgradeCostBase 100→500, eggPriceBase 50→150,
+  eggPriceGrowth 1.12→1.32. First rebirth median day 0.9 → 20.7 (p10 8.7, p90 47.7); Glow held
+  stays ~1-4 egg prices instead of climbing to 12,000. The design sets no first-rebirth target:
+  approve the ~3-week pace, pick another, or keep today's values. Level 30 of 50 on day 1 either way.
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):

@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-045 · 2026-10-29 · P1.7 tuning waits for Kian; P1.8 prepared
+Context: economy on #95 proposes upgradeCostBase 100→500, eggPriceBase 50→150, eggPriceGrowth
+1.12→1.32. Each serves a quoted design target, but no design-doc numeric range covers them and
+they set a first-rebirth pace (~3 weeks) the design never defines. Decision: not approved under
+D-041; P1.8 applies the values in a stacked PR that merges only if Kian approves. Async loot
+reading leave-time stored Glow is a bug, not tuning: sent to P1.1 (debit accrues to debit time).
+Why: pacing is a product call; the PR makes it a one-click approval. Reversible: yes.
+
 ### D-044 · 2026-10-29 · Merges wait for Kian; dependent work stacks on PR branches
 Context: from #92 on, the session's permission check refuses every `gh pr merge` ("Merge
 Without Review"), even after a reviewer pass and for docs-only ledger PRs. Decision: no merge is
