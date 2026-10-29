@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: bobs up and down, then accidentally zaps itself",
     "stolen": "gotcha pose when stolen: a quick dreamy gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "floater",
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -21,6 +22,7 @@
     "#1A1433"
   ],
   "personality": "dreamy",
+  "pose": "floating in the air a little above the ground, nothing touching the ground, not standing",
   "status": "prompts-ready",
   "tier": "Uncommon"
 }

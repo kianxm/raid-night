@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-040 · 2026-10-29 · P2.1 critter art pulled ahead of Phase 1 (Kian)
+Decision: pause before Phase 1 and run the critter asset pipeline (P2.1) now, to use the Higgsfield
+trial credits (100 left, trial ends in a few days). 2D concept fronts first in batches of 5 with
+Gate 1 after each; one 3D test on an approved critter if credits allow. Body plans live in
+`tools/assets/Prompts.luau` (`ART`), not the catalog: only the art pipeline reads them, so no
+contract change. Why: art has no code dependencies, and the credits expire. Reversible: yes.
+
 ### D-039 · 2026-10-29 · Process speed-ups (Kian)
 Context: ~24 h of Phase 0 produced 77 PRs, 25 of them ledger-only; the live-protection chain
 (P0.5g to C5, ~3,200 lines, D-033 to D-037) was reviewer rounds on edge cases that lose nothing,

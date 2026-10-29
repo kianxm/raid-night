@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: catches its own reflection and strikes a pose",
     "stolen": "gotcha pose when stolen: a quick vain gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "quadruped",
   "budget": {
     "heightStuds": 3,
     "texture": 1024,
@@ -21,6 +22,7 @@
     "#151922"
   ],
   "personality": "vain",
+  "pose": "standing on all four short legs like an animal, not upright like a person",
   "status": "prompts-ready",
   "tier": "Epic"
 }

@@ -27,7 +27,9 @@ lune run tools/assets/build_prompts.luau          # all critters
 lune run tools/assets/build_prompts.luau fox      # ids containing "fox"
 ```
 
-Writes `assets/jobs/<id>/front.txt`, `side.txt`, `back.txt`, `icon.txt` and `brief.json`
+Prompt text, each critter's body plan and pose, and the hex-to-words color names live in
+`tools/assets/Prompts.luau` (tested by `tests/specs/AssetPrompts.spec.luau`). A new critter needs
+an `ART` entry there. Writes `assets/jobs/<id>/front.txt`, `side.txt`, `back.txt`, `icon.txt` and `brief.json`
 (name, tier, personality, palette, the three-animation set, triangle and texture budgets), plus
 `assets/jobs/INDEX.md`.
 

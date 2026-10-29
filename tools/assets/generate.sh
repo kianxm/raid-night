@@ -16,7 +16,7 @@ set -euo pipefail
 IMAGE_MODEL="${IMAGE_MODEL:-seedream_v4_5}"             # Seedream 4.5: up to 14 reference images, 1 credit
 IMAGE_QUALITY="${IMAGE_QUALITY:-high}"                   # basic | high (same cost)
 MODEL_3D="${MODEL_3D:-multi_image_to_3d}"                # multi-view image to 3D
-STYLE_REFS=(assets/clean/_style/ref-01.png assets/clean/_style/ref-02.png assets/clean/_style/ref-03.png assets/clean/_style/ref-04.png)
+STYLE_REFS=(assets/clean/_style/ref-01.png assets/clean/_style/ref-02.png)
 DRY_RUN="${DRY_RUN:-1}"
 
 mode="${1:-}"; shift || true

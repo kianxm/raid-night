@@ -1,0 +1,224 @@
+--!strict
+--[[
+	Prompt text for critter concept art. Pure: no file access, so tests/specs/AssetPrompts.spec
+	can check it. tools/assets/build_prompts.luau writes the results to assets/jobs/.
+
+	The STYLE, AVOID, EXPRESSION, BODY PLAN and ANIMATIONS blocks must match docs/style-bible.md.
+	Lessons from the Stage 0 style test (assets/generation-log.md) are folded in:
+	  - hex codes leak into images as text, so colors are named in words (hex stays in briefs)
+	  - "inventory icon" draws an app-icon frame, so the icon is a plain character portrait
+	  - the single glow is ignored half the time, so prompts say "no other glowing parts"
+	  - night scenes drift to plush, so the finish is "smooth matte vinyl toy surface, no fuzz"
+	  - the style references show an upright mouse, so every prompt names the body plan and pose
+]]
+
+local Prompts = {}
+
+Prompts.STYLE = "Stylized 3D game character for a cozy nighttime game. Chunky toy-like shapes, soft rounded "
+	.. "silhouette, oversized head about 40 percent of body height, big expressive eyes, short stubby "
+	.. "limbs. Smooth matte vinyl toy surface with toon shading, no fuzz, no felt, no plush texture. "
+	.. "Clean simple shapes and textures, no fine detail. Readable silhouette at small size."
+
+Prompts.AVOID = "Avoid photorealism, realistic fur strands, text, letters, numbers, labels, logos, watermarks, "
+	.. "frames, borders, existing cartoon characters, franchise mascots, human faces, weapons, gore, scary "
+	.. "or sexualized features, sad, crying, injured or frightened expressions or poses."
+
+-- Body plans are shared so rigs and animations are reused (style bible, "Body plan follows the
+-- animal"). Each pose is written for a neutral turnaround.
+Prompts.BODY_PLANS = {
+	upright = "standing upright on two short legs, arms relaxed",
+	quadruped = "standing on all four short legs like an animal, not upright like a person",
+	crawler = "low to the ground in its natural animal posture, not standing upright like a person",
+	floater = "floating in the air a little above the ground, nothing touching the ground, not standing",
+	flyer = "hovering in the air with its wings spread and its legs tucked, not standing",
+	serpent = "long serpentine body coiled in a loose ring, not standing upright",
+}
+
+-- Every critter's plan. A critter may also override its pose when the plan's default would
+-- fight its `look` line.
+Prompts.ART = {
+	dusk_mouse = { bodyPlan = "upright" },
+	lantern_snail = { bodyPlan = "crawler", pose = "gliding low on its soft foot, shell on its back" },
+	puddle_newt = { bodyPlan = "crawler", pose = "on four short splayed legs, belly close to the ground" },
+	pebble_toad = { bodyPlan = "crawler", pose = "squatting low on all four legs like a toad" },
+	sock_moth = { bodyPlan = "flyer" },
+	snooze_bat = { bodyPlan = "flyer", pose = "hanging upside down by its feet, wings folded around its body" },
+	blinkbug = { bodyPlan = "flyer" },
+	crumb_rat = { bodyPlan = "upright" },
+	button_beetle = { bodyPlan = "crawler", pose = "on six short legs, body low and round" },
+	fuzz_owlet = { bodyPlan = "upright", pose = "standing upright on two tiny feet, wings folded at its sides" },
+	drama_possum = { bodyPlan = "quadruped" },
+	neon_shrimp = { bodyPlan = "floater", pose = "floating curled in the air, tiny gloves raised" },
+	moonquill = { bodyPlan = "quadruped" },
+	boo_mole = { bodyPlan = "floater", pose = "floating like a little ghost, body fading into a wispy tail" },
+	lid_raccoon = { bodyPlan = "upright" },
+	nimbus_lamb = { bodyPlan = "quadruped" },
+	puddle_jelly = { bodyPlan = "floater" },
+	streetlamp_frog = { bodyPlan = "upright" },
+	wick_cat = { bodyPlan = "quadruped" },
+	noodle_weasel = { bodyPlan = "quadruped" },
+	static_crab = {
+		bodyPlan = "crawler",
+		pose = "scuttling on short crab legs, the television worn on its back as its shell",
+	},
+	crescent_fox = { bodyPlan = "quadruped" },
+	patchwork_bear = { bodyPlan = "upright" },
+	dj_owl = { bodyPlan = "upright", pose = "standing upright on two short feet, wings resting on the turntable" },
+	shroom_fawn = { bodyPlan = "quadruped" },
+	bubble_otter = { bodyPlan = "floater", pose = "floating on its back inside the bubble, paws on its belly" },
+	comet_ferret = { bodyPlan = "quadruped" },
+	tick_toad = { bodyPlan = "crawler", pose = "sitting up like a frog on its back legs, belly facing forward" },
+	aurora_pup = { bodyPlan = "quadruped" },
+	mirror_cat = { bodyPlan = "quadruped" },
+	pocket_whale = { bodyPlan = "floater" },
+	ufo_hamster = { bodyPlan = "floater", pose = "sitting inside its saucer, which floats above the ground" },
+	neon_drake = { bodyPlan = "flyer" },
+	storm_hare = { bodyPlan = "floater", pose = "sitting on its small thundercloud, which floats above the ground" },
+	lunar_kitsune = { bodyPlan = "quadruped" },
+	abyss_angler = { bodyPlan = "floater", pose = "floating as if swimming, lure held up in front of its face" },
+	king_bandit = { bodyPlan = "upright" },
+	nebula_owl = { bodyPlan = "upright", pose = "standing upright on two short feet, wings opened wide" },
+	eclipse_wyrm = { bodyPlan = "serpent" },
+	midnight_mew = { bodyPlan = "floater" },
+}
+
+-- Rarity raises attitude: Commons stay simple, Uncommons get a touch more, Rare and above get the most.
+local EXPRESSION_BY_TIER = {
+	Common = "kept simple and friendly so it reads as cute",
+	Uncommon = "with a touch of attitude that still reads as cute and friendly",
+}
+local EXPRESSION_RARE_AND_ABOVE = "with lots of character that still reads as cute and charming"
+
+local HUES: { { below: number, name: string } } = {
+	{ below = 15, name = "red" },
+	{ below = 40, name = "orange" },
+	{ below = 65, name = "yellow" },
+	{ below = 85, name = "lime" },
+	{ below = 150, name = "green" },
+	{ below = 175, name = "mint" },
+	{ below = 200, name = "cyan" },
+	{ below = 245, name = "blue" },
+	{ below = 290, name = "violet" },
+	{ below = 320, name = "magenta" },
+	{ below = 345, name = "pink" },
+	{ below = 360, name = "red" },
+}
+
+-- Names a "#RRGGBB" color in plain words, because image models draw hex codes as text.
+function Prompts.colorName(hex: string): string
+	local r = tonumber(string.sub(hex, 2, 3), 16) :: number / 255
+	local g = tonumber(string.sub(hex, 4, 5), 16) :: number / 255
+	local b = tonumber(string.sub(hex, 6, 7), 16) :: number / 255
+	local maxC, minC = math.max(r, g, b), math.min(r, g, b)
+	local light = (maxC + minC) / 2
+	local chroma = maxC - minC
+	local sat = if chroma == 0 then 0 else chroma / (1 - math.abs(2 * light - 1))
+
+	if sat < 0.15 or chroma < 0.06 then
+		if light > 0.93 then
+			return "white"
+		elseif light > 0.7 then
+			return "light grey"
+		elseif light > 0.4 then
+			return "grey"
+		elseif light > 0.08 then
+			return "charcoal"
+		end
+		return "black"
+	end
+
+	local hue
+	if maxC == r then
+		hue = 60 * (((g - b) / chroma) % 6)
+	elseif maxC == g then
+		hue = 60 * ((b - r) / chroma + 2)
+	else
+		hue = 60 * ((r - g) / chroma + 4)
+	end
+	local name = "red"
+	for _, entry in HUES do
+		if hue < entry.below then
+			name = entry.name
+			break
+		end
+	end
+	local warm = name == "red" or name == "orange" or name == "yellow"
+	local purple = name == "violet" or name == "magenta"
+
+	if sat < 0.25 and light >= 0.3 and (name == "blue" or name == "cyan") then
+		return if light > 0.6 then "light blue-grey" else "blue-grey"
+	elseif light < 0.3 then
+		if purple then
+			return "deep purple"
+		elseif name == "blue" or name == "cyan" then
+			return if light < 0.15 then "midnight navy" else "dark navy"
+		elseif name == "pink" then
+			return "burgundy"
+		elseif warm then
+			return "dark brown"
+		end
+		return `very dark {name}`
+	elseif light < 0.5 then
+		if name == "orange" or name == "yellow" then
+			return if sat < 0.5 then "brown" else "amber"
+		elseif name == "mint" then
+			return "deep teal"
+		elseif name == "pink" then
+			return "raspberry"
+		elseif name == "violet" then
+			return "muted purple"
+		end
+		return if sat < 0.4 then `muted {name}` else `deep {name}`
+	elseif warm and sat < 0.45 then
+		return if light > 0.8 then "cream" elseif light > 0.6 then "beige" else "tan"
+	elseif light > 0.8 then
+		if name == "red" then
+			return "pale pink"
+		elseif name == "orange" then
+			return "peach"
+		end
+		return `pale {name}`
+	elseif light > 0.6 then
+		if name == "red" then
+			return "coral"
+		end
+		return `light {name}`
+	end
+	return if sat < 0.4 then `dusty {name}` else `bright {name}`
+end
+
+local function colorLine(species): string
+	local others = {}
+	for i = 2, #species.palette do
+		table.insert(others, Prompts.colorName(species.palette[i]))
+	end
+	return `Its one glowing feature glows softly in {Prompts.colorName(species.palette[1])}, with no other glowing `
+		.. `parts. Other colors: {table.concat(others, " and ")}. No extra props or accessories beyond the `
+		.. `ones named.`
+end
+
+function Prompts.expressionLine(species): string
+	local tone = EXPRESSION_BY_TIER[species.tier] or EXPRESSION_RARE_AND_ABOVE
+	return `Expression: {species.personality}, {tone}.`
+end
+
+-- The critter's body plan pose: its own override, else its plan's default.
+function Prompts.pose(species): string
+	local art = Prompts.ART[species.id]
+	assert(art, `{species.id} has no entry in Prompts.ART`)
+	return art.pose or Prompts.BODY_PLANS[art.bodyPlan]
+end
+
+function Prompts.view(species, view: string): string
+	return `{Prompts.STYLE} Character: {species.name}, {species.look}. Body: {Prompts.pose(species)}. `
+		.. `{Prompts.expressionLine(species)} {view} view, full body, centered and filling most of the frame, `
+		.. `orthographic camera, evenly lit, plain mid-grey background. {colorLine(species)} {Prompts.AVOID}`
+end
+
+function Prompts.icon(species): string
+	return `{Prompts.STYLE} Character portrait of {species.name}, {species.look}. Body: {Prompts.pose(species)}. `
+		.. `{Prompts.expressionLine(species)} Three-quarter view, head and body centered and filling the frame, `
+		.. `soft rim light, plain flat light-grey background. {colorLine(species)} {Prompts.AVOID}`
+end
+
+return Prompts

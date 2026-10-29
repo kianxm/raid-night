@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: ticks steadily until its alarm rings and it falls over",
     "stolen": "gotcha pose when stolen: a quick pompous gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "crawler",
   "budget": {
     "heightStuds": 3,
     "texture": 1024,
@@ -21,6 +22,7 @@
     "#201A10"
   ],
   "personality": "pompous",
+  "pose": "sitting up like a frog on its back legs, belly facing forward",
   "status": "prompts-ready",
   "tier": "Epic"
 }

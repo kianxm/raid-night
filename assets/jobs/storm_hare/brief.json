@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: thumps its foot and a thunderclap rolls out",
     "stolen": "gotcha pose when stolen: a quick daring gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "floater",
   "budget": {
     "heightStuds": 3.5,
     "texture": 1024,
@@ -21,6 +22,7 @@
     "#141B33"
   ],
   "personality": "daring",
+  "pose": "sitting on its small thundercloud, which floats above the ground",
   "status": "prompts-ready",
   "tier": "Legendary"
 }

@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: counts a stack of glowing coins and grins",
     "stolen": "gotcha pose when stolen: a quick smug gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "upright",
   "budget": {
     "heightStuds": 3.5,
     "texture": 1024,
@@ -21,6 +22,7 @@
     "#15111C"
   ],
   "personality": "smug",
+  "pose": "standing upright on two short legs, arms relaxed",
   "status": "prompts-ready",
   "tier": "Legendary"
 }
