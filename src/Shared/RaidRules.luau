@@ -9,6 +9,7 @@
 
 local Types = require("./Types")
 local Config = require("./Config")
+local Economy = require("./Economy")
 
 type PlayerProfile = Types.PlayerProfile
 type DenSnapshot = Types.DenSnapshot
@@ -31,6 +32,21 @@ RaidRules.Reason = table.freeze({
 	RevengeExpired = "RevengeExpired",
 	NotInSnapshot = "NotInSnapshot",
 	NotStealable = "NotStealable",
+	-- Live stealing (decision D-003)
+	SwitchedOff = "SwitchedOff", -- Escrow.canStartTransfer refused (kill switch)
+	RaiderNotReady = "RaiderNotReady", -- raider has no den or no loaded profile
+	EmptyDen = "EmptyDen", -- nobody owns this den
+	OwnDen = "OwnDen", -- you cannot steal from yourself
+	OwnerNotReady = "OwnerNotReady", -- the owner's profile is not loaded
+	AlreadyCarrying = "AlreadyCarrying",
+	NothingOnPad = "NothingOnPad",
+	CritterBusy = "CritterBusy", -- already carried (or on its way through escrow)
+	OutOfRange = "OutOfRange",
+	LockdownActive = "LockdownActive",
+	LockdownCooldown = "LockdownCooldown",
+	-- Live loss rules (decision D-031)
+	LiveProtected = "LiveProtected", -- the den lost enough Glow/s to live steals today
+	PostLossSafety = "PostLossSafety", -- a live loss just landed (or a carry from the den is under way)
 })
 
 function RaidRules.dayIndex(now: number): number
@@ -44,6 +60,8 @@ function RaidRules.resetDailyIfNeeded(profile: PlayerProfile, now: number)
 		profile.lossDay = today
 		profile.lossesToday = 0
 		profile.pairRaidsToday = {}
+		profile.liveLossBaseRate = nil
+		profile.liveLossRateToday = nil
 	end
 end
 
@@ -142,6 +160,298 @@ function RaidRules.carrySpeedMultiplier(weight: Weight): number
 		return 0.6
 	end
 	return 0.45 -- VeryHeavy
+end
+
+-- Live stealing (decision D-003) ------------------------------------------------------------------
+--[[
+	Pure rules for stealing from an online owner's den. RaidService feeds them server-seen
+	positions and its own state; nothing here comes from a client. Times are whatever clock the
+	caller uses consistently (RaidService passes workspace:GetServerTimeNow() for live raids and
+	os.time() for profile reads).
+]]
+
+-- Live-raid tuning Config.LiveRaid does not hold yet. These stay here for Phase 0 and move to
+-- Config in the next contract batch (decision D-021). The grab range is Config.LiveRaid.grabRange
+-- (decision D-018).
+RaidRules.Live = table.freeze({
+	-- Movement budget (see carryStep). It refills at moveRefill x the carry walk speed and holds
+	-- at most budgetSeconds of walking plus budgetSlack studs. A carry starts with the slack only,
+	-- so a speed hack fails quickly (1.5x within a second, 1.15x within 40 / walkSpeed s), while a
+	-- lag freeze of up to budgetSeconds (no samples, then one catch-up jump) still passes: the
+	-- budget refills during the freeze.
+	moveRefill = 1.1,
+	budgetSeconds = 1,
+	budgetSlack = 2,
+	maxCarryHeight = 16, -- studs of root part above the den floor (a jump off the den station fits)
+})
+
+export type Lockdown = {
+	startedAt: number,
+	untilAt: number, -- start + lockdownSeconds
+	readyAt: number, -- untilAt + lockdownCooldownSeconds (decision D-011)
+}
+
+export type LiveGrab = {
+	flagsAllow: boolean, -- Escrow.canStartTransfer(Config.Flags, "Live", isRevenge)
+	raiderUserId: number,
+	raiderReady: boolean, -- raider has a den to escape to and a loaded profile
+	ownerUserId: number?, -- the den's owner; nil when nobody owns it
+	ownerProfile: PlayerProfile?, -- nil when not loaded
+	-- RaidRules.entryBlocked for this raider right now: someone who was not inside when a
+	-- Lockdown began cannot grab, even if a teleport put them in range between push-backs.
+	lockdownBlocked: boolean,
+	padIndex: number,
+	carrying: boolean, -- the raider already carries a critter
+	isLocked: (uid: string) -> boolean, -- critter already carried or in escrow
+	-- Steals from this den already under way (carried, or in escrow and not settled). Any at all
+	-- refuses the grab (PostLossSafety): each may land as a loss, and a crowd must not beat the
+	-- post-loss safety window or the protection check by grabbing together (decision D-031).
+	inFlightForOwner: number,
+	-- Of those, the ones by this raider: they count against the pair's daily limit once they land.
+	inFlightForPair: number,
+	-- When this den last lost a critter to a live steal, on the same clock as `now`. Server memory
+	-- (RaidService), never persisted: live steals are same-server. nil = none this server session.
+	lastLiveLossAt: number?,
+	distance: number, -- raider root part to the pad, server positions
+	now: number, -- unix seconds: the owner's daily counters and the post-loss safety window
+}
+
+export type CarryOutcome = "Continue" | "TooFast" | "TooHigh" | "SkippedStreet" | "Escape" | "Tagged" | "DropAtBorder"
+
+export type CarryStep = {
+	moved: number, -- horizontal (X/Z) studs since the last sample
+	dt: number, -- seconds since the last sample
+	walkSpeed: number, -- the carry walk speed the server set
+	budget: number, -- movement budget left after the last sample (carryStartBudget at the grab)
+	height: number, -- carrier root part above the den floor, studs
+	insideOwnDen: boolean,
+	wasInsideDefenderDen: boolean,
+	insideDefenderDen: boolean,
+	-- An earlier sample was outside both dens, with no return into the owner's den since.
+	crossedStreet: boolean,
+	lockdownActive: boolean, -- the defender's den is locked down right now
+	-- The critter's OWNER to the carrier on X/Z only (height never dodges a tag; nobody else can
+	-- tag); nil when the owner has no character.
+	ownerDistance: number?,
+}
+
+-- The critter the owner's profile has on this pad, or nil. Models and attributes never decide
+-- which critter a pad holds (decision D-014).
+function RaidRules.padCritter(profile: PlayerProfile, padIndex: number): Critter?
+	for _, critter in profile.critters do
+		if critter.placement == "Pad" and critter.padIndex == padIndex then
+			return critter
+		end
+	end
+	return nil
+end
+
+-- Read-only: critters this profile lost today (no reset is written).
+function RaidRules.lossesToday(profile: PlayerProfile, now: number): number
+	return if profile.lossDay == RaidRules.dayIndex(now) then profile.lossesToday else 0
+end
+
+--[[
+	Live loss rules (decision D-031). Live steals only; async raids keep maxLossesPerDay.
+	  - A den's live losses are valued in Glow/s: each stolen critter's Economy.critterRate at the
+	    debit (mutation, rebirths, its placement before the steal).
+	  - The base is Economy.denRate of the den for its first live loss of the UTC day, measured when
+	    that steal's grab was accepted, before the owner was alerted (decision D-034): the record's
+	    liveBaseRate. An owner who moves high earners off their pads during the carry cannot
+	    shrink it. A record without one falls back to denRate just before the debit.
+	  - Once today's losses reach Config.LiveRaid.protectionLossShare of the base, the den is
+	    protected from live steals for the rest of the UTC day. The debit that crosses the line
+	    lands; nothing after it does (canGrabLive refuses, and Escrow.debitDefender takes nothing).
+	  - After any live loss nobody can grab from the den for postLossSafetySeconds.
+	Both fields live on the profile, belong to lossDay and reset with it, so stealing a few cheap
+	critters from a rich den never protects it, and losing the den's best critter does.
+]]
+
+-- Read-only: is this den protected from live steals for the rest of today? A profile without the
+-- fields (no live loss today, or a save from before D-031) is not. A NaN counts as protected.
+function RaidRules.liveProtected(profile: PlayerProfile, now: number): boolean
+	local base, lost = profile.liveLossBaseRate, profile.liveLossRateToday
+	if profile.lossDay ~= RaidRules.dayIndex(now) or base == nil or lost == nil then
+		return false
+	end
+	return not (lost < Config.LiveRaid.protectionLossShare * base)
+end
+
+--[[
+	Records one live loss on the defender: the base on the day's first, and the critter's Glow/s.
+	Call it from the escrow debit BEFORE the critter leaves the profile, so its rate is the one it
+	earned where it sat (and a fallback base still counts it). Errors if the critter is already gone.
+	`grabBaseRate` is the record's liveBaseRate (D-034): the base when this is the day's first live
+	loss. nil, or anything but a finite number >= 0, means none: denRate is measured now instead.
+	Later losses that day never change the base.
+]]
+function RaidRules.recordLiveLoss(defender: PlayerProfile, critter: Critter, now: number, grabBaseRate: number?)
+	assert(defender.critters[critter.uid] ~= nil, "recordLiveLoss: call before the critter leaves the profile")
+	RaidRules.resetDailyIfNeeded(defender, now)
+	if defender.liveLossBaseRate == nil then
+		local measured = type(grabBaseRate) == "number" and grabBaseRate >= 0 and grabBaseRate < math.huge
+		defender.liveLossBaseRate = if measured then grabBaseRate else Economy.denRate(defender)
+	end
+	defender.liveLossRateToday = (defender.liveLossRateToday or 0) + Economy.critterRate(critter, defender.rebirths)
+end
+
+-- When grabs from a den reopen after a live loss at `lastLiveLossAt` (any clock; the answer is on
+-- the same one). RaidService also shows it as the den's LiveGrabReadyAt attribute.
+function RaidRules.liveGrabReadyAt(lastLiveLossAt: number): number
+	return lastLiveLossAt + Config.LiveRaid.postLossSafetySeconds
+end
+
+-- Can this raider grab the critter on this pad? Returns the critter on success.
+function RaidRules.canGrabLive(g: LiveGrab): (boolean, string?, Critter?)
+	if not g.flagsAllow then
+		return false, RaidRules.Reason.SwitchedOff, nil
+	end
+	if not g.raiderReady then
+		return false, RaidRules.Reason.RaiderNotReady, nil
+	end
+	if g.ownerUserId == nil then
+		return false, RaidRules.Reason.EmptyDen, nil
+	end
+	if g.ownerUserId == g.raiderUserId then
+		return false, RaidRules.Reason.OwnDen, nil
+	end
+	local profile = g.ownerProfile
+	if profile == nil or profile.userId ~= g.ownerUserId then
+		return false, RaidRules.Reason.OwnerNotReady, nil
+	end
+	if g.lockdownBlocked then
+		return false, RaidRules.Reason.LockdownActive, nil
+	end
+	if g.carrying then
+		return false, RaidRules.Reason.AlreadyCarrying, nil
+	end
+	local critter = RaidRules.padCritter(profile, g.padIndex)
+	if critter == nil then
+		return false, RaidRules.Reason.NothingOnPad, nil
+	end
+	if g.isLocked(critter.uid) then
+		return false, RaidRules.Reason.CritterBusy, nil
+	end
+	-- Live loss rules (decision D-031): no daily count cap for live steals. The longest-lasting
+	-- refusal comes first, so the raider sees the reason that matters.
+	if RaidRules.liveProtected(profile, g.now) then
+		return false, RaidRules.Reason.LiveProtected, nil
+	end
+	-- Same-pair daily limit (decisions D-022, D-031), read from the owner's counters for this raider.
+	local pairRaids = RaidRules.pairCount(profile, g.raiderUserId, g.now) + g.inFlightForPair
+	if pairRaids >= Config.LiveRaid.maxStealsPerPairPerDay then
+		return false, RaidRules.Reason.PairLimit, nil
+	end
+	local lastLoss = g.lastLiveLossAt
+	if g.inFlightForOwner > 0 or (lastLoss ~= nil and not (g.now >= RaidRules.liveGrabReadyAt(lastLoss))) then
+		return false, RaidRules.Reason.PostLossSafety, nil -- `not >=` also refuses NaN
+	end
+	if not (g.distance <= Config.LiveRaid.grabRange) then -- also refuses NaN
+		return false, RaidRules.Reason.OutOfRange, nil
+	end
+	return true, nil, critter
+end
+
+-- Has a server-timed grab hold lasted long enough?
+function RaidRules.grabHoldDone(startedAt: number, now: number): boolean
+	return now - startedAt >= Config.LiveRaid.grabHoldSeconds
+end
+
+function RaidRules.carryWalkSpeed(baseWalkSpeed: number, weight: Weight): number
+	return baseWalkSpeed * RaidRules.carrySpeedMultiplier(weight)
+end
+
+-- The most movement budget a carrier at `walkSpeed` can bank.
+function RaidRules.carryBudgetCap(walkSpeed: number): number
+	return walkSpeed * RaidRules.Live.budgetSeconds + RaidRules.Live.budgetSlack
+end
+
+-- The budget a carry starts with: the slack only, nothing banked.
+function RaidRules.carryStartBudget(): number
+	return RaidRules.Live.budgetSlack
+end
+
+--[[
+	One server sample of a carry. Returns the outcome, the budget left, and whether the carrier
+	has now been seen on the street. First match wins:
+	  TooFast        the budget went negative: sustained speed, or a jump bigger than ~1 s of
+	                 walking. The budget refills at moveRefill x walkSpeed, capped, then pays for
+	                 the X/Z distance moved.
+	  TooHigh        root part more than maxCarryHeight above the den floor (flying)
+	  DropAtBorder   left the owner's den during a Lockdown (checked before an escape, so no jump
+	                 out of a locked den lands as one)
+	  SkippedStreet  reached your own den without being seen outside both dens since last leaving
+	                 the owner's den: a hop across the gap between neighbouring dens never escapes
+	                 (the critter drops)
+	  Escape         inside your own den; home is safe even with the owner close behind
+	  Tagged         the owner within tagRange on X/Z
+]]
+function RaidRules.carryStep(s: CarryStep): (CarryOutcome, number, boolean)
+	local refill = RaidRules.Live.moveRefill * s.walkSpeed * math.max(s.dt, 0)
+	local budget = math.min(RaidRules.carryBudgetCap(s.walkSpeed), s.budget + refill) - s.moved
+	-- Going back into the owner's den forgets the street: a carrier cannot step out once, come
+	-- back, bank budget and then hop the gap into their own den.
+	local outsideBoth = not s.insideDefenderDen and not s.insideOwnDen
+	local crossedStreet = (s.crossedStreet and not s.insideDefenderDen) or outsideBoth
+	if not (budget >= 0) then -- NaN fails too
+		return "TooFast", budget, crossedStreet
+	end
+	if not (s.height <= RaidRules.Live.maxCarryHeight) then
+		return "TooHigh", budget, crossedStreet
+	end
+	if s.lockdownActive and s.wasInsideDefenderDen and not s.insideDefenderDen then
+		return "DropAtBorder", budget, crossedStreet
+	end
+	if s.insideOwnDen then
+		return if crossedStreet then "Escape" else "SkippedStreet", budget, crossedStreet
+	end
+	if s.ownerDistance and s.ownerDistance <= Config.LiveRaid.tagRange then
+		return "Tagged", budget, crossedStreet
+	end
+	return "Continue", budget, crossedStreet
+end
+
+-- Lockdown (decisions D-003, D-011, D-013) ---------------------------------------------------------
+
+function RaidRules.startLockdown(now: number): Lockdown
+	local untilAt = now + Config.LiveRaid.lockdownSeconds
+	return {
+		startedAt = now,
+		untilAt = untilAt,
+		readyAt = untilAt + Config.LiveRaid.lockdownCooldownSeconds,
+	}
+end
+
+function RaidRules.lockdownActive(lockdown: Lockdown?, now: number): boolean
+	return lockdown ~= nil and now < lockdown.untilAt
+end
+
+-- May the owner start a Lockdown now? (Owner-only is the caller's check.)
+function RaidRules.canStartLockdown(lockdown: Lockdown?, now: number): (boolean, string?)
+	if lockdown == nil then
+		return true, nil
+	end
+	if now < lockdown.untilAt then
+		return false, RaidRules.Reason.LockdownActive
+	end
+	if now < lockdown.readyAt then
+		return false, RaidRules.Reason.LockdownCooldown
+	end
+	return true, nil
+end
+
+-- Must this visitor be pushed out of the den? Lockdown blocks ENTRY only: someone already inside
+-- at the last sample may stay or leave. The owner is never blocked. Revenge does not bypass a
+-- Lockdown (decision D-013), so `isRevenge` is deliberately ignored.
+function RaidRules.entryBlocked(
+	lockdown: Lockdown?,
+	now: number,
+	isOwner: boolean,
+	_isRevenge: boolean,
+	wasInside: boolean,
+	isInside: boolean
+): boolean
+	return isInside and not wasInside and not isOwner and RaidRules.lockdownActive(lockdown, now)
 end
 
 -- Records the raid on the raider's own profile (pair count and log). Call once per finished

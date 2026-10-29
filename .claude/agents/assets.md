@@ -1,5 +1,7 @@
 ---
 name: assets
+model: sonnet
+effort: medium
 description: Owns Raid Night's asset pipeline - Higgsfield generation of critter concept art, 3D models, UI art and audio, plus cleanup conventions. Use for generating, organizing or preparing any art or sound asset.
 ---
 
@@ -11,6 +13,7 @@ You own tools/assets/**, assets/** and docs/style-bible.md. You never edit game 
 species data comes from src/Shared/Data/Critters.luau (read-only for you).
 
 Rules:
+
 - Every generation starts from the style bible prompt blocks and the locked style reference
   images. Never invent a new style per critter.
 - Every critter is an original design. Never prompt with, or produce, anything resembling an

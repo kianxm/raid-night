@@ -22,6 +22,16 @@ end
 local Config = {
 	SCHEMA_VERSION = 1,
 
+	-- Kill switches. false turns the feature off everywhere; every service checks its flag
+	-- before acting. Defaults: only features that exist are on.
+	Flags = {
+		raids = true, -- live stealing (Phase 0)
+		asyncRaids = false, -- offline raids (Phase 1)
+		purchases = false, -- Robux products (Phase 2)
+		trading = false, -- trading (post-launch)
+		notifications = false, -- experience notifications (Phase 2)
+	},
+
 	Loot = {
 		maxCrittersPerRaid = 1,
 		storedGlowShare = 0.25, -- share of the defender's stored Glow a raid can take
@@ -40,7 +50,9 @@ local Config = {
 	},
 
 	Limits = {
-		maxLossesPerDay = 3, -- critters a player can lose per UTC day
+		-- Critters a player can lose to ASYNC raids per UTC day (every loss counts toward it). Live
+		-- steals use LiveRaid's value-based protection instead (decision D-031).
+		maxLossesPerDay = 3,
 		maxRaidsPerPairPerDay = 2, -- raids between the same two players per UTC day, revenge included
 	},
 
@@ -54,11 +66,45 @@ local Config = {
 		stolenTradeLockSeconds = 24 * HOUR,
 	},
 
+	-- Live stealing in a den whose owner is online (decision D-003). Server-enforced.
+	LiveRaid = {
+		lockdownSeconds = 45, -- a Lockdown blocks new raiders from entering the den this long
+		-- Counts from the END of a Lockdown (decision D-011). LockdownUntil = start + lockdownSeconds;
+		-- LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds, the earliest the next one can
+		-- start. So a den is locked at most 45 s in every 165 s.
+		lockdownCooldownSeconds = 120,
+		tagRange = 6, -- studs: how close the owner must be to tag a raider
+		grabHoldSeconds = 1, -- how long a raider holds the grab to pick a critter up
+		-- Studs from the raider's root part to the pad centre: how close a raider must be to start
+		-- a grab, and to stay for the whole hold (decision D-018).
+		grabRange = 10,
+		-- Live loss rules (decision D-031). The next three are launch guesses; tuned in Phase 3 (P3.9).
+		-- After a live loss nobody can grab from that den for this long (RaidService memory).
+		postLossSafetySeconds = 60,
+		-- Live steals between the same two players per UTC day (the shared pairRaidsToday count).
+		maxStealsPerPairPerDay = 2,
+		-- Once today's live losses reach this share of the den's Glow/s, measured just before its
+		-- first live loss of the day, the den is protected from live steals until the UTC day ends.
+		protectionLossShare = 0.5,
+	},
+
 	Income = {
 		baseStorageSeconds = 8 * HOUR, -- storage cap at den level 1, expressed in seconds of income
 		storageSecondsPerLevel = 15 * 60, -- +15 min of storage per den level
 		vaultMultiplier = 0.5,
 		rebirthMultiplierStep = 0.5, -- each rebirth adds +50% Glow
+	},
+
+	-- Robux-bought Glow multipliers (decision D-030). They multiply Glow earned in play and never
+	-- grant Glow directly. Bonuses stack additively: VIP + Lantern Night = +100%, so 2.0x (not
+	-- 1.5 * 1.5). Robux-linked: never applied to a player whose PolicyService info restricts paid
+	-- random items (ArePaidRandomItemsRestricted). Fail closed: if PolicyService can't be read
+	-- for a player, treat them as restricted. Their Glow stays earn-only, so eggs stay purchasable
+	-- for them. Ship only after the P2.8 reviewer policy audit and PolicyService check.
+	Boosts = {
+		vipGlowBonus = 0.5, -- VIP pass: +50% Glow (1.5x on its own)
+		lanternNightGlowBonus = 0.5, -- Lantern Night server boost: +50% Glow for everyone in the server
+		lanternNightSeconds = 15 * 60, -- how long one Lantern Night lasts
 	},
 
 	Mutations = {
@@ -86,6 +132,9 @@ local Config = {
 		eggPriceBase = 50,
 		eggPriceGrowth = 1.12, -- egg price scales with den level
 		rebirthMinTier = "Legendary", -- must own at least one critter of this tier or higher
+		-- Highest tier a bought egg can hatch. Tiers up to it keep their EggOdds ratios,
+		-- renormalized (Economy.rollTierUpTo). Phase 2 raises it to "Mythic" (decision D-003).
+		eggMaxTier = "Uncommon",
 	},
 
 	Matchmaking = {
@@ -105,7 +154,8 @@ local Config = {
 	},
 
 	Escrow = {
-		appliedTransferRetentionSeconds = 7 * DAY,
+		appliedTransferRetentionSeconds = 7 * DAY, -- never applied to a raid that is still open
+		maxRaidIdLength = 43, -- DataStore keys are at most 50 characters, minus "Escrow_"; a GUID is 36
 	},
 
 	Notifications = {

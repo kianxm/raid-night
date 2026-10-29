@@ -12,12 +12,90 @@
 local process = require("@lune/process")
 
 local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
-	{ name = "Catalog", load = function() return require("./specs/Catalog.spec") end },
-	{ name = "Economy", load = function() return require("./specs/Economy.spec") end },
-	{ name = "RaidRules", load = function() return require("./specs/RaidRules.spec") end },
-	{ name = "Profile", load = function() return require("./specs/Profile.spec") end },
-	{ name = "Escrow", load = function() return require("./specs/Escrow.spec") end },
-	{ name = "EscrowSimulation", load = function() return require("./specs/EscrowSimulation.spec") end },
+	{
+		name = "Catalog",
+		load = function()
+			return require("./specs/Catalog.spec")
+		end,
+	},
+	{
+		name = "Config",
+		load = function()
+			return require("./specs/Config.spec")
+		end,
+	},
+	{
+		name = "Economy",
+		load = function()
+			return require("./specs/Economy.spec")
+		end,
+	},
+	{
+		name = "HudMath",
+		load = function()
+			return require("./specs/HudMath.spec")
+		end,
+	},
+	{
+		name = "RaidRules",
+		load = function()
+			return require("./specs/RaidRules.spec")
+		end,
+	},
+	{
+		name = "RaidRulesLive",
+		load = function()
+			return require("./specs/RaidRulesLive.spec")
+		end,
+	},
+	{
+		name = "LiveLossRules",
+		load = function()
+			return require("./specs/LiveLossRules.spec")
+		end,
+	},
+	{
+		name = "RaidServiceSource",
+		load = function()
+			return require("./specs/RaidServiceSource.spec")
+		end,
+	},
+	{
+		name = "Plots",
+		load = function()
+			return require("./specs/Plots.spec")
+		end,
+	},
+	{
+		name = "Profile",
+		load = function()
+			return require("./specs/Profile.spec")
+		end,
+	},
+	{
+		name = "Escrow",
+		load = function()
+			return require("./specs/Escrow.spec")
+		end,
+	},
+	{
+		name = "EscrowKillSwitch",
+		load = function()
+			return require("./specs/EscrowKillSwitch.spec")
+		end,
+	},
+	{
+		name = "TestProfiles",
+		load = function()
+			return require("./specs/TestProfiles.spec")
+		end,
+	},
+	{
+		name = "EscrowSimulation",
+		load = function()
+			return require("./specs/EscrowSimulation.spec")
+		end,
+	},
 }
 
 local filter = process.args[1]

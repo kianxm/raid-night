@@ -56,6 +56,9 @@ Net.Requests = table.freeze({
 	GrabCritter = "GrabCritter", -- RemoteEvent: (raidId, critterUid)
 	GetRaidLog = "GetRaidLog", -- () -> { RaidLogEntry }
 	GetReplay = "GetReplay", -- (raidId) -> compressed replay frames
+	-- () -> boolean (true if started). Den owner only, live raids only. Blocks entry only: raiders
+	-- inside can leave, but a carried critter drops at the border. Server enforces Config.LiveRaid.
+	Lockdown = "Lockdown",
 })
 
 -- Server -> client pushes (RemoteEvents).
@@ -72,6 +75,18 @@ Net.Limits = table.freeze({
 	GrabCritter = 5,
 	StartRaid = 3,
 	BuyEgg = 10,
+	Lockdown = 3,
 })
+
+--[[
+	Replicated attributes: server-written, display-only state on Instances (full list in
+	docs/contracts.md, "Replicated attributes"). The server keeps the truth in its own tables and
+	never makes a gameplay or data decision from an attribute; clients must never be trusted for
+	them.
+	  Player:    Plot, CarryingUid ("" = not carrying), CarryingSpecies (species id, "" = none)
+	  Den Model: Plot, OwnerUserId, LockdownUntil, LockdownReadyAt (workspace:GetServerTimeNow())
+	  Pad:       PadIndex
+	  Critter:   CritterUid, SpeciesId, Tier, PadIndex, OwnerUserId
+]]
 
 return Net

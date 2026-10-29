@@ -9,7 +9,8 @@
 	  3. Get a review from the `reviewer` agent before merging.
 
 	Persisted types (saved to DataStore) are marked [persisted]. Never remove or rename a field on
-	a persisted type without a migration.
+	a persisted type without a migration. An optional field whose absence means the old behavior
+	needs no migration or SCHEMA_VERSION bump, but needs an old-save test (D-005).
 ]]
 
 -- Critter catalog -------------------------------------------------------------------------------
@@ -50,6 +51,9 @@ export type Critter = {
 	padIndex: number?, -- set only when placement == "Pad"
 	acquiredAt: number, -- unix seconds
 	stolenLockUntil: number?, -- untradeable until this time (set when stolen)
+	-- Never tradeable or giftable (e.g. rescue-egg critters). Missing = tradeable, so no
+	-- migration. Survives escrow. Check with Profile.isTradeable (decision D-005).
+	untradeable: boolean?,
 }
 
 -- Den defenses --------------------------------------------------------------------------------
@@ -122,8 +126,16 @@ export type PlayerProfile = {
 	-- Raid safety state
 	shieldUntil: number,
 	lossDay: number, -- UTC day index the daily counters belong to
-	lossesToday: number, -- critters lost today (capped by Config.Limits.maxLossesPerDay)
-	pairRaidsToday: { [string]: number }, -- other userId (as string) -> raids between you today
+	-- Critters lost today, live and async. Async raids stop at Config.Limits.maxLossesPerDay; live
+	-- steals use the value rule below instead (decision D-031).
+	lossesToday: number,
+	pairRaidsToday: { [string]: number }, -- other userId (as string) -> raids and live steals between you today
+	-- Live loss rules (decision D-031). Both belong to lossDay and go back to nil when the day rolls
+	-- (RaidRules.resetDailyIfNeeded). Missing = no live loss today, so no migration.
+	-- The den's Glow/s for today's first live loss: at its grab (EscrowRecord.liveBaseRate, D-034),
+	-- or just before its debit when the record has no grab-time base.
+	liveLossBaseRate: number?,
+	liveLossRateToday: number?, -- Glow/s of the critters lost to live steals today, summed
 
 	-- Raid history and idempotency
 	raidLog: { RaidLogEntry },
@@ -172,6 +184,10 @@ export type MatchEntry = {
 -- Voided: cancelled before any debit (cheat detected, raid invalid). Terminal.
 export type EscrowState = "Pending" | "Debited" | "Committed" | "Voided"
 
+-- Live: a steal between two players in one server (EscrowService.transferLive). Async: a raid on
+-- an offline den (Phase 1). The kind decides which daily loss rule the debit applies (D-031).
+export type TransferKind = "Live" | "Async"
+
 -- [persisted, separate key per raidId] The record that makes a cross-profile transfer safe.
 export type EscrowRecord = {
 	raidId: string,
@@ -185,7 +201,33 @@ export type EscrowRecord = {
 	isRevenge: boolean,
 	createdAt: number,
 	updatedAt: number,
+	-- A unique id (GUID) set by the call that creates the record and never changed, so that call
+	-- recognises its own create when the write landed but the response was lost. Missing on
+	-- records written before it existed; no migration (they are simply never "ours").
+	createNonce: string?,
+	-- Set at create and never changed (Escrow.canReplace). Missing = "Live": every record written
+	-- before it existed is a Phase 0 live steal, so no migration (decision D-031).
+	kind: TransferKind?,
+	-- Live only (decision D-034): the defender den's Glow/s (Economy.denRate) when the raider's
+	-- grab was accepted, before the owner could react. The base for the day's first live loss.
+	-- Set by Escrow.create (checked by Escrow.checkLiveBaseRate, rounded to 0.001 Glow/s) and never
+	-- changed; part of the transfer's identity (Escrow.sameTransfer). Missing = no grab-time
+	-- measurement (records written before it existed, Async): the debit measures the den instead.
+	-- No migration.
+	liveBaseRate: number?,
 }
+
+-- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.
+export type EscrowOpenEntry = {
+	role: "Raider" | "Defender",
+	createdAt: number, -- when the raid's transfer started (unix seconds)
+}
+
+-- [persisted, separate key per user: `Open_<userId>`] Open escrows a player is a party to, keyed
+-- by raidId. Written for BOTH parties before the record is created; removed once the record is
+-- terminal. Recovery reads it on every load, and appliedTransfers entries for raidIds listed
+-- here are never pruned.
+export type EscrowOpenIndex = { [string]: EscrowOpenEntry }
 
 -- Results ------------------------------------------------------------------------------------
 
