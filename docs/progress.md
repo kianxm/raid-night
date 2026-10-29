@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 2 (started 2026-10-29, unattended overnight; D-057) · Last updated: 2026-10-29
+Current phase: 2, at the Phase 2 gate (waiting for Kian) · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -60,43 +60,46 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 ## Phase 2: Vertical slice (parallelism 4)
 
-Started 2026-10-29 (Kian: "Run Phase 2", unattended overnight). No Higgsfield credits: placeholder
-art and sound, generation blocked (D-057). Merges wait for Kian; PRs stack, `preview/phase2` proves
-the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
+Started and run to the gate 2026-10-29 (Kian: "Run Phase 2", unattended overnight). No Higgsfield
+credits: placeholder art and sound (D-057). Merges refused: every PR is folded into
+`preview/phase2` (802513e: 657 tests, 0 fail, lint/format/types clean); Kian lands the phase by
+merging it (D-058, D-067). Gate report: `docs/gate-report-phase2.md`.
+
+"Done" below means reviewed (where required), checks green, and folded into preview/phase2.
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| C6 | data | — | In review | #123 | 1 | Reviewer (xhigh) APPROVED. 365 tests. 7 optional fields, no migration. Ship together with P2.6 (else existing-build new players get onboarding later). D-063. Was: Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
-| P2.1 | assets | — | Blocked | #87 (open) | 1 | Generation paused: no credits (D-057); Gate 1 picks are Kian's. Prompts and 40 fronts done in #87 |
-| P2.2 | assets | — | Blocked | #122 (stacked on #87) | 1 | Briefs done: 19 pieces, kit manifest (ids empty), credit estimate ~263 (38 images + 25 meshes incl. retries). Generation + Asset Gates wait for credits (D-057) |
-| P2.3 | raid | — | In review | #125 | 1 | 365 tests. Kit seam (WorldKit template → asset id → greybox), pads via Economy.padCount 6→30, dens/pockets stream as units, 12 lights; full map 851 parts / 1,943 instances; manifest ids 1:1 (+10 seam-only ids). No contract change. Phone numbers: Kian. Was: Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
-| P2.4 | economy | — | In review | #124 | 1 | 368 tests. Species→asset-id seam (ids empty), tier glow + 4 mutations on placeholders, eggMaxTier → Mythic (first rebirth median day 20.7, den 40 on day 2.7 vs 16.7 → P2.4t), snooze_bat hovers. Handoffs: client idle animator (ui), pocket/carried critters use the builder (raid), ids.json (assets). Was: Was P2.1: model-id seam with placeholder fallback, mutation effects, eggMaxTier → Mythic (D-057) |
-| P2.5 | ui | — | In review | #119, #120, #121 (stacked) | 1 | 358 tests. Shop + strings table, Bag + Den mgmt, Settings + silent sound cues. Needs GetSettings/SaveSettings remotes on C6 (data) and DenState.vaultSlots. Not run in Studio. Was: Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
-| P2.6 | ui | P2.5, C6b, P2.6r | In review | #142 (stacked on #139) | 1 | 615 tests. One hint at a time from GetOnboarding/OnboardingChanged, arrow to TutorialDenPosition, first-steal banner, raidLogTip "Got it" ack, others' tutorial prompts hidden; OptInController inert until #140 (confirm PromptOptIn return in Studio). UI: no review. Exit check "first steal < 3 min" needs Studio. Was: Onboarding (Appendix C) |
-| P2.7 | notifications | — | In review | #118 | 1 | Reviewer APPROVED; fail-closed reads + atomic day claim + merged saveState folded in. 359 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
-| P2.8 | economy | C6 | In review | #127 (stacked on #123) | 1 | 396 tests. Receipts exactly-once (40 seeds x 60 forced-shutdown sim, mutation caught), factor helper in IncomeService + source guard, Config.Purchases (D-061 defaults, ids 0), products + audit table for Kian. Reviewer (xhigh) BLOCKING x2 (receipt redelivered before profile load; VIP offered to restricted), fixed in 38d47c8 (397 tests, redelivery-before-load sim case); re-review APPROVED. Handoffs P2.8b/m/c, ui (D-065). Was: Passes/products, glow-factor helper, policy audit; products for Kian |
-| P2.9 | data | C6 | In review | #128 (stacked on #123) | 1 | 395 tests. Analytics.luau schema (17 events, 2 funnels, sources/sinks), AnalyticsService sender, data events, EscrowService → NotificationService.onLoss by name (D-066). Reviewer (xhigh) APPROVED. Call points handed to economy/raid/matchmaking/notifications/C6b. Live check needs a published place. Was: Analytics events (Appendix A) + funnels |
-| P2.10 | raid | C6, P2.3 | In review | #129 (stacked on #123) | 1 | Reviewer APPROVED (396 tests). Switches Config.Gear.enabled + items.lockpick.enabled. 394 tests (28 GearRules incl. exploits). Server-validated use; buying waits on P2.8c. Lockpick vs Lockdown + switches (D-068). Reviewer next. Was: Gear (live only for lockpick) |
-| P2.11 | assets | — | Blocked | | 0 | No credits (D-057); sound hooks ship empty in P2.5 |
-| C6b | data | C6 | In review | #126 (stacked on #123) | 1 | 396 tests. Settings + onboarding remotes, RateLimit.luau, steps 0-6 server-advanced (raidLogTip client ack only). Reviewer (xhigh) APPROVED. D-064 |
-| P2.6r | raid | C6b, P2.3, P2.6e | In review | #139 → preview/phase2 | 1 | 609 tests, 0 fail. TutorialDen per player on the street, NewPlayerShield 30 min (Config.Protection), RaidEvents (count + analytics), CarryProp/TestHook via CritterView. Pocket still orbs (follow-up). D-069. Reviewer APPROVED; sendEnded-before-count tweak folded in. Was: Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
-| P2.4t | economy | P2.4 | Blocked | #138 (PROPOSAL, not in preview) | 1 | Needs Kian. ~200 value sets swept: none gives both level 40 ~day 16.7 and ~3-week rebirth. Options: (1) eggPriceBase 400, growth 1.26 (L40 day 4.7, rebirth median 23.8, Glow held ~15 egg prices at day 21); (2) odds x2 for Legendary/Mythic (design + ui/odds changes); (3) no change (L40 day 2.7, rebirth 21.7); (4) new task: egg tiers unlock by den level. Was: Tuning proposal after eggMaxTier → Mythic (den 40 on day 2.7); prepared on a branch, stop for Kian |
-| P2.6e | economy | C6b | In review | #130 (stacked on #126) | 1 | 407 tests. Onboarding call points; free-egg auto-place also marks `place`; grantTutorialCritter (dusk_mouse, untradeable, once, keyed on stealHome: raid must NOT advance stealHome first; use tutorialCritterAvailable); setShownPads. No contract change. Was: advanceOnboarding call points, one-time untradeable tutorial critter grant, setShownPads (D-064) |
-| P2.8b | data | P2.8 | In review | #132 (stacked on #127) | 1 | 402 tests. Escrow loadProfile + seedTestSession accrue via the helper (setGlowAccrue hook registered in EscrowService.start); absent defenders stay factor 1. Reviewer (xhigh) APPROVED; PENDING now empty with #133. Was: EscrowService loadProfile + seedTestSession through the factor helper |
-| P2.8m | matchmaking | P2.8 | In review | #133 → preview/phase2 | 1 | Snapshot accrue via helper (PENDING entry removed), raid_portal_opened + RaidFlow Portal step. Raid scout undefined → Kian (proposal: +1 target for owners). Reviewer APPROVED |
-| P2.8c | economy | P2.8, P2.9, P2.10 | In review | #141 → preview/phase2 | 1 | 598 tests. buyGear (Glow only, one non-yielding call) + UpgradeGear; vaultSlots; GetShopOffers hides Robux-linked for restricted/unknown; economy analytics (rebirth has no call site: not served yet); Lantern Night push with `boosted`. Reviewer (xhigh) APPROVED. Was: DenState.vaultSlots, GetShopOffers remote (additive Net, D-059); Economy.buyGear + UpgradeGear; economy analytics call points (P2.9); contracts.md "P2.8 gate" paragraph lists 2 remaining accrues, not 3 (from #133) |
-| P2.5d | ui | P2.5, C6b | In review | #135, #136 (stacked) → preview/phase2 | 1 | Settings gate (no save before load), 6-tier odds chip (fit 300-900), portal refresh, gear HUD (hidden until owned; Upgrade "Coming soon"), idle animator (70 studs, reduced motion). Settings button renamed "Options". UI: no review. Was: Shop offers + Lantern Night announcement split to P2.5f (after P2.8c). Folded into preview. Was: ui handoffs: settings/onboarding wiring, shop offers, Lantern Night announcement, critter idle animator, odds chip 6 tiers, gear HUD (GetGear/UseGear, GearUsed fx, gear shop); GetRaidTargets refresh counts as a new portal open in analytics (don't re-call to refresh). Settings: never SaveSettings before GetSettings has answered (reviewer #126) |
-| P2.7b | notifications | P2.7, P2.9 | In review | #131 → preview/phase2 | 1 | track → analytics (+Throttled), onLoss deduped by raidId (20-entry list in the claim). Reviewer APPROVED. Was: track → AnalyticsService.trackNotification (+ notification_sent Throttled); dedupe onLoss by raidId; header says onLoss may run on the defender server (reviewer #128) |
-| P2.9b | data | P2.9, C6b | In review | #134 → preview/phase2 | 1 | 533 tests, 0 fail. Steps derived from Profile; onboarding_step logs every passed step; live DenRaided sink. Reviewer (xhigh) APPROVED (575 pass merged on preview); pcall around trackOnboarding folded in. Was: Analytics derives onboarding steps from Profile (fixes the preview failure); onboarding_step event; live DenRaided sink |
-| C6c | data | P2.6r | In review | #143 → preview/phase2 | 1 | 598 tests. countSuccessfulRaid(userId, raidId) -> number?, in-memory newest-32 per profile, no schema change. Reviewer (xhigh) APPROVED (620 pass merged with preview). Was: DataService.countSuccessfulRaid, idempotent per raidId (D-069) |
-| P2.7c | notifications | P2.7b | In review | #140 → preview/phase2 | 1 | 596 tests. One pending prompt per player; promptedAt only on shown=true; optin analytics. Reviewer APPROVED. Was: PromptNotificationOptIn push + ReportOptInResult; promptedAt only when shown (D-069) |
-| P2.5f | ui | P2.8c | In review | #144 (stacked on #141) | 1 | Shop rows (Loading, id 0 "Not available yet"), gear upgrade rows, vault capacity, Lantern banner. Base lacked P2.5d gear HUD: dedupe after merge (P2.5g). Was: Shop from GetShopOffers (id 0 = "Not available yet"), gear upgrade, vault capacity, Lantern banner |
-| P2.12a | integration | — | Done | preview/phase2 (70e4796) | 1 | All Phase 2 code folded in: 647 pass, 0 fail, lint/format/types clean. + #140/#141/#144. + #143: 620 pass, 0 fail. + #139/#142/#137: 615 pass, 0 fail.  + #135/#136: 593 pass, 0 fail. + #134: 584 pass, 0 fail, EscrowSimulation green. + P2.8 fix, #132, #131, #133: 577 pass, 1 known fail; PENDING empty. + #129: 568 pass. + #130: 537 pass, 1 known fail. Built from #118-#128 + #87/#122: 526 pass, 1 fail (Analytics vs 6-step onboarding → P2.9b); EscrowSimulation green, lint/format/types clean. 4 conflicts resolved (tests/run.luau, IncomeService, contracts.md, DataService header). |
-| P2.5g | ui | P2.5f | In review | #145 → preview/phase2 | 1 | 647 tests, CI green (after a lint fix). HUD Gear button opens the Shop; gear bar hides behind menus; also covers #147 (GetGear after a Shop buy). Fold in after the Studio pass. Was: One gear upgrade path, no Lantern banner when boosted=false (D-061(3)) |
-| P2.12b | integration | P2.12a | Done | Studio (temporary sync, D-060) | 1 | 70e4796 single client, test ids, restored byte-for-byte, nothing saved. PASS: boot (no errors), settings/onboarding remotes, den (6 pads, vault, mutations), gear (all 5 + UpgradeGear), shop, analytics (all events), async raid (escape, count once). Onboarding steps PASS but 3:51 to the tutorial steal (#146 → P2.6f, D-070); gear bar refresh #147 (ui, in #145). Not run: phone sizes, notifications/opt-in, real Robux, live vs human |
-| P2.6f | economy | P2.12b | In review | #148 → preview/phase2 | 1 | 657 tests. Onboarding egg 50 (normal 150) once; sim: second egg ~1:05, first steal ~1:17 (was ~3:00 floor). Reviewer APPROVED; ui price label in P2.5h |
-| P2.5h | ui | P2.6f | In review | #149 (stacks #148 + #145) | 1 | 657 tests. HUD/Shop egg price via Economy.paidEggPrice |
-| P2.12 | integration | all | In review | #137 → preview/phase2 | 1 | Kit docs/playtests/phase2.md + "Before inviting" checklist (strings, products, flags incl. asyncRaids, StreamingEnabled, phone perf, tester group Play access ~200: verify limit with an alt). Docs only. Studio pass and freeze follow | Closed-test build + kit; access setup is Kian's |
+| C6 | data | — | Done | #123 | 1 | 7 optional profile fields, no migration. Reviewer (xhigh) APPROVED (D-059, D-063) |
+| C6b | data | C6 | Done | #126 | 1 | Settings + onboarding remotes, RateLimit.luau, steps 1-6 server-advanced. Reviewer (xhigh) APPROVED (D-064) |
+| C6c | data | P2.6r | Done | #143 | 1 | countSuccessfulRaid(userId, raidId), idempotent. Reviewer (xhigh) APPROVED |
+| P2.1 | assets | — | Blocked | #87 (in preview) | 1 | Prompts + 40 fronts done (D-040). Generation + Gate 1/2: credits and Kian (D-057) |
+| P2.2 | assets | — | Blocked | #122 (in preview) | 1 | 19 briefs + kit manifest (ids empty), ~263 credits estimated. Generation: credits (D-057) |
+| P2.3 | raid | — | Done | #125 | 1 | Kit seam (placeholder fallback), pads 6→30 by level, streaming, 12 lights, 851 parts at 30 pads. Phone perf: Kian |
+| P2.4 | economy | — | Done | #124 | 1 | Species→asset-id seam, tier glow, 4 mutations, eggMaxTier → Mythic. Studio: mutations visible |
+| P2.4t | economy | P2.4 | Blocked | #138 (PROPOSAL, not in preview) | 1 | Tuning after Mythic: Kian picks option 1-4 |
+| P2.5 | ui | — | Done | #119, #120, #121 | 1 | Shop, Bag, Den mgmt, Settings, strings table, silent sound cues |
+| P2.5d | ui | P2.5, C6b | Done | #135, #136 | 1 | Settings wiring, 6-tier odds chip, gear HUD, idle animator |
+| P2.5f | ui | P2.8c | Done | #144 | 1 | Shop offers, gear upgrades, vault capacity, Lantern banner |
+| P2.5g | ui | P2.5f | Done | #145 | 1 | One gear upgrade path; Lantern hidden unless boosted; fixes #147 |
+| P2.5h | ui | P2.6f | Done | #149 | 1 | Egg price labels use paidEggPrice |
+| P2.6 | ui | P2.5, C6b, P2.6r | Done | #142 | 1 | Onboarding hints, arrow, first-steal banner, opt-in controller (PromptOptIn return value to confirm live) |
+| P2.6e | economy | C6b | Done | #130 | 1 | Onboarding call points, one-time untradeable tutorial critter (D-064) |
+| P2.6r | raid | C6b, P2.3, P2.6e | Done | #139 | 1 | Tutorial den, 30-min new-player live shield, RaidEvents. Reviewer APPROVED (D-069) |
+| P2.6f | economy | P2.12b | Done | #148 | 1 | Fixes #146: onboarding egg 50 Glow (D-070). Reviewer APPROVED. Studio: first steal at 60 s |
+| P2.7 | notifications | — | Done | #118 | 1 | Send rules, own DataStore, storage category off (D-062). Reviewer APPROVED. Strings + key: Kian |
+| P2.7b | notifications | P2.7, P2.9 | Done | #131 | 1 | track → analytics, onLoss dedupe. Reviewer APPROVED |
+| P2.7c | notifications | P2.7b | Done | #140 | 1 | Opt-in push/request, promptedAt only when shown. Reviewer APPROVED |
+| P2.8 | economy | C6 | Done | #127 | 2 | Products, receipts exactly-once, factor helper, D-061/D-065 defaults. Reviewer (xhigh) BLOCKING x2 → fixed → APPROVED. Products to create: Kian |
+| P2.8b | data | P2.8 | Done | #132 | 1 | Escrow/seed accrues via the helper. Reviewer (xhigh) APPROVED |
+| P2.8m | matchmaking | P2.8 | Done | #133 | 1 | Snapshot accrue via helper (PENDING empty), raid_portal_opened. Raid scout undefined: Kian |
+| P2.8c | economy | P2.8, P2.9, P2.10 | Done | #141 | 1 | buyGear/UpgradeGear, vaultSlots, GetShopOffers, economy analytics. Reviewer (xhigh) APPROVED |
+| P2.9 | data | C6 | Done | #128 | 1 | Analytics schema, funnels, sources/sinks (D-066). Reviewer (xhigh) APPROVED |
+| P2.9b | data | P2.9, C6b | Done | #134 | 1 | Steps from Profile, onboarding_step, live DenRaided sink. Reviewer (xhigh) APPROVED |
+| P2.10 | raid | C6, P2.3 | Done | #129 | 1 | 5 gear items, switches (D-068). Reviewer APPROVED. Lockpick rule: Kian. 2-client checks deferred |
+| P2.11 | assets | — | Blocked | | 0 | No credits (D-057); cue names wired, ids empty |
+| P2.12a | integration | — | Done | preview/phase2 802513e | 1 | Every PR folded in order; 657 pass, 0 fail |
+| P2.12b | integration | P2.12a | Done | Studio (D-060) | 1 | Single-client pass: all areas PASS; #146/#147 found and fixed (P2.12c: onboarding 60 s) |
+| P2.12 | integration | all | Done | #137 | 1 | docs/playtests/phase2.md + "Before inviting" checklist. Build freeze + tester access: Kian |
 
 ## Setup notes
 - 2026-10-29 (Phase 2): Studio MCP healthy, "Raid Night" open in Edit, no wedged play session; Workspace.StreamingEnabled = true (confirms #125's ask); HttpEnabled = false.
@@ -124,8 +127,8 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 
 ## Blocked (needs Kian)
 
-- Merges: the permission check refuses `gh pr merge` (D-044/D-058). Phase 1 ledger #116 and every
-  Phase 2 PR wait for you; merge order is in the gate report.
+- Merges: the permission check refuses `gh pr merge` (D-044/D-058). Land #116 (Phase 1 ledger), then
+  preview/phase2 (802513e) into integration, then this ledger PR. See docs/gate-report-phase2.md.
 - Higgsfield credits for P2.1/P2.2/P2.11 generation, and Asset Gate 1 picks (#87).
 - P2.4t tuning after eggMaxTier → Mythic (#138): pick option 1-4 (see the P2.4t row).
 
@@ -175,6 +178,12 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
   top-centre toast below ~700 px wide (667x375 landscape): check, or move/narrow it.
 - Live protection (D-036/D-037): an owner buying an egg after a protecting loss (auto-place lifts
   protection); an owner vaulting during a carry from a refilled den (the steal still lands).
+
+- (Phase 2) 4-client session with no errors (exit check); each gear item in a 2-client live raid
+  (#129); owners using gear on raiders; notification test send landing and Join opening the revenge
+  screen (#118, needs strings + key); real Robux purchases incl. a forced shutdown mid-purchase and VIP
+  10-min 1.5x check (#127, needs product ids); phone-size screenshots of every screen and the phone
+  perf check (#125 step 7); analytics arriving in the Creator Dashboard (published place).
 
 ## Hardening backlog (triage after the phase playtest, D-039)
 

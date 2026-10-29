@@ -4,29 +4,28 @@ Updated 2026-10-29. Read this first on startup, then docs/progress.md. Follow th
 "Context discipline" (section 2).
 
 ## Phase
-Phase 2 running unattended overnight (Kian, 2026-10-29). Stop at the Phase 2 gate with the gate
-report. No Higgsfield credits: placeholders (D-057). Merges refused: stack PRs, build
-preview/phase2, Kian merges (D-058).
+Phase 2 is at its human gate (gate report: docs/gate-report-phase2.md). Do not start Phase 3 or
+cross the gate until Kian approves. Everything is folded into `preview/phase2` (802513e, 657 tests,
+0 fail); nothing is merged into integration (merge refused, D-058).
 
-## In flight (wave 1)
-- C6 data (xhigh): Phase 2 profile fields, agent/data/C6
-- P2.3 raid: kit seam, pads 6→30, perf, agent/raid/P2.3
-- P2.5 ui: full UI pass (may split a/b/c stacked), agent/ui/P2.5
-- P2.7 notifications: agent/notifications/P2.7
+## In flight
+Nothing. Open: #116 (Phase 1 ledger), the Phase 2 ledger PR (stacked on #116), #138 (tuning
+PROPOSAL, not in preview), plus older stacked PRs that GitHub still shows open (#118-#130, #87) but
+whose commits are all in preview/phase2.
 
-## Next
-Wave 2 as slots free: P2.4 economy, P2.2 assets briefs, then after C6: P2.8 economy (reviewer
-xhigh), P2.9 data, P2.10 raid (stack on P2.3 + C6), P2.6 ui (stack on P2.5 + C6). Settings and
-opt-in remotes requested by ui/notifications go on top of C6. Then integration: checks per PR,
-preview/phase2, single-client Studio pass (D-060), P2.12 kit, gate report.
+## Next (after Kian)
+1. Kian lands #116, preview/phase2 → integration (one PR), the ledger PR; picks #138's option.
+2. Integration agent: fast-forward the main checkout (never switch branches), Studio pass on
+   integration, then the 4-client session with testers.
+3. Fill Creator Dashboard ids (Config.Purchases, notification MESSAGE_IDS) when Kian sends them.
+4. When credits return: P2.1 Gate 1 picks, P2.2 kit generation, P2.11 audio (D-057).
 
 ## Ask Kian
-Merges (#116 ledger first, then Phase 2 stack), credits + Gate 1 (#87), P2.8 product list and
-prices, notification strings, D-061 defaults, closed-test access (~200 testers).
+Merges; #138 tuning; lockpick rule (D-068); product definitions and refund questions (D-061,
+D-065); storage-full notification; credits; paid-randomness mini-phase stays out (CLAUDE.md rule 6).
 
 ## Remember
-- Ledger worktree: $CLAUDE_JOB_DIR/tmp/wt-ledger2 (job 26a0a7a7), branch agent/integration/ledger-p2,
-  stacked on #116 (agent/integration/ledger-p1-soak). Open its PR once there's a wave to record.
+- Ledger worktree: $CLAUDE_JOB_DIR/tmp/wt-ledger2 (job 26a0a7a7), branch agent/integration/ledger-p2.
+- Preview worktree: $CLAUDE_JOB_DIR/tmp/wt-preview2 (integration agent).
+- Studio: healthy at the end of the run, Edit mode, nothing saved; StudioMemoryProfiles = true.
 - Never switch branches in Kian's main checkout (Rojo).
-- Design summary mentions a Phase 2 paid-randomness mini-phase (paid eggs, Blood Moon, Glow packs);
-  not in the playbook's Phase 2 table and CLAUDE.md rule 6 forbids it at launch: not started, flag at gate.
