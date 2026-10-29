@@ -59,6 +59,9 @@
 	                          reserved test id, held and saved like a player's, DataStore
 	                          persistence only, behind the StudioTestSessions switch. Also
 	                          ServerStorage.DataTestHook. See the last section.
+	  setGlowAccrue(accrue)   the Glow-factor helper's accrue (IncomeService.accrue, P2.8b), handed
+	                          over by EscrowService.start: DataService cannot require IncomeService.
+	                          Only the DataTestHook seed uses it, and it refuses until one is set
 
 	Studio memory switch (D-019). To play in Studio with API access on but save NOTHING, set a
 	boolean attribute on ServerStorage before pressing Play (Properties, or the command bar in
@@ -135,6 +138,8 @@ local testSessions: { [number]: Session } = {}
 local testLoading: { [number]: true } = {}
 local testSessionListeners: { (number, PlayerProfile) -> () } = {}
 local installTestHook: () -> () -- Studio only; defined with the test sessions at the end
+-- The Glow-factor helper's accrue (P2.8b), set by EscrowService.start (setGlowAccrue).
+local glowAccrue: ((profile: PlayerProfile, now: number) -> number)? = nil
 local messageListeners: { [string]: (number, any) -> () } = {}
 local rawProfiles: DataStore? = nil -- the profiles DataStore itself, for updateOffline only
 local memoryOnly = false -- Studio memory switch on: every profile is in ProfileStore's mock store
@@ -849,15 +854,24 @@ function DataService.testSessionIds(): { number }
 	return ids
 end
 
+-- The Glow-factor helper's accrue, IncomeService.accrue (P2.8): server code accrues only through
+-- it (source guard: PurchaseSource.spec), so a profile loaded here pays its player's own factor.
+-- DataService cannot require IncomeService (IncomeService requires DataService), so
+-- EscrowService.start hands it over. Only the DataTestHook seed uses it, and refuses until set.
+function DataService.setGlowAccrue(accrue: (profile: PlayerProfile, now: number) -> number)
+	glowAccrue = accrue
+end
+
 --[[
 	Studio test-session hook (P1.10d). Installed by start() only in Studio, and every command
 	refuses unless ServerStorage.StudioTestSessions == true and the id is a test id. From the
 	server command bar (or an execute_luau call) during Play:
 	  local hook = game:GetService("ServerStorage"):WaitForChild("DataTestHook")
 	  hook:Invoke("load", -1000001)          loadTestSession: a DataStore session held here
-	  hook:Invoke("seed", -1000002, 3, 500)  a held test session gets 3 Common critters on free
-	                                         pads (default 3; at most the free pads) and 500 more
-	                                         stored Glow (default 0), then a confirmed save
+	  hook:Invoke("seed", -1000002, 3, 500)  a held test session is accrued (Glow-factor helper),
+	                                         then gets 3 Common critters on free pads (default 3;
+	                                         at most the free pads) and 500 more stored Glow
+	                                         (default 0), then a confirmed save
 	  hook:Invoke("show", -1000002)          its Glow, critters and appliedTransfers: live when
 	                                         held here, else the saved copy (peekOffline)
 	  hook:Invoke("release", -1000002)       releaseTestSession: a leave, final save waited for
@@ -866,6 +880,11 @@ local function seedTestSession(userId: number, count: any, glow: any): string
 	local session = testSessions[userId]
 	if session == nil or not session:IsActive() then
 		return `{userId} is not a test session held here; load it first`
+	end
+	-- Fail closed: without the Glow-factor helper the seed changes nothing (P2.8b).
+	local accrue = glowAccrue
+	if accrue == nil then
+		return "refused: no Glow-factor accrue registered (EscrowService.start has not run)"
 	end
 	local wanted = TEST_SEED_DEFAULT
 	if type(count) == "number" and count == count then
@@ -877,7 +896,9 @@ local function seedTestSession(userId: number, count: any, glow: any): string
 	end
 	local profile: PlayerProfile = session.Data
 	local now = os.time()
-	Economy.accrue(profile, now) -- Money model: accrue before placements or `stored` change
+	-- Money model: accrue before placements or `stored` change, at the session's own factor (the
+	-- helper treats a test session held here like a player loaded here).
+	accrue(profile, now)
 	local used: { [number]: true } = {}
 	for _, critter in profile.critters do
 		if critter.placement == "Pad" and critter.padIndex then

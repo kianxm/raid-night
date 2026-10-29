@@ -658,6 +658,165 @@ tests["recover refuses an absent defender's async debit when its store cannot re
 	expect.truthy(defender.critters["fox"])
 end
 
+-- Online loads accrue at the player's own factor (P2.8b) --------------------------------------
+--[[
+	EscrowService's store accrues every profile it loads (always one loaded in its own server, so
+	online) through IncomeService.accrue, the Glow-factor helper: Economy.accrueBoosted on that
+	player's GlowFactorState. A defender no server holds is debited through debitAbsent
+	(Escrow.debitAbsentProfile) at factor 1: offline income is unboosted (D-061). Lune cannot run
+	the services, so this store models the helper with the pure functions it is built on, and
+	clock.now stands for the os.time() the helper is called with; source guards
+	(EscrowServiceSource.spec) pin that loadProfile calls the helper once per load.
+]]
+local BOOSTED = { purchasesEnabled = true, vipBoostsOffline = false }
+local VIP = 1 + Config.Boosts.vipGlowBonus
+
+local function helperStore(raider, defender, record, clock: { now: number })
+	local store, records = memoryStore(raider, defender, record)
+	local states = {
+		[raider.userId] = Economy.newGlowFactorState(),
+		[defender.userId] = Economy.newGlowFactorState(),
+	}
+	local loads = { [raider.userId] = 0, [defender.userId] = 0 }
+	local loadLive = store.loadProfile
+	store.loadProfile = function(userId)
+		local profile = loadLive(userId)
+		loads[userId] += 1
+		Economy.accrueBoosted(states[userId], profile, clock.now, BOOSTED) -- IncomeService.accrue
+		return profile
+	end
+	store.debitAbsent = function(r, now)
+		local _, applied = Escrow.debitAbsentProfile(defender, r, now) -- inside DataService.updateOffline
+		return applied
+	end
+	return store, records, states, loads
+end
+
+-- A defender online since `joinedAt`, whose VIP became known (PolicyService: unrestricted) at
+-- `boostedAt`: IncomeService.setGlowInputs accrued at the old factor (1) first. A second pad
+-- earner keeps the den earning once the fox is taken.
+local function boostedDefender(state, defender, joinedAt: number, boostedAt: number)
+	fixtures.give(defender, fixtures.critter("fox2", "crescent_fox", "Pad", 2))
+	defender.stored = 0
+	defender.storedUpdatedAt = joinedAt
+	Economy.accrueBoosted(state, defender, joinedAt, BOOSTED) -- the join: nothing owed yet
+	Economy.changeGlowInputs(state, defender, boostedAt, { vip = true, paidRandomRestricted = false }, BOOSTED)
+end
+
+tests["an online defender's raid debit accrues at their current factor, once, then takes its share"] = function()
+	local raider, defender, record = setup("Async")
+	local clock = { now = NOW }
+	local store, records, states, loads = helperStore(raider, defender, record, clock)
+	boostedDefender(states[defender.userId], defender, NOW - 1200, NOW - 600)
+	expect.eq(defender.stored, Economy.denRate(defender) * 600, "the first 600 s at the old factor, 1")
+	-- What the den holds at the debit: the last 600 s at the VIP factor, nothing paid twice.
+	local atDebit = table.clone(defender)
+	Economy.accrue(atDebit, NOW, VIP)
+	local unboosted = table.clone(defender)
+	Economy.accrue(unboosted, NOW)
+	expect.truthy(atDebit.stored > unboosted.stored, "the factor matters here (under the cap)")
+	local share = math.floor(math.floor(atDebit.stored) * Config.Loot.storedGlowShare)
+
+	-- The defender is online in the raider's server. The server dies after saving the debit,
+	-- before the record moves on; the sweep retries in the same second.
+	expect.throws(function()
+		Escrow.recover(record.raidId, store, NOW, everyone, function(name: string)
+			if name == "savedDefender" then
+				error("simulated crash")
+			end
+		end)
+	end)
+	expect.eq(records[record.raidId].state, "Pending")
+	expect.eq(defender.appliedTransfers[record.raidId].glow, share, "its share of what was stored at the debit")
+	expect.eq(defender.stored, atDebit.stored - share, "accrued at the current factor, then debited")
+	Escrow.recover(record.raidId, store, NOW, everyone)
+	expect.eq(records[record.raidId].state, "Committed")
+	expect.eq(loads[defender.userId], 2, "loaded again by the retry")
+	expect.eq(defender.stored, atDebit.stored - share, "the retry paid nothing again")
+	expect.eq(defender.storedUpdatedAt, NOW, "accrued to the debit")
+	expect.eq(raider.glow, share, "the raider gets exactly what was debited")
+	expect.eq(records[record.raidId].glow, share)
+end
+
+tests["a retry later pays only the time since, at the factor, never the earlier period again"] = function()
+	local raider, defender, record = setup("Async")
+	local clock = { now = NOW }
+	local store, records, states = helperStore(raider, defender, record, clock)
+	boostedDefender(states[defender.userId], defender, NOW - 1200, NOW - 600)
+	local atDebit = table.clone(defender)
+	Economy.accrue(atDebit, NOW, VIP)
+	local share = math.floor(math.floor(atDebit.stored) * Config.Loot.storedGlowShare)
+	expect.throws(function()
+		Escrow.recover(record.raidId, store, NOW, everyone, function(name: string)
+			if name == "debitedUnsaved" then
+				error("simulated crash") -- the live profile holds the debit; nothing saved yet
+			end
+		end)
+	end)
+	clock.now = NOW + 60 -- the sweep's retry
+	Escrow.recover(record.raidId, store, NOW + 60, everyone)
+	expect.eq(records[record.raidId].state, "Committed")
+	expect.eq(defender.appliedTransfers[record.raidId].glow, share, "the debit is the first one, unchanged")
+	local rate = Economy.denRate(defender) -- the fox has left: the den earns at its new rate after
+	expect.truthy(rate > 0, "the den still earns")
+	expect.eq(defender.stored, atDebit.stored - share + rate * 60 * VIP, "only the 60 s since, at the factor")
+	expect.eq(defender.storedUpdatedAt, NOW + 60)
+	expect.eq(raider.glow, share)
+end
+
+tests["a live steal accrues each online party at their own factor once, before the debit and the credit"] = function()
+	local raider, defender = setup()
+	-- No Glow cap on the request, so the debit takes all stored Glow and shows what was accrued.
+	local record = Escrow.create("raid-1", raider.userId, defender.userId, "fox", 1_000_000, false, NOW, "Live")
+	local clock = { now = NOW }
+	local store, records, states, loads = helperStore(raider, defender, record, clock)
+	boostedDefender(states[defender.userId], defender, NOW - 1200, NOW - 600)
+	local atDebit = table.clone(defender)
+	Economy.accrue(atDebit, NOW, VIP)
+	-- The raider: online since NOW - 300 with VIP and a running Lantern Night (2.0x), their own
+	-- factor, not the defender's.
+	local raiderState = states[raider.userId]
+	fixtures.give(raider, fixtures.critter("kit", "crescent_fox", "Pad", 1))
+	raider.storedUpdatedAt = NOW - 300
+	Economy.accrueBoosted(raiderState, raider, NOW - 300, BOOSTED) -- the join
+	local lantern = { vip = true, paidRandomRestricted = false, lanternNightUntil = NOW + 900 }
+	Economy.changeGlowInputs(raiderState, raider, NOW - 300, lantern, BOOSTED)
+	local raiderAt = table.clone(raider)
+	Economy.accrue(raiderAt, NOW, Economy.maxGlowBoostFactor())
+
+	Escrow.advance(record.raidId, store, NOW)
+	Escrow.advance(record.raidId, store, NOW) -- a duplicate delivery
+	expect.eq(records[record.raidId].state, "Committed")
+	expect.eq(loads[defender.userId], 1, "the defender loaded once")
+	expect.eq(loads[raider.userId], 1, "the raider loaded once")
+	local taken = math.floor(atDebit.stored)
+	expect.eq(defender.appliedTransfers[record.raidId].glow, taken, "all stored, accrued at the VIP factor")
+	expect.eq(defender.stored, atDebit.stored - taken)
+	expect.truthy(raiderAt.stored > 0, "the raider's den earned")
+	expect.eq(raider.stored, raiderAt.stored, "the raider at their own factor (2.0)")
+	expect.eq(raider.glow, taken, "credited exactly what was debited")
+	expect.truthy(raider.critters["fox"])
+end
+
+tests["an absent defender's debit accrues at factor 1 even with VIP: offline income is unboosted"] = function()
+	local raider, defender, record = setup("Async")
+	local clock = { now = NOW }
+	local store, records, states, loads = helperStore(raider, defender, record, clock)
+	boostedDefender(states[defender.userId], defender, NOW - 1200, NOW - 600)
+	local offline = table.clone(defender)
+	Economy.accrue(offline, NOW) -- the defender left at NOW - 600; their factor stayed in that server
+	local share = math.floor(math.floor(offline.stored) * Config.Loot.storedGlowShare)
+	local function raiderOnly(userId: number): boolean
+		return userId == raider.userId
+	end
+	Escrow.recover(record.raidId, store, NOW, raiderOnly)
+	expect.eq(records[record.raidId].state, "Committed")
+	expect.eq(loads[defender.userId], 0, "never loaded through the helper")
+	expect.eq(defender.appliedTransfers[record.raidId].glow, share, "the share at factor 1")
+	expect.eq(defender.stored, offline.stored - share)
+	expect.eq(raider.glow, share)
+end
+
 -- Snapshots of one record at each state, for the record-store rule.
 local function stages()
 	local raider, defender, record = setup()

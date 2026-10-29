@@ -117,12 +117,15 @@ end
 tests["an async debit accrues the defender to the debit first, on every path"] = function()
 	local code = source.codeOnly(source.read(ESCROW))
 	local store = source.functionBody(code, "storeFor") or ""
-	-- Loaded here (and so in the defender's own server, after a message): loadProfile accrues.
+	-- Loaded here (and so in the defender's own server, after a message): loadProfile accrues,
+	-- through the Glow-factor helper at the player's own factor (P2.8b), once per load.
 	local load = string.match(store, "loadProfile = (function.-\n\t\tend),")
 	expect.truthy(load, "loadProfile found")
-	local accrued = string.find(load :: string, "Economy%.accrue%(profile, os%.time%(%)%)")
+	local accrued = string.find(load :: string, "IncomeService%.accrue%(profile, os%.time%(%)%)")
 	local returned = string.find(load :: string, "return profile")
 	expect.truthy(accrued and returned and (accrued :: number) < (returned :: number), "accrued before use")
+	expect.eq(count(load :: string, "accrue%("), 1, "one accrue per load")
+	expect.eq(count(code, "Economy%."), 0, "no Economy call in EscrowService: the helper accrues")
 	-- Not loaded anywhere: the offline write runs Escrow.debitAbsentProfile (accrue, then debit;
 	-- Escrow.spec) and nothing else inside the one write.
 	local absent = string.match(store, "debitAbsent = (function.-\n\t\tend),")
@@ -236,6 +239,27 @@ tests["the Studio pause lets go on close or timeout without finishing its step (
 	-- Only the Studio pause reads it: live drives are unchanged.
 	local rest = without(code, { "studioCheckpoint", "EscrowService.start" })
 	expect.eq(count(rest, "%f[%w_]closing%f[^%w_]"), 1, "closing only declared outside the pause and close")
+end
+
+-- P2.8b: DataService cannot require IncomeService (a cycle), so EscrowService, which requires
+-- both, hands the Glow-factor helper's accrue to DataService for its Studio seed.
+tests["EscrowService hands the Glow-factor helper's accrue to DataService, which only keeps it"] = function()
+	local escrow = source.codeOnly(source.read(ESCROW))
+	expect.truthy(
+		string.find(escrow, "\nlocal IncomeService = require%(script%.Parent%.IncomeService%)"),
+		"EscrowService requires IncomeService"
+	)
+	local start = source.functionBody(escrow, "EscrowService.start") or ""
+	expect.eq(count(start, "DataService%.setGlowAccrue%(IncomeService%.accrue%)"), 1, "registered at start")
+	expect.eq(count(escrow, "setGlowAccrue"), 1, "and nowhere else")
+	local data = source.codeOnly(source.read(DATA))
+	expect.eq(count(data, "require%([^\n]*IncomeService"), 0, "DataService never requires IncomeService")
+	local set = source.functionBody(data, "DataService.setGlowAccrue") or ""
+	expect.truthy(
+		string.find(set, "^function DataService%.setGlowAccrue%b()\n%s*glowAccrue = accrue\nend\n$"),
+		"setGlowAccrue only keeps it"
+	)
+	expect.eq(count(data, "glowAccrue = "), 1, "set in one place")
 end
 
 return tests

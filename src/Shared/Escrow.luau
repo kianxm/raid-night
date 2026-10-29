@@ -289,7 +289,10 @@ function Escrow.debitAbsentProfile(
 ): (boolean, AppliedTransfer)
 	local fresh = defender.appliedTransfers[record.raidId] == nil
 	if fresh then
-		-- P2.8: factor 1; pass Economy.glowBoostFactor once purchases ship.
+		-- Factor 1 on purpose: offline income is unboosted (VIP is online-only, D-061 (2);
+		-- Config.Purchases.vipBoostsOffline is false). A defender loaded in a server accrues at
+		-- their factor there instead (EscrowService's loadProfile, through IncomeService.accrue).
+		-- Reversing vipBoostsOffline must revisit this accrue.
 		Economy.accrue(defender, now)
 	end
 	return fresh, Escrow.debitDefender(defender, record, now)
