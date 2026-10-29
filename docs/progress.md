@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 2, at the Phase 2 gate (waiting for Kian) · Last updated: 2026-10-29
+Current phase: 2, at the Phase 2 gate (waiting for Kian); UI redesign P2.13 running at Kian's request · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -99,6 +99,8 @@ merging it (D-058, D-067). Gate report: `docs/gate-report-phase2.md`.
 | P2.11 | assets | — | Blocked | | 0 | No credits (D-057); cue names wired, ids empty |
 | P2.12a | integration | — | Done | preview/phase2 802513e | 1 | Every PR folded in order; 657 pass, 0 fail |
 | P2.12b | integration | P2.12a | Done | Studio (D-060) | 1 | Single-client pass: all areas PASS; #146/#147 found and fixed (P2.12c: onboarding 60 s) |
+| P2.13a | ui | — | In progress | agent/ui/P2.13a → preview/phase2 | 1 | UI redesign (D-071): theme from the design system + den HUD (phone + PC hotbar) |
+| P2.13b-e | ui | P2.13a | Todo | | 0 | Screen batches: eggs/shop; raid; revenge/log/opt-in; live/collection/settings |
 | P2.12 | integration | all | Done | #137 | 1 | docs/playtests/phase2.md + "Before inviting" checklist. Build freeze + tester access: Kian |
 
 ## Setup notes

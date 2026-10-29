@@ -3,6 +3,17 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-071 · 2026-10-29 · UI redesign from Kian's design canvas (Kian)
+Context: Kian asked to redesign the UI from his designs: canvas "Raid Night — End-to-end screens"
+(51 artboards, phone landscape 932x430 and PC 1440x900) built on his "Raid Night" design system.
+Decision: one theme module from the design system's tokens first (P2.13a), then screen batches in
+parallel (P2.13b-e), stacked on it, into preview/phase2. Web fonts map to the closest Roblox
+font; icons are drawn shapes until Kian uploads image assets (listed per PR); visual and layout
+only, with no behavior changes. Screens whose feature doesn't exist yet (Leaderboard, Nemesis,
+Replay, Share clip, Defenses editor, Pick a den, Raid scout, Meteor, Secret hatch) wait for their
+feature; Blood Moon stays out (paid randomness, CLAUDE.md rule 6). Why: one look, set by Kian.
+Reversible: yes.
+
 ### D-070 · 2026-10-29 · Onboarding's second egg is discounted
 Context: Studio pass P2.12b: join → tutorial steal took ~3:51; the floor is ~3:00, because the second
 egg costs 150 Glow at 1 Glow/s (P1.8 prices). Exit check: under 3 min. Decision: while onboarding
