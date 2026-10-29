@@ -127,6 +127,10 @@
 
 	Studio test profiles (DataService.loadTestProfile, decision D-019) have no load to recover
 	from, so DataService refuses to release one while an escrow for it is open here.
+	Studio test sessions (DataService.loadTestSession, P1.10d) are real DataStore sessions for
+	test ids: recovered on their load (onTestSessionLoaded) and swept like players
+	(testSessionIds), so a forced stop mid-transfer is recovered as for a player. A test id is
+	not an account, so DataStore writes name only positive user ids (accountIds).
 
 	Live loss rules (decision D-031): transferLive creates "Live" records, whose debit takes no
 	critter from a den that is live-protected at the debit (Escrow.debitDefender; measured
@@ -274,6 +278,19 @@ local function read(key: string): any
 	end)
 end
 
+-- The user ids a DataStore write names: accounts only. A Studio test id (P1.10d) or Local Server
+-- player is negative and not an account, so it is left off, as ProfileStore's AddUserId does.
+-- Every live userId is positive, so a live write names exactly the ids it was given.
+local function accountIds(userIds: { number }): { number }
+	local accounts = {}
+	for _, userId in userIds do
+		if userId > 0 then
+			table.insert(accounts, userId)
+		end
+	end
+	return accounts
+end
+
 -- transform(stored) returns the new value, or nil to leave the key unchanged. `userIds`: the
 -- players the key is about, stored with each write for GDPR erasure tooling (decision D-008).
 local function update(key: string, userIds: { number }, transform: (any) -> any)
@@ -285,13 +302,14 @@ local function update(key: string, userIds: { number }, transform: (any) -> any)
 		return
 	end
 	local store = assert(dataStore, "escrow storage not ready")
+	local accounts = accountIds(userIds)
 	withRetries(`update {key}`, function()
 		store:UpdateAsync(key, function(stored: any)
 			local value = transform(stored)
 			if value == nil then
 				return nil
 			end
-			return value, userIds
+			return value, accounts
 		end)
 	end)
 end
@@ -652,6 +670,12 @@ local function sweep()
 				task.spawn(recoverUser, userId, true) -- one player's error never stops the rest
 			end
 		end
+		-- Studio test sessions (P1.10d) are rescanned like players. Always none in a live server.
+		for _, userId in DataService.testSessionIds() do
+			if isHere(userId) and needsIndex[userId] == nil then
+				task.spawn(recoverUser, userId, true)
+			end
+		end
 	end
 end
 
@@ -947,6 +971,10 @@ function EscrowService.start()
 	-- Recovery is never behind a flag (docs/contracts.md: Kill switches).
 	DataService.onProfileLoaded(function(player: Player)
 		recoverUser(player.UserId)
+	end)
+	-- A Studio test session (P1.10d) has no Player, so it is recovered on its own load signal.
+	DataService.onTestSessionLoaded(function(userId: number)
+		recoverUser(userId)
 	end)
 	-- An async debit for a profile loaded here, from the raider's server. Only a wake-up: the
 	-- record decides, so a repeat, a late one, or one for a settled raid changes nothing.

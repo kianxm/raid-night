@@ -39,7 +39,9 @@ end
 
 tests["the memory switch is read once, at start, and only in Studio"] = function()
 	local code = source.codeOnly(source.read("src/Server/Services/DataService.luau"))
-	expect.eq(select(2, string.gsub(code, "GetAttribute", "")), 1, "one attribute read")
+	expect.eq(select(2, string.gsub(code, "GetAttribute%(MEMORY_SWITCH%)", "")), 1, "one memory switch read")
+	-- The only other read is the test-session switch, behind IsStudio (TestSessions.spec).
+	expect.eq(select(2, string.gsub(code, "GetAttribute", "")), 2, "two attribute reads in all")
 	local start = source.functionBody(code, "DataService.start") or ""
 	expect.truthy(
 		string.find(

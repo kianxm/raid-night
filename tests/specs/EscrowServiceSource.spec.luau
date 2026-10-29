@@ -10,6 +10,8 @@
 	  - An async debit message only wakes recovery; async transfers never use the live path.
 ]]
 
+local luau = require("@lune/luau")
+
 local expect = require("../lib/expect")
 local source = require("../lib/source")
 
@@ -52,7 +54,8 @@ tests["every escrow write stores the userIds it is about"] = function()
 	local code = source.codeOnly(source.read(ESCROW))
 	local update = source.functionBody(code, "update") or ""
 	expect.truthy(string.find(update, "^function update%(key: string, userIds: { number }"), "update takes userIds")
-	expect.truthy(string.find(update, "return value, userIds\n"), "the DataStore transform returns them")
+	expect.truthy(string.find(update, "local accounts = accountIds%(userIds%)\n"), "the accounts among them")
+	expect.truthy(string.find(update, "return value, accounts\n"), "the DataStore transform returns them")
 	expect.eq(count(update, ":UpdateAsync%("), 1, "one UpdateAsync")
 	local rest = without(code, { "update" })
 	local records = count(rest, "update%(recordKey%([^\n]*{ record%.raiderUserId, record%.defenderUserId }")
@@ -86,9 +89,29 @@ tests["DataService writes a profile outside ProfileStore only in the offline wri
 	-- updateOffline sends a profile loaded here back as held.
 	local entry = source.functionBody(code, "DataService.updateOffline") or ""
 	expect.truthy(
-		string.find(entry, 'if mode == "Memory" or sessions%[userId%] or testProfiles%[userId%] then%s*return "held"'),
+		string.find(
+			entry,
+			'if mode == "Memory" or sessions%[userId%] or testProfiles%[userId%] or testSessions%[userId%] then'
+				.. '%s*return "held"'
+		),
 		"a profile held here (or any, in Memory mode) is never written offline"
 	)
+end
+
+-- accountIds, cut from EscrowService's source and run: a live write names exactly its parties.
+tests["escrow writes name every real account and never a test or Local Server id"] = function()
+	local code = source.codeOnly(source.read(ESCROW))
+	local body = source.functionBody(code, "accountIds")
+	expect.truthy(body, "accountIds found")
+	local accountIds = luau.load((body :: string) .. "\nreturn accountIds", { debugName = "accountIds" })() :: any
+	local live = accountIds({ 123456789, 42 })
+	expect.eq(#live, 2, "both live parties named")
+	expect.eq(live[1], 123456789, "raider first")
+	expect.eq(live[2], 42, "then the defender")
+	local mixed = accountIds({ -1_000_001, 42, -1 })
+	expect.eq(#mixed, 1, "only the account is named")
+	expect.eq(mixed[1], 42, "the real account")
+	expect.eq(#accountIds({ -1_000_001, -1_000_002 }), 0, "two test ids name nobody")
 end
 
 tests["an async debit accrues the defender to the debit first, on every path"] = function()
