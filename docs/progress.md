@@ -14,13 +14,13 @@ Current phase: 0 · Last updated: 2026-10-28 (evening)
 | P0.4 | economy | P0.3 | Done | #9, #10 | 1 | Studio (1 client) passed steps 1-8: egg, collect math, pads/overflow, swaps, 15 bad payloads refused, rate limit, upgrade costs. Rejoin persistence and 2-client checks being rerun. Note: Inventory is uncapped (balance item) |
 | C1 | data | — | Done | #22 | 1 | Reviewer APPROVED. 102 tests on integration. Doc follow-ups folded into P0.3a |
 | P0.4b | economy | C1 | Done | #28 | 1 | 106 tests. Rescue egg Common-only + untradeable; accrue before the rescue check; eggMaxTier from Config; server uid→model table (no attribute reads). Follow-up: delete the "One existing read" paragraph in contracts.md (data) |
-| P0.5 | raid | P0.2, P0.4, P0.3b, C1 | In progress | #27, #29, #30, #32 | 3 | Round 2: #27, #29, #32 APPROVED; #30 B5 (Lockdown push-back forgave teleports). Round 3 running: B5 + crossedStreet reset + moveRefill 1.1 (D-025) |
+| P0.5 | raid | P0.2, P0.4, P0.3b, C1 | Done | #27, #29, #30, #32 | 3 | Reviewer APPROVED round 3 (attack reruns: teleport-into-lockdown and gap-jumps refused). integration code identical to the reviewed tree. 169 tests |
 | P0.6 | ui | P0.4 | Done | #12, #17 | 1 | #17 fixed the top-bar overlap (issue #15); Studio recheck with P0.6b. Client only; not run in Studio yet (phone emulator check in the P0.8 session). Lockdown button disabled until the remote exists |
 | P0.6b | ui | C1 | Done | #33 | 1 | Lockdown via Net, D-011 states, carried pill, raid toast, StealPrompt hidden in own den |
 | P0.7 | assets | — | Done | #5 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible). Stage 1 follow-up: `tools/assets/generate.sh` STYLE_REFS still lists ref-03/ref-04, which do not exist |
 | P0.5e | data | P0.5 | Done | #37, #38 | 1 | Reviewer APPROVED both. Studio memory switch (ServerStorage StudioMemoryProfiles), test profiles (ids <= -1_000_000), grabRange in Config, storage mode fixed before use. 122 tests |
 | P0.4c | economy | — | Done | #36 | 1 | Placement never moves a carried critter (as mover or swapped occupant). 115 tests |
-| P0.8 | integration | P0.5, P0.6, P0.6b | In progress | #20 | 1 | Kit merged (#20); recheck stealing/Lockdown wording and "stored Glow can be stolen" against P0.5. Multi-client session deferred to the end (see below). |
+| P0.8 | integration | P0.5, P0.6, P0.6b | In progress | #20 | 2 | Kit merged (#20). Final single-client Studio pass + kit correction running. Multi-client session deferred to the end |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
