@@ -144,6 +144,16 @@
 	the two profiles loaded here; only async debits cross servers (D-012 closed: no Async record is
 	ever voided, so no late debit can race a void).
 
+	After a step lands (P2.9): once this server has SAVED a record as Debited, it announces the
+	loss, deferred on its own thread inside pcall (never part of the transfer): an Async debit logs
+	raided_offline (on the defender when they are here, else on the raider) and, with the defender
+	here, a DenGlow "DenRaided" economy sink; any debit that moved something calls
+	NotificationService.onLoss({ defenderUserId, raidId, raiderName, kind, critterName }) when that
+	service exists and has onLoss (PR #118; looked up by name, so this works without it).
+	raiderName is the raider's DisplayName if they are here, else their Roblox username; critterName
+	is the catalog name. Once saved Committed, a raider here gets a Glow "RaidLoot" economy source.
+	Escrow.luau and every step's behavior are unchanged.
+
 	TODO (when rebirth is wired; D-026): applyRebirth must skip or refuse critters that are
 	locked (carried, or in an open escrow).
 ]]
@@ -156,9 +166,11 @@ local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local CritterCatalog = require(ReplicatedStorage.Shared.CritterCatalog)
 local Economy = require(ReplicatedStorage.Shared.Economy)
 local Escrow = require(ReplicatedStorage.Shared.Escrow)
 local Types = require(ReplicatedStorage.Shared.Types)
+local AnalyticsService = require(script.Parent.AnalyticsService)
 local DataService = require(script.Parent.DataService)
 local IncomeService = require(script.Parent.IncomeService) :: any
 
@@ -388,6 +400,126 @@ local function closeIndexes(record: EscrowRecord)
 	end
 end
 
+-- After a step lands (P2.9) ------------------------------------------------------------------------
+-- Analytics and the loss notification, announced once this server has SAVED a record step. They
+-- run deferred on their own thread, inside pcall, after the drive has moved on: they never yield,
+-- block or fail a transfer, and they read only the saved record (a copy) and profiles loaded here.
+-- Two servers that both save the same step (a rare race Escrow.canReplace allows) both announce it.
+
+local NAME_LOOKUP_DELAYS = { 1, 2 } -- seconds between Players:GetNameFromUserIdAsync attempts
+local notificationService: any = nil -- NotificationService, once found with an onLoss
+local notificationsChecked = false
+
+-- NotificationService.onLoss (P2.7, PR #118) when that service is present and has it; nil until
+-- then, so this file works with or without #118. Looked up once, on first use.
+local function notifications(): any
+	if notificationsChecked then
+		return notificationService
+	end
+	notificationsChecked = true
+	local module = script.Parent:FindFirstChild("NotificationService")
+	if module and module:IsA("ModuleScript") then
+		local ok, service = pcall(require, module)
+		if ok and type(service) == "table" and type((service :: any).onLoss) == "function" then
+			notificationService = service
+		end
+	end
+	return notificationService
+end
+
+-- The raider's Roblox DisplayName when they are here, else their username (a bounded lookup).
+local function raiderName(userId: number): string?
+	local player = Players:GetPlayerByUserId(userId)
+	if player then
+		return player.DisplayName
+	end
+	for attempt = 1, #NAME_LOOKUP_DELAYS + 1 do
+		local ok, name = pcall(function()
+			return Players:GetNameFromUserIdAsync(userId)
+		end)
+		if ok and type(name) == "string" then
+			return name
+		end
+		if attempt <= #NAME_LOOKUP_DELAYS then
+			task.wait(NAME_LOOKUP_DELAYS[attempt])
+		end
+	end
+	return nil
+end
+
+local function tierOf(critter: Types.Critter?): string
+	local species = if critter then CritterCatalog.get(critter.speciesId) else nil
+	return if species then species.tier else "None"
+end
+
+-- The defender gave up the loot (the record is saved Debited).
+local function announceDebit(record: EscrowRecord)
+	local moved = record.critter ~= nil or record.glow > 0
+	local defender = Players:GetPlayerByUserId(record.defenderUserId)
+	if Escrow.kindOf(record) == "Async" then
+		-- raided_offline: Roblox analytics need a Player in this server, so a debit written to a
+		-- profile no server holds is logged on the raider (whose server delivered it).
+		local raider = Players:GetPlayerByUserId(record.raiderUserId)
+		local on = defender or raider
+		if on then
+			AnalyticsService.track(on, "raided_offline", {
+				tierLost = tierOf(record.critter),
+				glowLost = record.glow,
+				revenge = record.isRevenge,
+				attributedTo = if defender then "Defender" else "Raider",
+			})
+		end
+		local profile = DataService.getProfile(record.defenderUserId)
+		if defender and profile and record.glow > 0 then
+			AnalyticsService.economy(defender, "DenRaided", record.glow, math.max(0, math.floor(profile.stored)))
+		end
+	end
+	local service = notifications()
+	if not moved or service == nil or record.defenderUserId <= 0 or record.raiderUserId <= 0 then
+		return -- nothing lost, no NotificationService yet, or a Studio test id (no account)
+	end
+	local name = raiderName(record.raiderUserId)
+	if name == nil then
+		warn(`[EscrowService] no loss notification for {record.raidId}: the raider's name could not be read`)
+		return
+	end
+	local species = if record.critter then CritterCatalog.get(record.critter.speciesId) else nil
+	service.onLoss({
+		defenderUserId = record.defenderUserId,
+		raidId = record.raidId,
+		raiderName = name,
+		kind = if record.critter then "Critter" else "Glow",
+		critterName = if species then species.name else nil,
+	})
+end
+
+-- The raider received the loot (the record is saved Committed).
+local function announceCredit(record: EscrowRecord)
+	local raider = Players:GetPlayerByUserId(record.raiderUserId)
+	local profile = DataService.getProfile(record.raiderUserId)
+	if raider and profile and record.glow > 0 then
+		AnalyticsService.economy(raider, "RaidLoot", record.glow, math.max(0, math.floor(profile.glow)))
+	end
+end
+
+-- Called by the store right after a record write landed, with the state it moved from.
+local function announce(record: EscrowRecord, before: string?)
+	local saved: EscrowRecord = deepCopy(record)
+	local announcer = if before == "Pending" and saved.state == "Debited"
+		then announceDebit
+		elseif before == "Debited" and saved.state == "Committed" then announceCredit
+		else nil
+	if announcer == nil then
+		return
+	end
+	task.defer(function()
+		local ok, err = pcall(announcer, saved)
+		if not ok then
+			warn(`[EscrowService] announcing {saved.raidId} ({saved.state}) failed: {err}`)
+		end
+	end)
+end
+
 -- What one drive saw: `record`, a copy of the record as last read or confirmed written (so a
 -- drive that errors part-way still knows which party it needs next), and `touched`, the parties
 -- loaded here whose live profile it changed (refreshed after a late drive, D-026).
@@ -402,8 +534,10 @@ local function storeFor(raidId: string, last: Seen): Escrow.Store
 			return record
 		end,
 		saveRecord = function(record: EscrowRecord)
+			local before = if last.record then last.record.state else nil
 			saveRecord(record)
 			last.record = table.clone(record)
+			announce(record, before) -- deferred: analytics and the loss notification (P2.9)
 		end,
 		loadProfile = function(userId: number): PlayerProfile
 			local profile = DataService.getProfile(userId)

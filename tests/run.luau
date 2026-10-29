@@ -121,6 +121,18 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "Analytics",
+		load = function()
+			return require("./specs/Analytics.spec")
+		end,
+	},
+	{
+		name = "AnalyticsServiceSource",
+		load = function()
+			return require("./specs/AnalyticsServiceSource.spec")
+		end,
+	},
+	{
 		name = "EscrowSimulation",
 		load = function()
 			return require("./specs/EscrowSimulation.spec")
