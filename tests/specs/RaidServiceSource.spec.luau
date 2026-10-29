@@ -147,4 +147,33 @@ tests["the grab-time protection base reaches transferLive as its 7th argument (D
 	expect.eq(count(code, "Economy.denRate"), 1, "and nowhere else")
 end
 
+tests["a live revenge comes only from MatchmakingService and reaches transferLive as its 6th argument"] = function()
+	local code = codeOnly(fs.readFile(FILES[1]))
+	local call = string.match(code, "pcall%(%s*EscrowService%.transferLive%s*,([^%)]*)%)")
+	expect.truthy(call, "transferLive is called through pcall")
+	local args = {}
+	for arg in string.gmatch(call :: string, "[^,]+") do
+		table.insert(args, (string.gsub(arg, "%s", "")))
+	end
+	expect.eq(args[6], "isRevenge", "the 6th is the server's revenge decision")
+	expect.truthy(
+		string.find(
+			code,
+			"local revengeRaidId = RaidRules%.liveRevengeAtEscape%(carry%.revengeRaidId, liveRevengeOf%(player%), defenderUserId%)"
+		),
+		"re-read at the escape, against the carry's defender"
+	)
+	expect.truthy(string.find(code, "local isRevenge = revengeRaidId ~= nil"), "isRevenge follows that answer")
+	expect.eq(count(code, "MatchmakingService.getLiveRevenge"), 1, "one place reads the live revenge")
+	expect.truthy(
+		string.find(code, "RaidRules%.liveRevengeAgainst%(liveRevengeOf%(player%), ownerUserId%)"),
+		"the grab is a revenge only against the den's owner"
+	)
+	expect.truthy(
+		string.find(code, "flagsAllow = liveAllowed%(revengeRaidId ~= nil%)"),
+		"a revenge grab needs asyncRaids"
+	)
+	expect.eq(count(code, "revengeTokens"), 0, "raid code never touches a revenge token")
+end
+
 return tests

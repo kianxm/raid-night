@@ -295,6 +295,13 @@ Live stealing happens in an online owner's den (RaidService, decision D-003).
 - `Net.Pushes.RaidEnded` goes to the raider whenever a live carry ends (decision D-020). In the
   `RaidEnd` payload, `escaped` is true only when `transferLive` returned `Committed`. `raidId` is
   the escrow raidId, or `""` for a drop before escape. `speciesId` is set, and `glow` is 0.
+- Live revenge steal (P1.9b): a grab in the den of the player's active live revenge target
+  (`MatchmakingService.getLiveRevenge`, never client data; `RaidRules.liveRevengeAgainst`) is a
+  revenge: the grab's kill switch is `Escrow.canStartTransfer(Config.Flags, "Live", true)`, and
+  nothing else changes (Lockdown, live loss rules, Glow 0). At the escape the revenge is read
+  again (`RaidRules.liveRevengeAtEscape`); `transferLive` gets `isRevenge = true` only if the same
+  revenge is still active, else the carry escapes as a plain live steal. RaidService never
+  touches a revenge token.
 
 Tuning lives in `Config.LiveRaid`:
 
