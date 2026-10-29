@@ -124,8 +124,9 @@ local function build(): { [string]: any }
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "Hud"
 	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = false -- stay below Roblox's top bar
-	gui.ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets -- notches and rounded corners
+	-- ScreenInsets supersedes IgnoreGuiInset. CoreUISafeInsets keeps content clear of the
+	-- Roblox top bar and also covers device notches and rounded corners.
+	gui.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
 	gui.DisplayOrder = 1
 	gui.Parent = player:WaitForChild("PlayerGui")
 
