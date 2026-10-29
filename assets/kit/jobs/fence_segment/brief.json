@@ -1,0 +1,18 @@
+{
+  "budget": {
+    "onScreenAtOnce": 40,
+    "parts": 2,
+    "texture": 512,
+    "triangles": 350
+  },
+  "group": "prop",
+  "id": "fence_segment",
+  "name": "Fence segment",
+  "notes3d": "Tiles end to end along the den borders; keep both ends identical so it repeats.",
+  "purpose": "Street and den dressing: fence segment. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 8,
+    "y": 3,
+    "z": 8
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "budget": {
+    "onScreenAtOnce": 6,
+    "parts": 3,
+    "texture": 512,
+    "triangles": 400
+  },
+  "group": "prop",
+  "id": "wheelbarrow",
+  "name": "Wheelbarrow",
+  "notes3d": "No glow material. The wheel can be a separate mesh for a roll animation.",
+  "purpose": "Street and den dressing: wheelbarrow. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 3,
+    "y": 2.5,
+    "z": 3
+  }
+}

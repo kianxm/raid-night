@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 8,
+    "parts": 12,
+    "texture": 512,
+    "triangles": 3000
+  },
+  "glow": {
+    "at": "a thin strip of light along the top of the low border wall",
+    "color": "soft pale blue moonlight glow"
+  },
+  "group": "den",
+  "id": "den_base",
+  "name": "Den base",
+  "notes3d": "Modular: floor tiles plus four border segments so the pad and spawn layout (Plots.luau) sits on top. Flat top for pads, border strip on its own emissive material. Pivot at floor centre, top at y=0.",
+  "purpose": "The floor, low border wall and back-wall nook of one player's den; critters sit on pads on top of it.",
+  "sizeStuds": {
+    "x": 56,
+    "y": 4,
+    "z": 56
+  }
+}

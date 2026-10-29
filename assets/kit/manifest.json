@@ -1,0 +1,24 @@
+{
+	"version": 1,
+	"pieces": {
+		"barrel": "",
+		"bench": "",
+		"crate_stack": "",
+		"den_base": "",
+		"fence_segment": "",
+		"lamp_post": "",
+		"mailbox": "",
+		"pad": "",
+		"plaza": "",
+		"rock_cluster": "",
+		"shrub": "",
+		"trap_alarm_moth": "",
+		"trap_net": "",
+		"trap_slow_puddle": "",
+		"trap_sprinkler": "",
+		"trap_trapdoor": "",
+		"tree_small": "",
+		"vault_door": "",
+		"wheelbarrow": ""
+	}
+}

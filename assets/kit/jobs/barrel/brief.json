@@ -1,0 +1,18 @@
+{
+  "budget": {
+    "onScreenAtOnce": 16,
+    "parts": 2,
+    "texture": 512,
+    "triangles": 300
+  },
+  "group": "prop",
+  "id": "barrel",
+  "name": "Barrel",
+  "notes3d": "No glow material.",
+  "purpose": "Street and den dressing: barrel. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 3,
+    "y": 3.5,
+    "z": 3
+  }
+}

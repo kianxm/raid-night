@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 12,
+    "parts": 4,
+    "texture": 512,
+    "triangles": 700
+  },
+  "glow": {
+    "at": "the lantern glass",
+    "color": "bright warning orange glow"
+  },
+  "group": "trap",
+  "id": "trap_alarm_moth",
+  "name": "Alarm moth trap",
+  "notes3d": "No moth creature: the wings are fins on the lantern, so it stays a prop. Glass bulb on its own emissive material, pulsed by script when triggered. Pivot centre of the base.",
+  "purpose": "Pocket-den trap (AlarmMoth): a lantern that wakes the guards and sends them chasing.",
+  "sizeStuds": {
+    "x": 3,
+    "y": 5,
+    "z": 3
+  }
+}

@@ -94,3 +94,11 @@ writes it to `assets/jobs/`. Change it there; this page holds the rules it follo
 >
 > stolen: gotcha pose when stolen: a quick {personality} gotcha, in on the joke, never sad or
 > scared
+
+## World kit
+
+Briefs for the den base, pad, vault door, the five traps, the plaza and 10 props live in
+`tools/assets/Kit.luau` and are written to `assets/kit/` by `lune run tools/assets/build_kit.luau`.
+Same look as the critters (matte vinyl, toon, night navy and slate), one glow accent per piece,
+and no glow stronger than a critter's so critters pop. `assets/kit/manifest.json` maps piece id
+to Roblox asset id and stays empty until pieces are imported.

@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 16,
+    "parts": 3,
+    "texture": 512,
+    "triangles": 800
+  },
+  "glow": {
+    "at": "the few tiny fruits in the canopy",
+    "color": "soft pale blue moonlight glow"
+  },
+  "group": "prop",
+  "id": "tree_small",
+  "name": "Small tree",
+  "notes3d": "Canopy as one blobby mesh, no leaf cards. Fruit specks on their own emissive material.",
+  "purpose": "Street and den dressing: small tree. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 6,
+    "y": 11,
+    "z": 6
+  }
+}

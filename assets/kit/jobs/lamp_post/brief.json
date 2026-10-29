@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 40,
+    "parts": 3,
+    "texture": 512,
+    "triangles": 500
+  },
+  "glow": {
+    "at": "the lamp glass",
+    "color": "warm amber lamp glow"
+  },
+  "group": "prop",
+  "id": "lamp_post",
+  "name": "Lamp post",
+  "notes3d": "Warm lamp pools are the world's key light, so this prop matters most. The light is a PointLight in-engine.",
+  "purpose": "Street and den dressing: lamp post. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 1,
+    "y": 9,
+    "z": 1
+  }
+}
