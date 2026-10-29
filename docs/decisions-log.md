@@ -3,6 +3,112 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-055 · 2026-10-29 · Studio check of preview/phase1 by temporary script sync
+Context: no Phase 1 server code had run in Roblox, and merges wait for Kian (D-044). Decision: the
+integration agent synced preview/phase1's 27 changed scripts into the open, unsaved edit place
+(HttpEnabled on temporarily), recorded originals, and restored them afterwards; Rojo and the main
+checkout untouched, nothing saved or published. Outcome: groups A and B1 passed; the Studio MCP
+play control wedged after the first forced stop, so the rest is unrun. One deviation: the test
+transfer used Kian's real account as the raider (Studio DataStore, not a live game); left Pending
+and recorded under Needs Kian. Why: catch runtime errors before morning. Reversible: yes.
+
+### D-054 · 2026-10-29 · One revenge raid per token
+Context: data on #109: "spending" a token only marked its shield bypass used, so a second +10%
+revenge raid stayed possible within the pair limit. Decision: an Async credit that moves
+something removes the named revenge token; a failed or empty revenge raid keeps it. Live revenge
+still doesn't spend (D-052). Why: revenge is one answer to one raid; the bonus can't be farmed.
+Reversible: yes (one line).
+
+### D-053 · 2026-10-29 · Failed raids don't count toward the pair limit; raider-side commit is core
+Context: raid on #106. Decision: only an escape that moves something counts toward the same-pair
+daily limit (as live steals); timeout, tag and retreat don't. The raider-side raid-log entry, the
+raider's pair count and the async revenge-token spend are P1.3's own done-when ("logs on both
+sides"), so data adds them to the raider credit now (P1.3d), applied once per raidId and never on
+an empty commit. Why: a failed raid takes nothing from the defender (shield and loss cap still
+apply); a revenge loop that never spends its token isn't the designed loop. Reversible: yes.
+
+### D-052 · 2026-10-29 · Live revenge token spend waits for the playtest
+Context: raid on #105. Live revenge escapes as a revenge transfer, but transferLive can't name the
+token to spend, so the token stays after a live revenge commits. Decision: hardening backlog, not
+a new escrow contract tonight. Repeat revenges against the same raider stay limited by the live
+pair limit (2/day) and token expiry; nothing is duplicated or lost. Why: D-039 pre-playtest
+scope; the playtest shows whether repeat revenge matters. Reversible: yes.
+
+### D-051 · 2026-10-29 · Raid UI refusal and revenge-join details
+Context: ui on #102. Decision: the client doesn't check Config.Flags itself; any refused
+StartRaid shows "Can't raid that den now" (no distinct "raids are off" copy until the server
+returns a reason). On a retryable live-join failure the UI offers "Raid their den instead"
+rather than starting the async raid automatically. The block list comes from
+StarterGui:GetCore("GetBlockedUserIds") plus the block/unblock core events (the documented
+client route). Why: the server stays the only judge; the player chooses the fallback.
+Reversible: yes.
+
+### D-050 · 2026-10-29 · Async raid details (P1.3a)
+Context: raid on #100/#101. Decision: (1) MatchmakingService.noteRaided runs on escape with the
+snapshot's power, not at StartRaid, so a failed raid doesn't hide a den for 4 h; (2) reaching the
+gate without a critter ends the raid and takes nothing (no walk-in, walk-out Glow); (3) guard and
+trap tuning lives in RaidRules.Pocket until it moves to Config (as D-021); (4) raidLogSeenAt is
+an optional Profile field written by the server when GetRaidLog is called (no migration). Why:
+fairness to the defender and simplest thing for the gate. Reversible: yes.
+
+### D-049 · 2026-10-29 · Escrow fix round on #97/#98; asyncRaids waits for old servers to die
+Context: reviewer APPROVED #97 and #98 at xhigh with suggestions. Decision: one fix round for the
+two Glow dupe/loss-adjacent items (a stale session's same-second debit writing its loot into the
+record; one sweep error stopping recovery) plus cheap lines in the same round (Refused instead of
+InFlight when nothing was written; Escrow.void refuses Async; a spec for accrue-inside-the-write).
+asyncRaids is turned on only after every pre-P1.1 server has shut down, because old servers void
+Pending records of any kind. Other suggestions go to the hardening backlog. Why: principle 1;
+the rest fails safe. Reversible: yes.
+
+### D-048 · 2026-10-29 · Replay fetch limit and 7-day cleanup
+Context: raid on #99. Decision: GetReplay is limited to 3 per 10 s; DataStores have no expiry, so
+each raider keeps an index of their replays and every new save deletes their expired ones and
+any beyond 64; a save whose index write fails is skipped, and reads refuse replays older than
+7 days. Why: replays are a nice-to-have that must never cost raid results or DataStore budget.
+Reviewer approved. Reversible: yes.
+
+### D-047 · 2026-10-29 · Async escrow records are never voided; cleanup deferred
+Context: data on #97/#98. Decision: close D-012 #6 by never voiding Async records (any server may
+redeliver the debit; it applies once per raidId) instead of a void tombstone. Deleting finished
+escrow records (D-008) moves to the hardening backlog (storage growth only). Async debits accrue
+the defender's offline income to debit time, take the loot share of what's stored then, and
+credit the raider exactly that. asyncRaids turns on only in a deploy after P1.1 ships. Why: an
+escaped raid always completes, with no void race (principle 1). Reviewer checks idempotency.
+Reversible: yes.
+
+### D-046 · 2026-10-29 · P1.3 and P1.4 split so they start before P1.1 lands
+Context: P1.1 (escrow) is the long pole; most of P1.3 and P1.4 doesn't touch escrow. Decision:
+P1.3a builds StartRaid (lock, flags, block and presence re-checks), the pocket den, traps,
+guards, timer and server grabs from integration, ending at one named escape hook; P1.3b wires
+that hook to EscrowService (transfer, shield, revenge token, logs), stacked on P1.1. P1.4a
+writes the replay codec and store in new files; P1.4b records during raids after P1.3. Why:
+fills the idle slots without two agents editing one file. Reversible: yes (process).
+
+### D-045 · 2026-10-29 · P1.7 tuning waits for Kian; P1.8 prepared
+Context: economy on #95 proposes upgradeCostBase 100→500, eggPriceBase 50→150, eggPriceGrowth
+1.12→1.32. Each serves a quoted design target, but no design-doc numeric range covers them and
+they set a first-rebirth pace (~3 weeks) the design never defines. Decision: not approved under
+D-041; P1.8 applies the values in a stacked PR that merges only if Kian approves. Async loot
+reading leave-time stored Glow is a bug, not tuning: sent to P1.1 (debit accrues to debit time).
+Why: pacing is a product call; the PR makes it a one-click approval. Reversible: yes.
+
+### D-044 · 2026-10-29 · Merges wait for Kian; dependent work stacks on PR branches
+Context: from #92 on, the session's permission check refuses every `gh pr merge` ("Merge
+Without Review"), even after a reviewer pass and for docs-only ledger PRs. Decision: no merge is
+worked around. A task whose dependency is an open PR branches from that PR's branch and targets
+it (stacked PR); Phase 1's chain is linear (P1.1 → P1.3 → P1.4/P1.6, P1.7 → P1.8), so no
+combining merges are needed. Checks and reviews run on the PR branches. Studio runs for unmerged
+code wait until Kian merges, because Rojo serves the main checkout on `integration`. Ledger
+updates stay on the open ledger PR. Kian merges in the order listed in the gate report.
+Why: respect the permission boundary and still finish the code. Reversible: yes (process).
+
+### D-043 · 2026-10-29 · Only offline dens are async raid targets
+Context: matchmaking on #91. Decision: GetRaidTargets lists a den as an async target only while
+its owner is offline (presence absent); online owners are raided live in their own server. A
+Studio-only hook may skip the asyncRaids flag for playtests (IsStudio + Memory persistence +
+test ids); live remotes always respect Config.Flags. Why: one den is never raided live and async
+at once; the hook can't reach a live game. Reviewer approved. Reversible: yes.
+
 ### D-042 · 2026-10-29 · P1.2 runs alongside P1.1; tools/sim goes to economy
 Context: P1.2 lists P1.1 as a dependency, but snapshots, pools, locks and presence live in
 matchmaking's own files and only read DataService as it is. Decision: start P1.2 in parallel

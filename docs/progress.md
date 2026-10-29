@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 1 (running) · Last updated: 2026-10-29
+Current phase: 1 → 2 (Phase 1 gate approved; Phase 2 not started, waiting for Kian) · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -47,16 +47,16 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| P1.1 | data | — | In progress | agent/data/P1.1 | 1 | Carries D-008, D-012 #6, D-026 TODOs, C5 day-high check |
-| P1.2 | matchmaking | P1.1 | In progress | agent/matchmaking/P1.2 | 1 | Runs alongside P1.1 (D-042) |
-| P1.3 | raid | P1.1, P1.2 | Todo | | | |
-| P1.4 | raid | P1.3 | Todo | | | |
-| P1.5 | ui | — | In progress | agent/ui/P1.5 | 1 | Mock data behind Net |
-| P1.6 | ui | P1.3, P1.5 | Todo | | | |
-| P1.7 | economy | — | In progress | agent/economy/P1.7 | 1 | Tuning approved by orchestrator within design-doc ranges (D-041) |
-| P1.8 | economy | P1.7 | Todo | | | |
-| P1.9 | matchmaking | P1.2 | Todo | | | Live check needs two servers or a private publish (Kian) |
-| P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
+| P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) APPROVED both; fix round (D-049) re-reviewed APPROVED (275 tests; mutation runs). Own Studio run waits for merge (D-044) |
+| P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
+| P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: #100, #101 (stacked), in review; P1.3b: Todo | 1 | Split (D-046). #100 contracts + pure rules, #101 server + pocket den: reviewer APPROVED both, 286 tests (D-050). P1.3c #103 (data, markRaidLogSeen, stacked on #100): reviewer APPROVED, 287 tests; the RaidLogSeenAt attribute keeps its load value. P1.3b #106: escape → transferAsync, RaidEnded Committed/InFlight(pending)/Refused, presence-failure refusal; 318 tests; reviewer APPROVED (+2 small follow-ups). P1.3d #109 (data, stacked on #107): raider Outgoing log, pair count, revenge token removed on a moving credit (D-054); EscrowRecord.revengeRaidId + transferAsync 7th arg; 329 tests; simulation extended with async revenge. P1.3e #110 (raid one-liner passing revengeRaidId, stacked on #109). Reviewer (xhigh) APPROVED #109 and #110; all mutations caught. P1.3b = escrow handoff, shield, revenge token, logs, pair limit, markRaidLogSeen (after P1.1 fix round) |
+| P1.4 | raid | P1.3 | In review | P1.4a: #99 (approved); P1.4b: #107 (stacked on #106), reviewer APPROVED | 1 | Split (D-046). #99: 3-min raid = 1,768 bytes, ±0.25 stud, reviewer APPROVED (decode fuzzed), 281 tests; GetReplay limit 3 and 7-day index cleanup approved (D-048). P1.4b = hook into raids after P1.3a, using save() not saveNow() |
+| P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
+| P1.6 | ui | P1.3, P1.5 | In review | #102, #108 | 1 | Stacked on #100, contains #92 and #94 (D-044). #108 (stacked on #102): "On its way!" and Glow-only outcome cards for #106. Real remotes, revenge + join-server flow, block list via GetCore (D-051). 290 tests, CI green. UI: no review. Studio plan and the two-account loop wait (Kian) |
+| P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
+| P1.8 | economy | P1.7 | Done | #96 (via preview/phase1) | 1 | Approved by Kian at the gate. Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
+| P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); reviewer APPROVED (no Glow bonus on live revenge, retries keep identical args). Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
+| P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit), preview/phase1 | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Dry run: all 17 PRs merge in order into `preview/phase1` (a6ad68f, no PR), 5 conflicts resolved, 340 tests + EscrowSimulation green, lint/format/types clean. P1.10c: preview scripts hand-synced into the open edit place (27 scripts), A + B1 passed, then Studio MCP play control wedged after the first forced stop; Studio restored, nothing saved (D-055). Retry after Studio recovered: P1.1 forced-shutdown recovery PASS (p11-sd-1 committed once, glow 474 on record and both appliedTransfers); A, B1, B5, D (matchmaking), E (live revenge), F core (#106 escape/shield/revenge token/loss/pair, Shielded refusal, revenge raid ~27.5% Glow, #109 Outgoing log + token spent), G (replays #99/#107) passed; no game bugs. Not run: B2-B4, C, #101 exploit/guard/trap/timeout steps, H (UI), parts of F/G/I, and the soak (DataStore mode only accepts a real loaded raider; test raiders refused) | Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
 
 ## Setup notes
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
@@ -82,6 +82,29 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
+
+- PR #92 (P1.5b, fixes #90 blank Raid Portal): reviewed, CI green, src/Client only, but the
+  permission check refused `gh pr merge 92` twice ("Merge Without Review"). Merge it yourself, or
+  allow the integration agent to merge reviewed PRs. Not worked around.
+
+- P1.7 tuning (#95, applied in P1.8's stacked PR): upgradeCostBase 100→500, eggPriceBase 50→150,
+  eggPriceGrowth 1.12→1.32. First rebirth median day 0.9 → 20.7 (p10 8.7, p90 47.7); Glow held
+  stays ~1-4 egg prices instead of climbing to 12,000. The design sets no first-rebirth target:
+  approve the ~3-week pace, pick another, or keep today's values. Level 30 of 50 on day 1 either way.
+
+- Rollout: turn `Config.Flags.asyncRaids` on only after every pre-P1.1 server has shut down
+  (shut down old servers after the publish that ships #97/#98); an old server would void a Pending
+  async record and could lose the critter and Glow (D-049).
+
+- Studio MCP wedged ("Start play hasn't finished yet" for 30+ min after a forced stop): restart Studio
+  or the MCP plugin before the next Studio run.
+- Test data (D-055, updated): `p11-sd-1` is now Committed: Kian's account 11086525754 gained test
+  critter `seed-1-1` and 474 Glow (133018 → 133492); keep or remove it. Earlier note: `p11-sd-1` was Pending with raider =
+  Kian's real account 11086525754 and test defender -1 already debited of critter `seed-1-1` (Glow 0).
+  On preview/Phase 1 code the recovery sweep commits it once into 11086525754 (that is the pending
+  forced-shutdown check: expect exactly one seed-1-1). On today's integration code an old recovery may
+  void it and the test critter is lost from -1 (test data only). Seeded test defenders `Player_-1`,
+  `Player_-2`, `Player_-3` exist. Kian's profile is otherwise unchanged (Glow 133018, 13 critters).
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
@@ -124,6 +147,7 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
   leaving mid-window leaves the den clean for the next owner; a real owner moving earners via
   PlaceCritter mid-carry keeps the grab-time base; the owner sees nothing during the 1 s hold;
   a UTC day roll clears LiveProtected within 0.5 s; no raid-log entry for a real empty steal.
+- Phone emulator: Raid Portal, in-raid HUD, raid log and outcome card at 667x375 and 844x390 (P1.5, #89/#92); Studio viewport could not be resized.
 - Phone emulator: den status chip and markers (P0.5i, #70); the 200 px chip (#80) may overlap the
   top-centre toast below ~700 px wide (667x375 landscape): check, or move/narrow it.
 - Live protection (D-036/D-037): an owner buying an egg after a protecting loss (auto-place lifts
@@ -135,7 +159,35 @@ Exploit and fairness edge cases that lose nothing and fail safe. One line each: 
 came from, rough size. Not fixed before the phase's human playtest; then kept, scheduled or
 dropped based on real play.
 
-- (empty)
+- Pool withdraw uses the band from load-time power; an offline raid that moved the den two bands leaves a stale entry while online (reviewer #91, MatchmakingService:594; small).
+- Leave-publish race on a server hop plus up to 60 s of pool cache can relist an online player (reviewer #91; P1.3 refuses async raids on fresh presence; small).
+- A raider can block their victim after a raid to hide from revenge (reviewer #91; decide after playtest).
+- Raider's own block list is session-only until their first ReportBlocked; fall back to the last snapshot (reviewer #91; small).
+- Studio hook `targets` also skips the `raids` gate; doc says asyncRaids only (reviewer #91; Studio only, doc fix).
+- Escrow (reviewer #98): a debit finished in another server is credited only on the raider server's next retry (up to 30 min backoff); a crashed server's stale lock keeps a defender "held" until they return (consider ProfileStore's 630 s assume-dead); unbounded MessageAsync retry threads during an outage (one pending send per user+raid); the dupe alarm can't see a critter both parties own (assert at credit); an erased defender save errors forever (park it). All fail safe.
+- Escrow follow-ups (re-review #97/#98): two sameApplied asserts (different `at`; saved critter with an extra field); a repeat transferAsync after Commit or a dupe alarm whose read fails reports Refused though the loot moved (status only).
+- Finished escrow records are never deleted (D-008 cleanup deferred, D-047; storage growth only; proposal in #98).
+- ReplayStore: cap expired-replay deletes per save (~4) so a returning raider's 64-delete burst can't drain the DataStore budget; delete the dropped list even if SetAsync fails; cache fetched records; finite startedAt check (reviewer #99; small).
+- DenSnapshot has no losses-today count, so StartRaid assumes 0 (the escrow debit still enforces the cap) (raid #100; matchmaking; small).
+- Async raids (reviewer #101): trap slow / Net is judged against the new walk speed at once, so a carrier with >150 ms ping can drop as TooFast (fails safe; add a grace); no movement budget before a grab lets a teleport skip guards/traps on the way in (carry back is checked); presence read error should be reported by matchmaking, not read as offline (P1.3b refuses on error); confirm StreamingEnabled is on in the place so pockets stay hidden.
+- Client RaidMath helpers (hintKey, failKey, outcomeKey) have no unit tests (tests/ is outside ui's lane; small).
+- markRaidLogSeen could take os.time() itself instead of a passed `now`; a fast server clock leaves a future value (display only) (reviewer #103; tiny).
+- Live revenge doesn't spend the revenge token on commit: needs optional revengeRaidId on transferLive / Escrow.create / the record, spent at the raider credit (data), then a one-line raid change (raid #105, D-052; small-medium). RaidEnd has no revenge flag for a "Revenge!" screen (ui; optional).
+- Live revenge: asyncRaids flipped off between the escape re-read and transferLive refuses the carry instead of a plain steal (fails safe); getLiveRevenge per hold step could be cached (reviewer #105; tiny).
+- Async shield memory is per server: a raider who hops servers can re-raid a just-shielded offline den until the snapshot/pool catches up (raid #106; small).
+- Raid lock TTL 240 s (raid 180 s + up to ~2 min escrow) can expire; raise it or refresh before escape (reviewer #106). Earlier note: lock TTL during a long raid plus a slow transfer (raid #106; small).
+- MatchmakingService.getPresence swallows read failures; return (nil, false) so callers fail closed (raid #106; tiny).
+- Live path never calls recordOutgoing: live raiders get no Outgoing log entry or raider pair count (data #109; pre-existing; small).
+- An empty Async debit still counts a pair slot on the defender's side (data #109; pre-existing; fairness).
+- While a revenge transfer is InFlight the lock is released and the token still exists, so a second revenge raid on the same token is possible (bounded by the pair limit; refuse tokens named by an open escrow) (reviewer #109; small). RaidRules.recordOutgoing doc comment is stale vs D-053 (raid; tiny).
+- A credit still in flight doesn't count toward the raider's pair limit yet (data #109; small).
+- Soak tooling: DataStore mode refuses test raiders ("raider must be loaded in this server"), so a forced-shutdown soak needs a real account; add a Studio-only test-raider load (data; small). Seeded test stored jumps 1000 → ~36900 on first raid from an old storedUpdatedAt (kit text stale).
+- Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
+- Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
+- Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).
+- getLiveRevenge can miss a block that exists only in a snapshot and was added after arrival (reviewer #94; rare).
+- `raiderOnline` tells a victim whether their raider is online (reviewer #94; privacy note, by design, blocks respected).
+- seenOnline: one MemoryStore read per revenge row per GetRaidTargets (15 s cache); watch the budget (reviewer #94). Six more in #94.
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
@@ -166,6 +218,10 @@ Full log with reasons: `docs/decisions-log.md`.
 - Live revenge needs `asyncRaids` too (follows the 2026-10-28 kill-switch wording literally).
 
 ## Gate history
+
+- Phase 1 gate: APPROVED 2026-10-29 (Kian, in chat), including the P1.8 tuning (#96). Landed by
+  merging `preview/phase1` (all Phase 1 PRs + #96 + this ledger) into integration. Still open: the
+  soak and the multi-person checks (deferred list), run with testers like Phase 0.
 
 - Promotion: integration → main after the post-gate follow-ups (C4, P0.5h, P0.5i), 2026-10-28.
 - Phase 0 exit checks: passed 2026-10-28 (176 tests, CI green on 860c3f4, single-client Studio
