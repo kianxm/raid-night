@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-035 · 2026-10-28 · Grab refusal reasons stay unshown in Phase 0
+Context: ui on #70: the refusal copy for LiveProtected / PostLossSafety is built and tested, but
+no remote delivers a grab refusal reason to the client (GrabCritter has no reply). Decision: no
+new Net push now; the den markers ("Protected today", "Safe for m:ss") already explain the two
+new refusals, and the deferred list already asks testers whether refusals need a message. If
+they do, add a `GrabRefused` push (Net + contracts.md + reviewer) and hook the existing copy.
+Why: principle 7, and a contract change for copy the testers may not need. Reversible: yes.
+
 ### D-034 · 2026-10-28 · Live protection base is the den's rate at the grab (Kian)
 Context: reviewer on #64: measured at the first live debit, the base can be shrunk during the
 carry (the owner is alerted at the grab and can move high earners to Inventory/Vault), buying
