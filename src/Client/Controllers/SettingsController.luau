@@ -13,6 +13,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Client = script.Parent.Parent
 local Ui = require(Client:WaitForChild("Raid"):WaitForChild("Ui"))
+local Theme = Ui.theme
 local Strings = require(Client:WaitForChild("Hud"):WaitForChild("Strings"))
 local SettingsState = require(Client:WaitForChild("Hud"):WaitForChild("SettingsState"))
 local Request = require(Client:WaitForChild("Request"))
@@ -26,13 +27,13 @@ local SettingsController = {}
 
 local function sliderCard(body: Instance, order: number, title: string, color: Color3, onChange: (number) -> ())
 	local card = Ui.card(body, title, order, 96)
-	local name = Ui.label(card, Ui.DISPLAY, 22)
+	local name = Ui.label(card, Ui.DISPLAY, Theme.type.buttonText)
 	name.Text = title
 	name.Size = UDim2.new(0.6, 0, 0, 28)
 	name.Position = UDim2.fromOffset(8, 6)
 	name.TextXAlignment = Enum.TextXAlignment.Left
 	name.ZIndex = 10
-	local value = Ui.label(card, Ui.DISPLAY, 22, color)
+	local value = Ui.label(card, Ui.DISPLAY, Theme.type.number - 6, color)
 	value.Size = UDim2.new(0.3, 0, 0, 28)
 	value.Position = UDim2.new(0.7, -8, 0, 6)
 	value.TextXAlignment = Enum.TextXAlignment.Right
@@ -44,16 +45,17 @@ local function sliderCard(body: Instance, order: number, title: string, color: C
 	track.AutoButtonColor = false
 	track.Size = UDim2.new(1, -24, 0, 36)
 	track.Position = UDim2.new(0, 12, 1, -48)
-	track.BackgroundColor3 = Ui.COLOR.panel
+	track.BackgroundColor3 = Theme.color.panelSunken
 	track.ZIndex = 10
-	Ui.round(track, 12)
-	Ui.outline(track, 3)
+	Theme.corner(track, Theme.radius.full)
+	Theme.outline(track, Theme.stroke.thin)
 	track.Parent = card
 	local fill = Instance.new("Frame")
 	fill.BackgroundColor3 = color
 	fill.BorderSizePixel = 0
 	fill.ZIndex = 11
-	Ui.round(fill, 12)
+	Theme.corner(fill, Theme.radius.full)
+	Theme.gradient(fill, 0.22)
 	fill.Parent = track
 
 	local function show(v: number)
@@ -137,7 +139,7 @@ function SettingsController.start()
 	MenuController.register({
 		id = "Settings",
 		label = Strings.menuSettings,
-		color = Ui.COLOR.dim,
+		color = Theme.color.inkDim,
 		title = Strings.settingsTitle,
 		build = function(body)
 			local showMusic = sliderCard(body, 1, Strings.settingsMusic, Ui.COLOR.glow, function(v)
@@ -150,7 +152,7 @@ function SettingsController.start()
 			end)
 
 			local row = Ui.card(body, "ReducedMotion", 3, 64)
-			local name = Ui.label(row, Ui.DISPLAY, 22)
+			local name = Ui.label(row, Ui.DISPLAY, Theme.type.buttonText)
 			name.Text = Strings.settingsReducedMotion
 			name.Size = UDim2.fromScale(0.55, 1)
 			name.Position = UDim2.fromOffset(8, 0)
@@ -172,7 +174,8 @@ function SettingsController.start()
 				-- Not Ui.setButton: a disabled (inactive) button would stop being tappable.
 				local title = toggle:FindFirstChild("Title") :: TextLabel
 				title.Text = if s.reducedMotion then Strings.settingsOn else Strings.settingsOff
-				toggle.BackgroundColor3 = if s.reducedMotion then Ui.COLOR.go else Ui.COLOR.disabled
+				title.TextColor3 = if s.reducedMotion then Theme.color.onAccent else Theme.color.onDisabled
+				toggle.BackgroundColor3 = if s.reducedMotion then Theme.color.go else Theme.color.disabled
 			end
 			SettingsState.onChanged(refresh)
 			refresh()
