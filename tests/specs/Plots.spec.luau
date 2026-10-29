@@ -152,4 +152,30 @@ tests["invalid plot and pad numbers throw"] = function()
 	end)
 end
 
+tests["pushOutside moves a visitor out through the nearest edge, onto open ground"] = function()
+	local half = L.plotSize / 2
+	for plot = 1, L.plotCount do
+		local cx, cz = Plots.center(plot)
+		local cases = {
+			{ cx + half - 1, cz, cx + half + 4, cz },
+			{ cx - half + 1, cz + 3, cx - half - 4, cz + 3 },
+			{ cx + 2, cz + half - 1, cx + 2, cz + half + 4 },
+			{ cx - 5, cz - half + 2, cx - 5, cz - half - 4 },
+		}
+		for i, c in cases do
+			local x, z = Plots.pushOutside(plot, c[1], c[2], 4)
+			expect.eq(x, c[3], `plot {plot} case {i} x`)
+			expect.eq(z, c[4], `plot {plot} case {i} z`)
+			expect.eq(Plots.plotAt(x, z), nil, `plot {plot} case {i} lands in another den`)
+		end
+	end
+end
+
+tests["pushOutside leaves someone already outside where they are"] = function()
+	local cx, cz = Plots.center(2)
+	local x, z = Plots.pushOutside(2, cx, cz + L.plotSize, 4)
+	expect.eq(x, cx)
+	expect.eq(z, cz + L.plotSize)
+end
+
 return tests

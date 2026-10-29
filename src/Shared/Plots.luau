@@ -152,6 +152,22 @@ function Plots.isInside(plot: number, x: number, z: number): boolean
 	return math.abs(x - cx) <= half and math.abs(z - cz) <= half
 end
 
+-- Where to put someone at (x, z) so they stand `margin` studs outside the plot, moved straight
+-- out through the nearest edge (Lockdown push-back). A point already outside is returned as is.
+function Plots.pushOutside(plot: number, x: number, z: number, margin: number): (number, number)
+	if not Plots.isInside(plot, x, z) then
+		return x, z
+	end
+	local cx, cz = Plots.center(plot)
+	local half = L.plotSize / 2
+	local dx, dz = x - cx, z - cz
+	local out = half + margin
+	if half - math.abs(dx) <= half - math.abs(dz) then
+		return cx + (if dx < 0 then -out else out), z
+	end
+	return x, cz + (if dz < 0 then -out else out)
+end
+
 -- Which plot (x, z) is in, or nil for the street, plaza and outside the map.
 function Plots.plotAt(x: number, z: number): number?
 	for plot = 1, L.plotCount do
