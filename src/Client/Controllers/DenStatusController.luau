@@ -5,7 +5,7 @@
 	Shows live protection and the post-loss countdown (D-031) from the Den Model attributes
 	`LiveProtected` and `LiveGrabReadyAt` (server time). Display only: the server decides every
 	grab. On another player's den a small billboard floats over it; on my own den a short
-	"Protected today" chip sits under the Glow panel. Attribute changes redraw at once; a 4 Hz
+	"Protected from steals" chip sits under the Glow panel. Attribute changes redraw at once; a 4 Hz
 	tick only advances countdown text, and only assigns Text when the string changed.
 ]]
 
@@ -76,8 +76,9 @@ local function buildOwnChip()
 	holder.Name = "OwnProtected"
 	holder.BackgroundTransparency = 1
 	-- Under the Glow panel (top-left, 74 px tall at y = 8), left edge clear of the thumbstick.
+	-- 200 px wide: the longer text stays about 15 px tall after TextScaled (150 px shrank it to ~12).
 	holder.Position = UDim2.fromOffset(10, 88)
-	holder.Size = UDim2.fromOffset(150, 26)
+	holder.Size = UDim2.fromOffset(200, 26)
 	holder.Visible = false
 	holder.Parent = gui
 	ownChip = holder
@@ -115,7 +116,7 @@ local function refresh(den: Instance, now: number)
 	local readyAt = den:GetAttribute("LiveGrabReadyAt")
 	if den:GetAttribute("OwnerUserId") == player.UserId then
 		ownDen = den
-		local mine = if DenStatusMath.isProtected(protected) then Strings.protectedToday else ""
+		local mine = if DenStatusMath.isProtected(protected) then Strings.protectedOwn else ""
 		if mine ~= ownShown then
 			ownShown = mine
 			ownChipText.Text = mine
