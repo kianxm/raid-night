@@ -34,6 +34,42 @@ local Strings = {
 	protectedOwn = "Protected from steals",
 	safeFor = "Safe for {time}",
 	alreadyStealing = "Someone is already stealing here",
+
+	-- Raid Portal
+	raid = "Raid",
+	portalTitle = "Pick a den",
+	portalEmpty = "No dens to raid right now",
+	portalRefused = "Can't raid that den now",
+	power = "Power {n}",
+	revengeTag = "Revenge",
+	hintSmall = "Small stash",
+	hintSolid = "Solid stash",
+	hintRich = "Rich stash",
+	close = "Close",
+
+	-- In-raid HUD
+	raidFindCritter = "Grab a critter",
+	raidCarryHint = "Get to the gate!",
+	gate = "Gate {dist}m",
+	raidEscaped = "Escaped with {name}!",
+	raidEscapedNone = "Made it out!",
+	raidCaught = "Caught!",
+	raidGlow = "+{n} Glow",
+
+	-- Raid log
+	logTitle = "While you were away",
+	logTitleAll = "Raid log",
+	logEmpty = "No raids yet",
+	logTookFrom = "{name} took {critter}",
+	logTookGlow = "{name} took {critter} and {n} Glow",
+	logHeld = "You held off {name}",
+	logYouTook = "You took {critter} from {name}",
+	logYouFailed = "{name} stopped you",
+	logAgo = "{time} ago",
+	logRevengeRaid = "Revenge",
+	replay = "Replay",
+	replayNone = "Replay not ready",
+	revenge = "Revenge",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string
