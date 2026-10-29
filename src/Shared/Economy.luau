@@ -23,6 +23,10 @@
 	accrue internally (collect without a factor, place, autoPlace, upgradeDen, buyEgg) use factor
 	1, so a server running a boost accrues with the factor first; their internal accrue is then a
 	no-op (no time has passed).
+
+	On the server this rule is kept by one helper (P2.8): IncomeService.accrue / collect /
+	setGlowInputs, built on the GlowFactorState functions below (accrueBoosted, collectBoosted,
+	changeGlowInputs). Server code never calls accrue or collect directly (a source guard checks).
 ]]
 
 local Types = require("./Types")
@@ -177,6 +181,265 @@ function Economy.collect(profile: PlayerProfile, now: number, factor: number?): 
 	profile.stored -= amount
 	profile.glow += amount
 	return amount
+end
+
+-- Glow factor tracker (P2.8; decisions D-030, D-032, D-061) ---------------------------------------
+--[[
+	The pure half of the server's one Glow-factor helper (IncomeService's accrue, collect and
+	setGlowInputs). One GlowFactorState per player in the server holds the inputs their factor is
+	made of. The factor is never stored: it is derived from the inputs at each moment, and the
+	inputs change only through changeGlowInputs, which accrues at the OLD inputs first. So no
+	elapsed time is ever paid at a factor that was not in effect during it.
+
+	  - Joining: the first accrue of a newly loaded profile (`joined` false) pays the offline gap
+	    (storedUpdatedAt to now) at offlineGlowFactor: 1 unless GlowSettings.vipBoostsOffline
+	    (D-061 (2): off). Lantern Night never applies offline.
+	  - Lantern Night ends on its own: `lanternNightUntil` is the server's end time, and an
+	    accrue that spans it pays the boosted factor up to it and the unboosted one after.
+	  - Fail closed: a player starts with paidRandomRestricted = nil (unknown), so their factor
+	    is 1 until PolicyService answers false. A bad input value falls to its safe default.
+]]
+
+export type GlowInputs = {
+	vip: boolean, -- owns the VIP pass (MarketplaceService)
+	paidRandomRestricted: boolean?, -- PolicyService ArePaidRandomItemsRestricted; nil = unknown
+	lanternNightUntil: number, -- unix seconds the server's Lantern Night ends; 0 = none
+}
+
+export type GlowFactorState = {
+	inputs: GlowInputs,
+	joined: boolean, -- the offline gap of the loaded profile is paid
+}
+
+-- Server-wide settings: Config.Flags.purchases and Config.Purchases.vipBoostsOffline.
+export type GlowSettings = {
+	purchasesEnabled: boolean,
+	vipBoostsOffline: boolean,
+}
+
+-- A change to some of a player's inputs. Fields left nil keep their value, so
+-- `paidRandomRestricted` can be set to true or false but never back to unknown.
+export type GlowInputChange = {
+	vip: boolean?,
+	paidRandomRestricted: boolean?,
+	lanternNightUntil: number?,
+}
+
+-- A fresh state: no VIP, policy unknown (factor 1), no Lantern Night, offline gap not yet paid.
+function Economy.newGlowFactorState(): GlowFactorState
+	return {
+		inputs = { vip = false, paidRandomRestricted = nil, lanternNightUntil = 0 },
+		joined = false,
+	}
+end
+
+local function isTime(value: any): boolean
+	return type(value) == "number" and value == value and value >= 0 and value < math.huge
+end
+
+local function lanternUntil(state: GlowFactorState): number
+	local untilAt = state.inputs.lanternNightUntil
+	return if isTime(untilAt) then untilAt else 0
+end
+
+local function onlineFactor(state: GlowFactorState, lanternNight: boolean, settings: GlowSettings): number
+	return Economy.glowBoostFactor({
+		vip = state.inputs.vip == true,
+		lanternNight = lanternNight,
+		paidRandomRestricted = state.inputs.paidRandomRestricted,
+		purchasesEnabled = settings.purchasesEnabled == true,
+	})
+end
+
+-- The factor for income earned while offline: VIP only, and only when settings.vipBoostsOffline.
+function Economy.offlineGlowFactor(state: GlowFactorState, settings: GlowSettings): number
+	if settings.vipBoostsOffline ~= true then
+		return 1
+	end
+	return onlineFactor(state, false, settings)
+end
+
+-- The online factor in effect at time `at` (for display; accrual goes through accrueBoosted).
+function Economy.glowFactorAt(state: GlowFactorState, at: number, settings: GlowSettings): number
+	return onlineFactor(state, at < lanternUntil(state), settings)
+end
+
+--[[
+	Accrues a loaded profile at the player's own factor. The first call for a newly loaded
+	profile pays the offline gap at offlineGlowFactor and marks the state joined; later calls pay
+	the online factor, split at the Lantern Night end when the period spans it. Returns Glow added.
+]]
+function Economy.accrueBoosted(
+	state: GlowFactorState,
+	profile: PlayerProfile,
+	now: number,
+	settings: GlowSettings
+): number
+	if now ~= now then
+		return 0
+	end
+	if not state.joined then
+		state.joined = true
+		return Economy.accrue(profile, now, Economy.offlineGlowFactor(state, settings))
+	end
+	local added = 0
+	local untilAt = lanternUntil(state)
+	if untilAt > profile.storedUpdatedAt and untilAt < now then
+		added += Economy.accrue(profile, untilAt, onlineFactor(state, true, settings))
+	end
+	added += Economy.accrue(profile, now, onlineFactor(state, profile.storedUpdatedAt < untilAt, settings))
+	return added
+end
+
+-- accrueBoosted, then banks whole stored Glow into `glow`. Returns the amount banked.
+function Economy.collectBoosted(
+	state: GlowFactorState,
+	profile: PlayerProfile,
+	now: number,
+	settings: GlowSettings
+): number
+	Economy.accrueBoosted(state, profile, now, settings)
+	return Economy.collect(profile, now) -- its own accrue is a no-op: no time has passed
+end
+
+--[[
+	The only way a player's factor changes. Accrues `profile` (when given: the player's profile
+	loaded in this server) at the OLD inputs up to `now`, then applies `change`. A bad value fails
+	closed: vip -> false, paidRandomRestricted -> nil (unknown = restricted), lanternNightUntil ->
+	0. A NaN `now` changes nothing. Returns the Glow accrued at the old inputs.
+]]
+function Economy.changeGlowInputs(
+	state: GlowFactorState,
+	profile: PlayerProfile?,
+	now: number,
+	change: GlowInputChange,
+	settings: GlowSettings
+): number
+	if now ~= now or type(change) ~= "table" then
+		return 0
+	end
+	local added = if profile then Economy.accrueBoosted(state, profile, now, settings) else 0
+	local inputs = state.inputs
+	if change.vip ~= nil then
+		inputs.vip = change.vip == true
+	end
+	if change.paidRandomRestricted ~= nil then
+		local restricted: any = change.paidRandomRestricted
+		inputs.paidRandomRestricted = if type(restricted) == "boolean" then restricted else nil
+	end
+	if change.lanternNightUntil ~= nil then
+		local untilAt: any = change.lanternNightUntil
+		inputs.lanternNightUntil = if isTime(untilAt) then untilAt else 0
+	end
+	return added
+end
+
+-- When a Lantern Night bought at `now` ends: a running one (ending after `now`) is extended by a
+-- full Config.Boosts.lanternNightSeconds, otherwise one starts now. The bonus never stacks:
+-- +50% stays +50%, only the end moves.
+function Economy.extendLanternNight(endsAt: number, now: number): number
+	local from = if isTime(endsAt) and endsAt > now then endsAt else now
+	return from + Config.Boosts.lanternNightSeconds
+end
+
+-- The Robux catalog (P2.8; D-028, D-029, D-061) ----------------------------------------------------
+
+-- One Config.Purchases entry (a pass or a product).
+export type CatalogItem = {
+	id: number, -- Creator Dashboard id; 0 = not created yet
+	price: number,
+	robuxLinked: boolean,
+	offerRestricted: boolean,
+	kind: string?, -- products only: one of PRODUCT_KINDS
+	accessoryId: string?, -- accessory products only
+}
+
+-- What the server knows about one player's purchase policy.
+export type PurchasePolicy = {
+	paidRandomRestricted: boolean?, -- nil = PolicyService has not answered (counts as restricted)
+	purchasesEnabled: boolean, -- Config.Flags.purchases
+}
+
+-- Product kinds a launch product may have. None is random and none grants Glow (D-028, D-029).
+Economy.PRODUCT_KINDS = table.freeze({ "shield", "lanternNight", "eventPass", "accessory" })
+
+local function isCreated(item: any): boolean
+	return type(item) == "table" and type(item.id) == "number" and item.id > 0 and item.id % 1 == 0
+end
+
+local function allowedFor(item: any, policy: PurchasePolicy): boolean
+	return type(policy) == "table" and policy.purchasesEnabled == true and isCreated(item)
+end
+
+-- Whether the shop offers `item` to this player: purchases on, the item created, and either not
+-- Robux-linked, offered to restricted players, or the player's policy known unrestricted.
+function Economy.purchaseOffered(item: CatalogItem, policy: PurchasePolicy): boolean
+	if not allowedFor(item, policy) then
+		return false
+	end
+	return item.robuxLinked ~= true or item.offerRestricted == true or policy.paidRandomRestricted == false
+end
+
+-- Whether an owned pass's perk applies: owned, purchases on, the item created, and, when it is
+-- Robux-linked, the player's policy known unrestricted (fail closed). VIP's Glow bonus is
+-- decided by glowBoostFactor instead; its non-Glow perks follow ownership.
+function Economy.perkActive(item: CatalogItem, owns: boolean, policy: PurchasePolicy): boolean
+	if owns ~= true or not allowedFor(item, policy) then
+		return false
+	end
+	return item.robuxLinked ~= true or policy.paidRandomRestricted == false
+end
+
+-- The Config.Purchases.products key and entry for a Creator Dashboard product id, or nil.
+function Economy.productById(productId: number): (string?, CatalogItem?)
+	if type(productId) ~= "number" or productId <= 0 or productId % 1 ~= 0 then
+		return nil, nil
+	end
+	for key, item in Config.Purchases.products :: any do
+		if item.id == productId then
+			return key, item
+		end
+	end
+	return nil, nil
+end
+
+--[[
+	ProcessReceipt's order of steps (P2.8), with the I/O passed in so a simulation can crash it
+	at any point. Returns the name of the Enum.ProductPurchaseDecision to answer:
+	  1. hasReceipt(): already granted, a redelivery. Grant nothing; "PurchaseGranted" once
+	     save() confirms a saved copy holding the receipt, else "NotProcessedYet".
+	  2. canGrant(): the product may be granted now (catalog, kill switch, policy, the grant
+	     itself possible). No: "NotProcessedYet", nothing written.
+	  3. record() (Profile.recordReceipt): false here is bad input, never a redelivery (step 1
+	     caught those): "NotProcessedYet", nothing granted.
+	  4. grant(), in the same step as record with no yield between.
+	  5. save(): a confirmed save whose data holds the receipt, and so the grant written in the
+	     same step. Only then "PurchaseGranted". A failed save is "NotProcessedYet", and the
+	     redelivery takes step 1.
+	Steps 1-4 must not yield. An error anywhere is the caller's "NotProcessedYet" (pcall).
+]]
+export type ReceiptDecision = "PurchaseGranted" | "NotProcessedYet"
+export type ReceiptSteps = {
+	hasReceipt: () -> boolean,
+	canGrant: () -> boolean,
+	record: () -> boolean,
+	grant: () -> boolean,
+	save: () -> boolean,
+}
+
+function Economy.processReceipt(steps: ReceiptSteps): ReceiptDecision
+	if steps.hasReceipt() == true then
+		return if steps.save() == true then "PurchaseGranted" else "NotProcessedYet"
+	end
+	if steps.canGrant() ~= true or steps.record() ~= true then
+		return "NotProcessedYet"
+	end
+	if steps.grant() ~= true then
+		-- Unreachable while canGrant matches grant (no yield between). Never acknowledged; the
+		-- caller logs it.
+		return "NotProcessedYet"
+	end
+	return if steps.save() == true then "PurchaseGranted" else "NotProcessedYet"
 end
 
 -- Share of the storage cap currently filled, 0..1. Drives the "storage nearly full" notification.
@@ -335,12 +598,25 @@ function Economy.vaultCount(profile: PlayerProfile): number
 	return count
 end
 
+-- Vault slots the player can fill: the saved `vaultSlots` (1 + rebirths) plus `extraVaultSlots`
+-- (a whole number >= 0, such as an active vault slot pass; anything else counts as 0).
+function Economy.vaultCapacity(profile: PlayerProfile, extraVaultSlots: number?): number
+	local extra = extraVaultSlots
+	if type(extra) ~= "number" or extra ~= extra or extra < 0 or extra % 1 ~= 0 or extra == math.huge then
+		extra = 0
+	end
+	return profile.vaultSlots + (extra :: number)
+end
+
 --[[
 	Moves an owned critter to a Pad (with `padIndex`), the Vault or Inventory. A critter moved
 	onto an occupied pad swaps with the occupant, which takes the mover's old spot, so no slot
 	limit can be broken by a swap. Guard placement is not available yet (no guard slots exist).
 	`isLocked(uid)` marks critters that must not move (a raider is carrying them): a placement
 	never moves a locked critter, neither as the mover nor as a swap's displaced occupant.
+	`extraVaultSlots` (default 0) adds vault slots that are not saved, such as the vault slot pass
+	while its perk is active (vaultCapacity). A critter already in the Vault is never moved out
+	when the capacity drops; it only stops new ones going in.
 	Accrues first. Returns false and a reason, without changing anything, if the move is invalid.
 ]]
 function Economy.place(
@@ -350,7 +626,8 @@ function Economy.place(
 	padIndex: number?,
 	physicalPads: number,
 	now: number,
-	isLocked: ((uid: string) -> boolean)?
+	isLocked: ((uid: string) -> boolean)?,
+	extraVaultSlots: number?
 ): (boolean, string?)
 	local critter = profile.critters[uid]
 	if not critter then
@@ -370,7 +647,8 @@ function Economy.place(
 			return false, "pad is busy"
 		end
 	elseif placement == "Vault" then
-		if critter.placement ~= "Vault" and Economy.vaultCount(profile) >= profile.vaultSlots then
+		local capacity = Economy.vaultCapacity(profile, extraVaultSlots)
+		if critter.placement ~= "Vault" and Economy.vaultCount(profile) >= capacity then
 			return false, "vault is full"
 		end
 	elseif placement ~= "Inventory" then

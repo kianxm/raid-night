@@ -6,8 +6,17 @@
 	Shared/Economy.luau; this service validates requests, calls it, pushes DenChanged and keeps
 	the placeholder critter visuals on the pads in sync.
 
-	Invariant: Economy.accrue(profile, now) runs BEFORE any change to placements or den level
-	(Economy.place, upgradeDen, buyEgg and autoPlace do it themselves).
+	Invariant: the den accrues BEFORE any change to placements or den level. Every request and
+	push accrues through the Glow-factor helper first (below), with the same `now` the Economy
+	call then gets, so the factor-1 accrue inside Economy.place, upgradeDen, buyEgg and autoPlace
+	is a no-op.
+
+	Glow-factor helper (P2.8; D-030, D-032, D-061): the one place a player's Glow factor changes
+	and the only server code that accrues or collects. Every server accrue of an online player
+	goes through IncomeService.accrue / collect, and the factor's inputs change only through
+	setGlowInputs, which accrues at the old inputs first. A source guard
+	(tests/specs/PurchaseSource.spec.luau) pins that Economy's accrue and collect functions appear
+	in src/Server only between the helper's BEGIN and END markers.
 
 	Phase 0 rule (decision D-027, issue #43): every push first runs Economy.autoPlace, so Inventory
 	critters (a stolen critter, an egg hatched with full pads) fill free usable pads, oldest first,
@@ -35,6 +44,16 @@
 	  setCritterLock(fn?)           fn(userId, uid) -> true while a critter must not move (being
 	                                carried). Locked critters cannot be placed, are never swapped
 	                                off their pad by another placement, and are not drawn.
+	  setPerks(hooks)               PurchaseService's pass perks: extraVaultSlots(userId) -> number
+	                                and autoCollect(userId) -> boolean (both fail closed)
+	  accrue(profile, now)          the helper: accrues at the player's factor when `profile` is
+	                                the one loaded here for them, else at factor 1 (offline)
+	  collect(profile, now)         the helper's collect: accrue, then bank whole stored Glow
+	  setGlowInputs(userId, change, now)
+	                                the only way a factor changes: accrues the loaded profile at
+	                                the old inputs, then applies { vip?, paidRandomRestricted?,
+	                                lanternNightUntil? } (Economy.changeGlowInputs)
+	  glowFactor(userId, now)       the online factor in effect now (1 = none), for display
 ]]
 
 local Players = game:GetService("Players")
@@ -68,6 +87,15 @@ local random = Random.new()
 local remotes: Folder
 local denChanged: RemoteEvent
 local critterLock: ((number, string) -> boolean)? = nil
+type Perks = { extraVaultSlots: (number) -> number, autoCollect: (number) -> boolean }
+local perks: Perks = {
+	extraVaultSlots = function(_userId: number): number
+		return 0
+	end,
+	autoCollect = function(_userId: number): boolean
+		return false
+	end,
+}
 local stations: { [number]: { buy: ProximityPrompt, upgrade: ProximityPrompt } } = {}
 -- The critter models this service built for each player's den: uid -> model and the pad it was
 -- drawn on. Cleared on plot release and player leave.
@@ -249,6 +277,93 @@ local function updateStation(plot: number, profile: any)
 		else "Max level"
 end
 
+-- BEGIN GLOW FACTOR HELPER ------------------------------------------------------------------------
+--[[
+	The only server code that may call Economy's accrue and collect functions (source guard:
+	tests/specs/PurchaseSource.spec.luau). One entry per player holds their GlowFactorState and the
+	profile it belongs to. A profile that is not the one loaded in this server for its player
+	(an offline copy, an absent defender) accrues at factor 1: offline income is unboosted.
+]]
+type GlowEntry = { state: any, profile: any }
+local glowEntries: { [number]: GlowEntry } = {}
+
+local function glowSettings(): any
+	return {
+		purchasesEnabled = Config.Flags.purchases == true,
+		vipBoostsOffline = Config.Purchases.vipBoostsOffline == true,
+	}
+end
+
+local function glowEntry(userId: number): GlowEntry
+	local entry = glowEntries[userId]
+	if not entry then
+		entry = { state = Economy.newGlowFactorState(), profile = nil }
+		glowEntries[userId] = entry
+	end
+	return entry :: GlowEntry
+end
+
+-- The entry for `profile` when it is the profile loaded here for its player, else nil. A newly
+-- loaded profile starts unjoined, so its first accrue pays the offline gap unboosted.
+local function loadedEntry(profile: any): GlowEntry?
+	if type(profile) ~= "table" or type(profile.userId) ~= "number" then
+		return nil
+	end
+	if DataService.getProfile(profile.userId) ~= profile then
+		return nil
+	end
+	local entry = glowEntry(profile.userId)
+	if entry.profile ~= profile then
+		entry.profile = profile
+		entry.state.joined = false
+	end
+	return entry
+end
+
+function IncomeService.accrue(profile: any, now: number): number
+	local entry = loadedEntry(profile)
+	if not entry then
+		return Economy.accrue(profile, now)
+	end
+	return Economy.accrueBoosted(entry.state, profile, now, glowSettings())
+end
+
+function IncomeService.collect(profile: any, now: number): number
+	local entry = loadedEntry(profile)
+	if not entry then
+		return Economy.collect(profile, now)
+	end
+	return Economy.collectBoosted(entry.state, profile, now, glowSettings())
+end
+
+function IncomeService.setGlowInputs(userId: number, change: any, now: number): number
+	if type(userId) ~= "number" then
+		return 0
+	end
+	local entry = glowEntry(userId)
+	local profile = DataService.getProfile(userId)
+	local loaded = if profile and loadedEntry(profile) then profile else nil
+	return Economy.changeGlowInputs(entry.state, loaded, now, change, glowSettings())
+end
+
+function IncomeService.glowFactor(userId: number, now: number): number
+	local entry = glowEntries[userId]
+	return if entry then Economy.glowFactorAt(entry.state, now, glowSettings()) else 1
+end
+
+-- The final accrue before the leave save (DataService.onProfileReleasing: getProfile is already
+-- nil here, so the entry's own profile reference decides), then forgets the player.
+local function releaseGlow(userId: number, profile: any)
+	local entry = glowEntries[userId]
+	glowEntries[userId] = nil
+	if entry and entry.profile == profile then
+		Economy.accrueBoosted(entry.state, profile, os.time(), glowSettings())
+	else
+		Economy.accrue(profile, os.time())
+	end
+end
+-- END GLOW FACTOR HELPER --------------------------------------------------------------------------
+
 -- Pushes ----------------------------------------------------------------------------------------
 
 local function push(player: Player)
@@ -257,7 +372,7 @@ local function push(player: Player)
 		return
 	end
 	local now = os.time()
-	Economy.accrue(profile, now)
+	IncomeService.accrue(profile, now)
 	-- D-027 (Phase 0): Inventory critters fill free pads. Needs the den world (0 pads = no-op).
 	local userId = player.UserId
 	Economy.autoPlace(profile, physicalPads(player), now, function(uid: string): boolean
@@ -279,16 +394,20 @@ function IncomeService.setCritterLock(fn: ((number, string) -> boolean)?)
 	critterLock = fn
 end
 
+function IncomeService.setPerks(hooks: Perks)
+	perks = hooks
+end
+
 -- Requests --------------------------------------------------------------------------------------
 
-local function collect(player: Player, profile: any): number
-	local banked = Economy.collect(profile, os.time())
+local function collect(player: Player, profile: any, now: number): number
+	local banked = IncomeService.collect(profile, now)
 	push(player)
 	return banked
 end
 
-local function buyEgg(player: Player, profile: any): any
-	local critter = Economy.buyEgg(profile, os.time(), {
+local function buyEgg(player: Player, profile: any, now: number): any
+	local critter = Economy.buyEgg(profile, now, {
 		tierRoll = random:NextNumber(),
 		speciesRoll = random:NextNumber(),
 		uid = HttpService:GenerateGUID(false),
@@ -302,15 +421,15 @@ local function buyEgg(player: Player, profile: any): any
 	return nil
 end
 
-local function upgradeDen(player: Player, profile: any): boolean
-	local ok = Economy.upgradeDen(profile, os.time())
+local function upgradeDen(player: Player, profile: any, now: number): boolean
+	local ok = Economy.upgradeDen(profile, now)
 	if ok then
 		push(player)
 	end
 	return ok
 end
 
-local function placeCritter(player: Player, profile: any, uid: any, placement: any, padIndex: any): boolean
+local function placeCritter(player: Player, profile: any, now: number, uid: any, placement: any, padIndex: any): boolean
 	if type(uid) ~= "string" or #uid > MAX_UID_LENGTH or type(placement) ~= "string" then
 		return false
 	end
@@ -322,15 +441,18 @@ local function placeCritter(player: Player, profile: any, uid: any, placement: a
 	local function locked(critterUid: string): boolean
 		return isLocked(userId, critterUid)
 	end
-	local ok = Economy.place(profile, uid, placement, padIndex, physicalPads(player), os.time(), locked)
+	-- The vault slot pass adds a slot while its perk is active (PurchaseService; fails closed to 0).
+	local extraSlots = perks.extraVaultSlots(userId)
+	local ok = Economy.place(profile, uid, placement, padIndex, physicalPads(player), now, locked, extraSlots)
 	if ok then
 		push(player)
 	end
 	return ok
 end
 
--- Wraps a handler: rate limit, loaded profile, and no error ever reaches the client.
-local function guarded(name: string, failValue: any, handler: (Player, any, ...any) -> any)
+-- Wraps a handler: rate limit, loaded profile, and no error ever reaches the client. The den
+-- accrues through the helper first, and the handler gets that same `now`.
+local function guarded(name: string, failValue: any, handler: (Player, any, number, ...any) -> any)
 	return function(player: Player, ...: any): any
 		if not allow(player, name) then
 			return failValue
@@ -339,7 +461,11 @@ local function guarded(name: string, failValue: any, handler: (Player, any, ...a
 		if not profile then
 			return failValue
 		end
-		local ok, result = pcall(handler, player, profile, ...)
+		local ok, result = pcall(function(...: any): any
+			local now = os.time()
+			IncomeService.accrue(profile, now)
+			return handler(player, profile, now, ...)
+		end, ...)
 		if not ok then
 			warn(`[IncomeService] {name} failed for {player.UserId}: {result}`)
 			return failValue
@@ -349,8 +475,7 @@ local function guarded(name: string, failValue: any, handler: (Player, any, ...a
 end
 
 local handlers = {
-	GetDenState = guarded(Net.Requests.GetDenState, nil, function(_player, profile)
-		Economy.accrue(profile, os.time())
+	GetDenState = guarded(Net.Requests.GetDenState, nil, function(_player, profile, _now)
 		return Economy.denState(profile)
 	end),
 	Collect = guarded(Net.Requests.Collect, 0, collect),
@@ -358,6 +483,25 @@ local handlers = {
 	BuyEgg = guarded(Net.Requests.BuyEgg, nil, buyEgg),
 	UpgradeDen = guarded(Net.Requests.UpgradeDen, false, upgradeDen),
 }
+
+-- Auto-collect pass: banks each online owner's stored Glow every Config.Purchases.autoCollectSeconds
+-- while the perk is active for them (PurchaseService decides: owned, purchases on, policy known
+-- unrestricted). Through the helper, like a Collect request.
+local function autoCollectLoop()
+	while true do
+		task.wait(Config.Purchases.autoCollectSeconds)
+		for _, player in Players:GetPlayers() do
+			local profile = DataService.getProfile(player.UserId)
+			local ok, active = pcall(perks.autoCollect, player.UserId)
+			if profile and ok and active == true then
+				local done, err = pcall(collect, player, profile, os.time())
+				if not done then
+					warn(`[IncomeService] auto-collect failed for {player.UserId}: {err}`)
+				end
+			end
+		end
+	end
+end
 
 -- World station ----------------------------------------------------------------------------------
 
@@ -458,10 +602,21 @@ function IncomeService.start()
 	DataService.onProfileLoaded(function(player: Player)
 		push(player)
 	end)
+	-- The final accrue before the leave save, at the player's factor (must not yield).
+	DataService.onProfileReleasing(releaseGlow)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		windows[player] = nil
 		drawn[player] = nil
+		-- A player whose profile never loaded here (or whose lock was taken) has no release: drop
+		-- their entry once nothing here holds their profile.
+		local userId = player.UserId
+		task.delay(60, function()
+			if DataService.getProfile(userId) == nil and Players:GetPlayerByUserId(userId) == nil then
+				glowEntries[userId] = nil
+			end
+		end)
 	end)
+	task.spawn(autoCollectLoop)
 end
 
 return IncomeService
