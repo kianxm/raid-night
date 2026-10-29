@@ -27,6 +27,8 @@ needing a human or live environment into "Needs Kian", stop at the Phase 1 gate 
 - P2.8 product questions (not urgent).
 
 ## Remember
+- D-044: merges are refused by the permission check. Stack dependent tasks on the parent PR
+  branch; Kian merges in order; ledger stays on the open ledger PR (#93).
 - Auto-merge is disabled on the repo: merge ledger PRs by hand after CI (`gh pr checks --watch`).
 - Ledger worktree: $CLAUDE_JOB_DIR/tmp/wt-ledger (job 26a0a7a7).
 - Never switch branches in Kian's main checkout (Rojo); fast-forward only.

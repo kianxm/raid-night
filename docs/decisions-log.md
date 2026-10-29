@@ -3,6 +3,16 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-044 · 2026-10-29 · Merges wait for Kian; dependent work stacks on PR branches
+Context: from #92 on, the session's permission check refuses every `gh pr merge` ("Merge
+Without Review"), even after a reviewer pass and for docs-only ledger PRs. Decision: no merge is
+worked around. A task whose dependency is an open PR branches from that PR's branch and targets
+it (stacked PR); Phase 1's chain is linear (P1.1 → P1.3 → P1.4/P1.6, P1.7 → P1.8), so no
+combining merges are needed. Checks and reviews run on the PR branches. Studio runs for unmerged
+code wait until Kian merges, because Rojo serves the main checkout on `integration`. Ledger
+updates stay on the open ledger PR. Kian merges in the order listed in the gate report.
+Why: respect the permission boundary and still finish the code. Reversible: yes (process).
+
 ### D-043 · 2026-10-29 · Only offline dens are async raid targets
 Context: matchmaking on #91. Decision: GetRaidTargets lists a den as an async target only while
 its owner is offline (presence absent); online owners are raided live in their own server. A
