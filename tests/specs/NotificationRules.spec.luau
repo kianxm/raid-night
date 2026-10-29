@@ -11,6 +11,23 @@ end
 
 local tests = {}
 
+-- The storage category ships off; the storage specs switch it on and restore it.
+local function withStorageOn(fn: () -> ())
+	Rules.ENABLED_CATEGORIES.storage = true
+	local ok, err = pcall(fn)
+	Rules.ENABLED_CATEGORIES.storage = false
+	if not ok then
+		error(err, 0)
+	end
+end
+
+tests["storage send is refused while its category is off (default)"] = function()
+	expect.eq(Rules.ENABLED_CATEGORIES.storage, false)
+	local d = Rules.decideStorage({ glowLossPending = true }, 100, 100, 0.9, NOW, true)
+	expect.eq(d.action, "Skip")
+	expect.eq(d.reason, "CategoryOff")
+end
+
 tests["first critter lost sends a revenge notification"] = function()
 	local d = Rules.decideLoss({}, critterLoss(), NOW, true)
 	expect.eq(d.action, "Send")
@@ -35,22 +52,26 @@ tests["flag off skips everything"] = function()
 end
 
 tests["glow-only loss is held, then one combined send at 90 percent"] = function()
-	local ev: Rules.LossEvent = { kind = "Glow", raidId = "raid-2" }
-	expect.eq(Rules.decideLoss({}, ev, NOW, true).action, "Hold")
-	local state = Rules.afterGlowLoss({})
-	expect.eq(Rules.decideStorage(state, 89, 100, 0.9, NOW, true).reason, "StorageNotFull")
-	local d = Rules.decideStorage(state, 90, 100, 0.9, NOW, true)
-	expect.eq(d.action, "Send")
-	expect.eq(d.category, "storage")
-	local after = Rules.afterSend(state, "storage", true, NOW)
-	expect.eq(after.glowLossPending, false)
-	expect.eq(Rules.decideStorage(after, 100, 100, 0.9, NOW + DAY, true).reason, "NothingPending")
+	withStorageOn(function()
+		local ev: Rules.LossEvent = { kind = "Glow", raidId = "raid-2" }
+		expect.eq(Rules.decideLoss({}, ev, NOW, true).action, "Hold")
+		local state = Rules.afterGlowLoss({})
+		expect.eq(Rules.decideStorage(state, 89, 100, 0.9, NOW, true).reason, "StorageNotFull")
+		local d = Rules.decideStorage(state, 90, 100, 0.9, NOW, true)
+		expect.eq(d.action, "Send")
+		expect.eq(d.category, "storage")
+		local after = Rules.afterSend(state, "storage", true, NOW)
+		expect.eq(after.glowLossPending, false)
+		expect.eq(Rules.decideStorage(after, 100, 100, 0.9, NOW + DAY, true).reason, "NothingPending")
+	end)
 end
 
 tests["storage send waits for a free daily slot and keeps the pending flag"] = function()
-	local state = Rules.afterGlowLoss(Rules.afterSend({}, "revenge", true, NOW))
-	expect.eq(Rules.decideStorage(state, 100, 100, 0.9, NOW, true).reason, "DailyCapSpent")
-	expect.eq(Rules.decideStorage(state, 100, 100, 0.9, NOW + DAY, true).action, "Send")
+	withStorageOn(function()
+		local state = Rules.afterGlowLoss(Rules.afterSend({}, "revenge", true, NOW))
+		expect.eq(Rules.decideStorage(state, 100, 100, 0.9, NOW, true).reason, "DailyCapSpent")
+		expect.eq(Rules.decideStorage(state, 100, 100, 0.9, NOW + DAY, true).action, "Send")
+	end)
 end
 
 tests["storage send does not clear pending when it fails"] = function()

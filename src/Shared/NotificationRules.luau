@@ -37,6 +37,10 @@ export type Decision = {
 	reason: string,
 }
 
+-- Which categories may send. The design sends only the first-critter-lost revenge notification;
+-- storage stays off until Kian approves a storage-full category.
+Rules.ENABLED_CATEGORIES = { revenge = true, storage = false } :: { [string]: boolean }
+
 Rules.SECONDS_PER_DAY = 86400
 Rules.PROMPT_COOLDOWN_SECONDS = 30 * 86400
 Rules.MAX_LAUNCH_DATA = 200 -- platform limit on launch data length
@@ -56,6 +60,9 @@ end
 function Rules.decideLoss(state: State, event: LossEvent, now: number, enabled: boolean): Decision
 	if not enabled then
 		return { action = "Skip", reason = "Disabled" }
+	end
+	if Rules.ENABLED_CATEGORIES.revenge ~= true then
+		return { action = "Skip", reason = "CategoryOff" }
 	end
 	if event.kind == "Glow" then
 		return { action = "Hold", reason = "GlowOnly" }
@@ -83,6 +90,9 @@ function Rules.decideStorage(
 ): Decision
 	if not enabled then
 		return { action = "Skip", reason = "Disabled" }
+	end
+	if Rules.ENABLED_CATEGORIES.storage ~= true then
+		return { action = "Skip", reason = "CategoryOff" }
 	end
 	if state.glowLossPending ~= true then
 		return { action = "Skip", reason = "NothingPending" }
