@@ -73,7 +73,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.4 | economy | — | In progress | agent/economy/P2.4 | 1 | Was P2.1: model-id seam with placeholder fallback, mutation effects, eggMaxTier → Mythic (D-057) |
 | P2.5 | ui | — | In review | #119, #120, #121 (stacked) | 1 | 358 tests. Shop + strings table, Bag + Den mgmt, Settings + silent sound cues. Needs GetSettings/SaveSettings remotes on C6 (data) and DenState.vaultSlots. Not run in Studio. Was: Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
 | P2.6 | ui | P2.5, C6 | Todo | | 0 | Onboarding (Appendix C) |
-| P2.7 | notifications | — | In review | #118 | 1 | Reviewer APPROVED; fail-closed + atomic day claim folded in. 359 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
+| P2.7 | notifications | — | In review | #118 | 1 | Reviewer APPROVED; fail-closed reads + atomic day claim + merged saveState folded in. 359 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
 | P2.8 | economy | C6 | Todo | | 0 | Passes/products, glow-factor helper, policy audit; products for Kian |
 | P2.9 | data | C6 | Todo | | 0 | Analytics events (Appendix A) + funnels |
 | P2.10 | raid | C6, P2.3 | Todo | | 0 | Gear (live only for lockpick) |
