@@ -249,4 +249,338 @@ tests["DataService.markRaidLogSeen writes only a loaded profile, through the pur
 	expect.eq(select(2, string.gsub(code, "raidLogSeenAt%s*=", "")), 0, "DataService never assigns the field itself")
 end
 
+-- Phase 2 fields (decision D-059) ------------------------------------------------------------------
+
+local PHASE2_FIELDS = { "settings", "onboarding", "successfulRaids", "gear", "receipts", "eventPasses", "accessories" }
+
+-- A save written before Phase 2: today's Profile.new without any Phase 2 field.
+local function prePhase2Save(userId: number, createdAt: number): any
+	local saved: any = Profile.new(userId, createdAt)
+	for _, field in PHASE2_FIELDS do
+		saved[field] = nil
+	end
+	return saved
+end
+
+tests["a save from before Phase 2 loads unchanged, with no migration, and reads every default"] = function()
+	local p: any = Profile.prepare(prePhase2Save(42, NOW - 5 * 86400), 42, NOW)
+	expect.eq(Config.SCHEMA_VERSION, 1, "optional fields need no SCHEMA_VERSION bump")
+	expect.eq(p.schemaVersion, Config.SCHEMA_VERSION)
+	for _, field in PHASE2_FIELDS do
+		expect.eq(p[field], nil, `{field} stays absent until first written`)
+	end
+	local settings = Profile.settingsOf(p)
+	expect.eq(settings.musicVolume, Profile.SETTINGS_DEFAULTS.musicVolume)
+	expect.eq(settings.sfxVolume, Profile.SETTINGS_DEFAULTS.sfxVolume)
+	expect.eq(settings.reducedMotion, Profile.SETTINGS_DEFAULTS.reducedMotion)
+	expect.truthy(Profile.isOnboardingComplete(p), "an existing player is never sent through onboarding")
+	expect.eq(Profile.onboardingStep(p), Profile.ONBOARDING_LAST_STEP)
+	expect.falsy(Profile.advanceOnboarding(p, 1, NOW), "and cannot be put back into it")
+	expect.falsy(Profile.completeOnboarding(p, NOW))
+	expect.eq(p.onboarding, nil, "nothing was written")
+	expect.eq(Profile.successfulRaids(p), 0)
+	for _, id in Profile.GEAR_IDS do
+		expect.eq(Profile.gearLevel(p, id), 0, `{id} not owned`)
+	end
+	expect.falsy(Profile.hasReceipt(p, "purchase-1"))
+	expect.falsy(Profile.hasEventPass(p, "event-1"))
+	expect.eq(Profile.accessoryCount(p, "hat"), 0)
+end
+
+tests["a new save starts onboarding and leaves every other Phase 2 field absent"] = function()
+	local template = Profile.new(0, 0)
+	local p: any = Profile.prepare(template, 42, NOW)
+	expect.eq(p.onboarding.step, 0)
+	expect.eq(p.onboarding.completedAt, nil)
+	expect.falsy(Profile.isOnboardingComplete(p))
+	expect.eq(Profile.onboardingStep(p), 0)
+	for _, field in PHASE2_FIELDS do
+		if field ~= "onboarding" then
+			expect.eq(p[field], nil, `{field} absent`)
+		end
+	end
+	local other: any = Profile.new(0, 0)
+	p.onboarding.step = 3
+	expect.eq(other.onboarding.step, 0, "every template has its own onboarding table")
+end
+
+tests["DataService never reconciles the template into an existing save"] = function()
+	-- Reconcile would add Profile.new's { step = 0 } to old saves and send existing players
+	-- through onboarding.
+	local code = source.codeOnly(source.read("src/Server/Services/DataService.luau"))
+	expect.eq(string.find(code, "Reconcile", 1, true), nil)
+end
+
+-- Settings (P2.5)
+
+tests["settings default when missing and corrupt values read as defaults or clamped"] = function()
+	expect.eq(Profile.SETTINGS_DEFAULTS.musicVolume, 1)
+	expect.eq(Profile.SETTINGS_DEFAULTS.sfxVolume, 1)
+	expect.eq(Profile.SETTINGS_DEFAULTS.reducedMotion, false)
+	expect.truthy(table.isfrozen(Profile.SETTINGS_DEFAULTS :: any))
+
+	local p: any = Profile.new(1, NOW)
+	p.settings = "corrupt"
+	expect.eq(Profile.settingsOf(p).musicVolume, 1, "a non-table reads as all defaults")
+	p.settings = { musicVolume = 0 / 0, sfxVolume = "loud", reducedMotion = 1 }
+	local read = Profile.settingsOf(p)
+	expect.eq(read.musicVolume, 1, "NaN reads as the default")
+	expect.eq(read.sfxVolume, 1, "a string reads as the default")
+	expect.eq(read.reducedMotion, false, "a number reads as the default")
+	p.settings = { musicVolume = 7, sfxVolume = -2, reducedMotion = true }
+	read = Profile.settingsOf(p)
+	expect.eq(read.musicVolume, 1, "too loud reads clamped")
+	expect.eq(read.sfxVolume, 0, "below silent reads clamped")
+	expect.eq(read.reducedMotion, true)
+	p.settings = { musicVolume = 0 }
+	expect.eq(Profile.settingsOf(p).musicVolume, 0, "muted is a real choice, not a missing one")
+end
+
+tests["applySettings clamps and rounds volumes, writes only what changed, and keeps the rest"] = function()
+	local p: any = Profile.new(1, NOW)
+	expect.truthy(Profile.applySettings(p, { musicVolume = 1.5, sfxVolume = -0.25 }))
+	expect.eq(p.settings.musicVolume, 1, "clamped to 1")
+	expect.eq(p.settings.sfxVolume, 0, "clamped to 0")
+	expect.eq(p.settings.reducedMotion, nil, "a key left out stays unchosen")
+	expect.truthy(Profile.applySettings(p, { musicVolume = 0.456 }))
+	expect.eq(p.settings.musicVolume, 0.46, "rounded to 0.01")
+	expect.eq(p.settings.sfxVolume, 0, "kept")
+	expect.falsy(Profile.applySettings(p, { musicVolume = 0.4600001 }), "the same value again changes nothing")
+	expect.truthy(Profile.applySettings(p, { reducedMotion = false }), "an explicit choice of the default is saved")
+	expect.eq(p.settings.reducedMotion, false)
+	expect.falsy(Profile.applySettings(p, {}), "an empty request changes nothing")
+
+	local corrupt: any = Profile.new(2, NOW)
+	corrupt.settings = 5
+	expect.truthy(Profile.applySettings(corrupt, { reducedMotion = true }), "a corrupt saved value is replaced")
+	expect.eq(corrupt.settings.reducedMotion, true)
+end
+
+tests["applySettings refuses any bad request whole, writing nothing"] = function()
+	local p: any = Profile.new(1, NOW)
+	expect.truthy(Profile.applySettings(p, { musicVolume = 0.5, sfxVolume = 0.5, reducedMotion = false }))
+	local bad: { any } = {
+		"loud",
+		42,
+		true,
+		{ musicVolume = 0 / 0 },
+		{ musicVolume = math.huge },
+		{ sfxVolume = -math.huge },
+		{ musicVolume = "0.2" },
+		{ reducedMotion = "yes" },
+		{ reducedMotion = 1 },
+		{ volume = 0.2 },
+		{ musicVolume = 0.2, admin = true },
+		{ 0.2 },
+		{ musicVolume = 0.2, sfxVolume = 0 / 0 }, -- one bad key spoils the good one
+	}
+	for i, request in bad do
+		expect.falsy(Profile.applySettings(p, request), `bad request {i} refused`)
+	end
+	expect.falsy(Profile.applySettings(p, nil), "nil refused")
+	expect.eq(p.settings.musicVolume, 0.5, "nothing above wrote")
+	expect.eq(p.settings.sfxVolume, 0.5)
+	expect.eq(p.settings.reducedMotion, false)
+	expect.eq(p.settings.volume, nil)
+	expect.eq(p.settings.admin, nil)
+end
+
+-- Onboarding (P2.6)
+
+tests["onboarding moves forward only and finishes at the last step"] = function()
+	local p: any = Profile.prepare(Profile.new(0, 0), 42, NOW)
+	expect.truthy(Profile.advanceOnboarding(p, 1, NOW + 10))
+	expect.eq(Profile.onboardingStep(p), 1)
+	expect.falsy(Profile.advanceOnboarding(p, 1, NOW + 20), "a repeat changes nothing")
+	expect.falsy(Profile.advanceOnboarding(p, 0, NOW + 20), "never backwards")
+	for _, bad in { 1.5, -1, Profile.ONBOARDING_LAST_STEP + 1, 0 / 0, math.huge, "2" :: any } do
+		expect.falsy(Profile.advanceOnboarding(p, bad, NOW + 20), `step {bad} refused`)
+	end
+	expect.falsy(Profile.advanceOnboarding(p, 2, 0 / 0), "a NaN time is refused")
+	expect.eq(Profile.onboardingStep(p), 1, "nothing above wrote")
+	expect.truthy(Profile.advanceOnboarding(p, 3, NOW + 30), "a step may be jumped over")
+	expect.falsy(Profile.isOnboardingComplete(p))
+	expect.eq(p.onboarding.completedAt, nil)
+	expect.truthy(Profile.advanceOnboarding(p, Profile.ONBOARDING_LAST_STEP, NOW + 40))
+	expect.truthy(Profile.isOnboardingComplete(p))
+	expect.eq(p.onboarding.completedAt, NOW + 40)
+	expect.falsy(Profile.completeOnboarding(p, NOW + 50), "already over")
+	expect.eq(p.onboarding.completedAt, NOW + 40, "the first finish time is kept")
+end
+
+tests["skipping onboarding keeps the step reached and ends it once"] = function()
+	local p: any = Profile.prepare(Profile.new(0, 0), 42, NOW)
+	expect.truthy(Profile.advanceOnboarding(p, 2, NOW + 10))
+	expect.falsy(Profile.completeOnboarding(p, math.huge), "an infinite time is refused")
+	expect.truthy(Profile.completeOnboarding(p, NOW + 20))
+	expect.truthy(Profile.isOnboardingComplete(p))
+	expect.eq(Profile.onboardingStep(p), 2, "analytics still sees where they left")
+	expect.eq(p.onboarding.completedAt, NOW + 20)
+	expect.falsy(Profile.advanceOnboarding(p, 3, NOW + 30), "no steps after a skip")
+	expect.falsy(Profile.completeOnboarding(p, NOW + 30))
+end
+
+tests["a corrupt onboarding state counts as complete, so nobody is stuck in it"] = function()
+	for _, corrupt in { "x", { step = 1.5 }, { step = -1 }, { step = 0 / 0 }, { step = 99 }, {} } :: { any } do
+		local p: any = Profile.new(1, NOW)
+		p.onboarding = corrupt
+		expect.truthy(Profile.isOnboardingComplete(p))
+		expect.eq(Profile.onboardingStep(p), Profile.ONBOARDING_LAST_STEP)
+		expect.falsy(Profile.advanceOnboarding(p, 1, NOW))
+		expect.falsy(Profile.completeOnboarding(p, NOW))
+	end
+end
+
+-- Successful raids (P2.7 opt-in, P2.9)
+
+tests["successful raids count up from 0 and a corrupt count starts again"] = function()
+	local p: any = Profile.new(1, NOW)
+	expect.eq(Profile.successfulRaids(p), 0)
+	expect.eq(Profile.countSuccessfulRaid(p), 1, "the first: the opt-in prompt's trigger")
+	expect.eq(Profile.countSuccessfulRaid(p), 2)
+	expect.eq(p.successfulRaids, 2)
+	for _, corrupt in { 0 / 0, -3, 1.5, math.huge, "4" :: any } do
+		p.successfulRaids = corrupt
+		expect.eq(Profile.successfulRaids(p), 0, `{corrupt} reads as 0`)
+		expect.eq(Profile.countSuccessfulRaid(p), 1)
+	end
+end
+
+-- Gear (P2.10)
+
+tests["gear ids are the five P2.10 items and are frozen"] = function()
+	local ids: { [string]: boolean } = {}
+	for _, id in Profile.GEAR_IDS do
+		ids[id] = true
+		expect.truthy(Profile.isGearId(id))
+	end
+	for _, id in { "grapple", "smoke", "decoy", "speedCoil", "lockpick" } do
+		expect.truthy(ids[id], `{id} listed`)
+	end
+	expect.eq(#Profile.GEAR_IDS, 5)
+	expect.truthy(table.isfrozen(Profile.GEAR_IDS :: any))
+	expect.falsy(Profile.isGearId("jetpack"))
+	expect.falsy(Profile.isGearId(1))
+end
+
+tests["gear levels default to 0, take whole levels only, and 0 removes the entry"] = function()
+	local p: any = Profile.new(1, NOW)
+	expect.falsy(Profile.setGearLevel(p, "grapple", 0), "0 on a missing table is no change")
+	expect.eq(p.gear, nil)
+	expect.truthy(Profile.setGearLevel(p, "grapple", 3))
+	expect.eq(Profile.gearLevel(p, "grapple"), 3)
+	expect.eq(Profile.gearLevel(p, "smoke"), 0, "other gear untouched")
+	expect.falsy(Profile.setGearLevel(p, "grapple", 3), "the same level changes nothing")
+	for _, bad in { -1, 1.5, 0 / 0, math.huge, "2" :: any } do
+		expect.falsy(Profile.setGearLevel(p, "grapple", bad), `level {bad} refused`)
+	end
+	expect.falsy(Profile.setGearLevel(p, "jetpack" :: any, 1), "unknown id refused")
+	expect.eq(p.gear.jetpack, nil)
+	expect.eq(Profile.gearLevel(p, "grapple"), 3, "nothing above wrote")
+	expect.truthy(Profile.setGearLevel(p, "grapple", 0))
+	expect.eq(p.gear.grapple, nil, "level 0 is stored as missing")
+
+	p.gear = { smoke = 0 / 0, decoy = -2, lockpick = "5", speedCoil = 2.5 }
+	for _, id in Profile.GEAR_IDS do
+		expect.eq(Profile.gearLevel(p, id), 0, `corrupt {id} reads as 0`)
+	end
+	p.gear = "corrupt"
+	expect.eq(Profile.gearLevel(p, "grapple"), 0)
+	expect.truthy(Profile.setGearLevel(p, "decoy", 1), "a corrupt table is replaced")
+	expect.eq(Profile.gearLevel(p, "decoy"), 1)
+end
+
+-- Purchases (P2.8)
+
+tests["a receipt is recorded once, so a redelivered purchase grants nothing"] = function()
+	local p: any = Profile.new(1, NOW)
+	expect.falsy(Profile.hasReceipt(p, "abc"))
+	expect.truthy(Profile.recordReceipt(p, "abc", 123, NOW))
+	expect.truthy(Profile.hasReceipt(p, "abc"))
+	expect.falsy(Profile.recordReceipt(p, "abc", 123, NOW + 60), "a redelivery is refused")
+	expect.eq(p.receipts.abc.at, NOW, "and leaves the first grant as it was")
+	expect.eq(p.receipts.abc.productId, 123)
+	local bad: { { any } } = {
+		{ "", 123, NOW },
+		{ string.rep("x", 101), 123, NOW },
+		{ 42, 123, NOW },
+		{ "d", 0, NOW },
+		{ "d", -5, NOW },
+		{ "d", 1.5, NOW },
+		{ "d", 0 / 0, NOW },
+		{ "d", 123, 0 / 0 },
+		{ "d", 123, math.huge },
+	}
+	for i, args in bad do
+		expect.falsy(Profile.recordReceipt(p, args[1], args[2], args[3]), `bad receipt {i} refused`)
+	end
+	expect.falsy(Profile.hasReceipt(p, "d"))
+	expect.truthy(Profile.recordReceipt(p, string.rep("x", 100), 123, NOW), "100 characters is allowed")
+end
+
+tests["receipts keep the newest MAX_RECEIPTS and never drop the one just recorded"] = function()
+	local p: any = Profile.new(1, NOW)
+	local extra = 5
+	for i = 1, Profile.MAX_RECEIPTS + extra do
+		expect.truthy(Profile.recordReceipt(p, `p{i}`, 1, NOW + i))
+	end
+	local count = 0
+	for _ in p.receipts do
+		count += 1
+	end
+	expect.eq(count, Profile.MAX_RECEIPTS)
+	for i = 1, extra do
+		expect.falsy(Profile.hasReceipt(p, `p{i}`), `oldest p{i} dropped`)
+	end
+	expect.truthy(Profile.hasReceipt(p, `p{extra + 1}`), "the rest kept")
+	expect.truthy(Profile.hasReceipt(p, `p{Profile.MAX_RECEIPTS + extra}`))
+
+	-- A clock behind every saved receipt (another server's) must not drop the purchase it records.
+	expect.truthy(Profile.recordReceipt(p, "late", 1, NOW - 1000))
+	expect.truthy(Profile.hasReceipt(p, "late"), "kept although it is the oldest")
+	expect.falsy(Profile.hasReceipt(p, `p{extra + 1}`), "the oldest other one went instead")
+
+	-- A corrupt entry goes first.
+	p.receipts[`p{extra + 2}`] = "corrupt"
+	expect.truthy(Profile.recordReceipt(p, "next", 1, NOW + 10_000))
+	expect.eq(p.receipts[`p{extra + 2}`], nil, "the corrupt entry was dropped")
+	expect.truthy(Profile.hasReceipt(p, `p{extra + 3}`), "not a good one")
+end
+
+tests["a corrupt receipts table is replaced by the next record"] = function()
+	local p: any = Profile.new(1, NOW)
+	p.receipts = "corrupt"
+	expect.falsy(Profile.hasReceipt(p, "abc"))
+	expect.truthy(Profile.recordReceipt(p, "abc", 1, NOW))
+	expect.truthy(Profile.hasReceipt(p, "abc"))
+end
+
+tests["an event pass is granted once per event"] = function()
+	local p: any = Profile.new(1, NOW)
+	expect.truthy(Profile.grantEventPass(p, "blood_moon_1", NOW))
+	expect.truthy(Profile.hasEventPass(p, "blood_moon_1"))
+	expect.falsy(Profile.hasEventPass(p, "blood_moon_2"))
+	expect.falsy(Profile.grantEventPass(p, "blood_moon_1", NOW + 60), "already owned")
+	expect.eq(p.eventPasses.blood_moon_1, NOW, "the first grant time is kept")
+	expect.falsy(Profile.grantEventPass(p, "", NOW))
+	expect.falsy(Profile.grantEventPass(p, 7 :: any, NOW))
+	expect.falsy(Profile.grantEventPass(p, "e", 0 / 0))
+	expect.eq(p.eventPasses.e, nil)
+end
+
+tests["accessories count up per id and a corrupt count starts again"] = function()
+	local p: any = Profile.new(1, NOW)
+	expect.eq(Profile.accessoryCount(p, "moon_hat"), 0)
+	expect.truthy(Profile.grantAccessory(p, "moon_hat"))
+	expect.truthy(Profile.grantAccessory(p, "moon_hat"))
+	expect.eq(Profile.accessoryCount(p, "moon_hat"), 2)
+	expect.eq(Profile.accessoryCount(p, "scarf"), 0)
+	expect.falsy(Profile.grantAccessory(p, ""))
+	expect.falsy(Profile.grantAccessory(p, nil :: any))
+	p.accessories.scarf = 0 / 0
+	expect.eq(Profile.accessoryCount(p, "scarf"), 0)
+	expect.truthy(Profile.grantAccessory(p, "scarf"))
+	expect.eq(Profile.accessoryCount(p, "scarf"), 1)
+end
+
 return tests
