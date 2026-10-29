@@ -95,6 +95,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.12 | integration | all | In review | #137 → preview/phase2 | 1 | Kit docs/playtests/phase2.md + "Before inviting" checklist (strings, products, flags incl. asyncRaids, StreamingEnabled, phone perf, tester group Play access ~200: verify limit with an alt). Docs only. Studio pass and freeze follow | Closed-test build + kit; access setup is Kian's |
 
 ## Setup notes
+- 2026-10-29 (Phase 2): Studio MCP healthy, "Raid Night" open in Edit, no wedged play session; Workspace.StreamingEnabled = true (confirms #125's ask); HttpEnabled = false.
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
   profiles); check profiles through a temporary server Script instead. `StudioMemoryProfiles`
   is left true in the open edit place (unsaved, unpublished).
