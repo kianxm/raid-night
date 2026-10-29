@@ -144,6 +144,15 @@ function Ui.pop(frame: GuiObject)
 		:Play()
 end
 
+-- PC key hint: a small raised cap ("Enter", "Esc", "1") for buttons and cards.
+function Ui.keycap(parent: Instance, text: string): Frame
+	local cap, label = Theme.chip(parent, "Keycap", text, Theme.color.panelSunken, Theme.color.ink)
+	local width = 24 + 8 * #text
+	cap.Size = UDim2.fromOffset(width, 24)
+	label.Font = Theme.display
+	return cap
+end
+
 function Ui.screenGui(name: string, order: number, parent: Instance): ScreenGui
 	local gui = Instance.new("ScreenGui")
 	gui.Name = name

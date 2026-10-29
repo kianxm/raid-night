@@ -64,13 +64,20 @@ local Strings = {
 	close = "Close",
 
 	-- In-raid HUD
-	raidFindCritter = "Grab a critter",
+	raidFindCritter = "Grab a critter and get it through the gate",
 	raidCarryHint = "Get to the gate!",
 	gate = "Gate {dist}m",
 	raidEscaped = "Escaped with {name}!",
 	raidEscapedNone = "Made it out!",
 	raidGlowOnly = "Made it out with Glow!",
 	raidPending = "On its way!",
+	raidEscapedRibbon = "Escaped!",
+	raidBackToDen = "Back to my den",
+	raidMyDen = "My den",
+	raidAgain = "Raid again",
+	caughtGotTo = "Got to",
+	caughtTimeLeft = "Time left",
+	caughtDist = "{n}m from gate",
 	raidPendingNamed = "{name} is on its way!",
 	raidCaught = "Caught!",
 	raidGlow = "+{n} Glow",
@@ -225,6 +232,8 @@ local Strings = {
 	gearPickDone = "Lock picked!",
 	gearPickBroke = "Pick broke",
 	portalRefresh = "Refresh",
+	portalRibbon = "Raid Portal",
+	portalSub = "Dens close to your power",
 
 	-- Onboarding hints (one at a time)
 	obHatch = "Tap Free egg to hatch your first critter",
