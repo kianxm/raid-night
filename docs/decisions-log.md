@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-053 · 2026-10-29 · Failed raids don't count toward the pair limit; raider-side commit is core
+Context: raid on #106. Decision: only an escape that moves something counts toward the same-pair
+daily limit (as live steals); timeout, tag and retreat don't. The raider-side raid-log entry, the
+raider's pair count and the async revenge-token spend are P1.3's own done-when ("logs on both
+sides"), so data adds them to the raider credit now (P1.3d), applied once per raidId and never on
+an empty commit. Why: a failed raid takes nothing from the defender (shield and loss cap still
+apply); a revenge loop that never spends its token isn't the designed loop. Reversible: yes.
+
 ### D-052 · 2026-10-29 · Live revenge token spend waits for the playtest
 Context: raid on #105. Live revenge escapes as a revenge transfer, but transferLive can't name the
 token to spend, so the token stays after a live revenge commits. Decision: hardening backlog, not
