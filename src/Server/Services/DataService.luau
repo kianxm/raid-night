@@ -33,7 +33,9 @@
 	                          on the next autosave or on leave, unless the server dies first.
 	                          Never call it from code a player's load waits on.
 	  persistence()          "DataStore", "Memory" (Studio without API access, or the Studio memory
-	                          switch below) or nil (checking)
+	                          switch below) or nil (start() has not run yet, or ProfileStore is
+	                          still checking access). nil means "not decided": never pick a mode
+	                          from it, ask again later
 	  sendMessage             Phase 1, errors until then
 	  loadTestProfile(userId, profile), releaseTestProfile(userId), guardTestRelease(guard)
 	                          Studio-only fake profiles for RaidService's single-client test hook
@@ -104,6 +106,9 @@ local handled: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any --
 local testProfiles: { [number]: PlayerProfile } = {} -- Studio only (D-019); never saved
 local testReleaseGuard: ((userId: number) -> string?)? = nil -- set by EscrowService
 local memoryOnly = false -- Studio memory switch on: every profile is in ProfileStore's mock store
+-- Set once by start(), after the switch is read. Until then persistence() is nil, so nothing
+-- (EscrowService above all) can choose a storage mode the switch would contradict.
+local started = false
 local closing = false
 
 local function keyFor(userId: number): string
@@ -147,11 +152,11 @@ local function onPlayerAdded(player: Player)
 	end
 	handled[player] = true
 	local userId = player.UserId
-	local started = os.clock()
+	local loadBegan = os.clock()
 	local ok, session = pcall(store.StartSessionAsync, store, keyFor(userId), {
 		-- Stop retrying when the player leaves or the deadline passes: bounded, never a tight loop.
 		Cancel = function(): boolean
-			return isGone(player) or os.clock() - started > LOAD_TIMEOUT_SECONDS
+			return isGone(player) or os.clock() - loadBegan > LOAD_TIMEOUT_SECONDS
 		end,
 	})
 	if not ok or session == nil then
@@ -216,11 +221,16 @@ local function onPlayerRemoving(player: Player)
 end
 
 function DataService.start()
+	-- Once only: a second start() could re-read the switch and change the mode under EscrowService.
+	if started then
+		error("DataService.start() was called twice")
+	end
 	-- `IsStudio() and`: a live server never reads the switch, whatever the place file holds.
 	memoryOnly = RunService:IsStudio() and ServerStorage:GetAttribute(MEMORY_SWITCH) == true
 	local profileStore = ProfileStore.New(STORE_NAME, Profile.new(0, 0))
 	-- The mock drops StartSessionAsync's params (Cancel); its loads never wait on another server.
 	store = if memoryOnly then profileStore.Mock else profileStore
+	started = true -- only now may persistence() answer: the switch is read and the store chosen
 	if memoryOnly then
 		warn(`[DataService] Studio memory switch ({MEMORY_SWITCH}) is on: profiles are mock, nothing saves`)
 	end
@@ -375,9 +385,14 @@ function DataService.saveNow(userId: number, confirm: (savedData: any) -> boolea
 end
 
 -- Where saves go: "DataStore", "Memory" (Studio without API access, or the Studio memory switch;
--- profiles live in memory for this session only), or nil while ProfileStore is still checking
--- access. Services that keep their own records next to profiles must use the same mode.
+-- profiles live in memory for this session only), or nil: start() has not run (the switch is not
+-- read yet), or ProfileStore is still checking access. Services that keep their own records next
+-- to profiles must use the same mode, so they must treat nil as "not decided" (refuse and ask
+-- again later), never as a default. Once non-nil, the answer never changes for this server.
 function DataService.persistence(): ("DataStore" | "Memory")?
+	if not started then
+		return nil
+	end
 	if memoryOnly then
 		return "Memory"
 	end
@@ -410,10 +425,16 @@ end
 	id is in use by a player, a session or another test profile. Fires no onProfileLoaded
 	listeners (there is no Player). Kept in its own table, so no leave or session end touches it.
 	saveNow on it is decided at once (above): there is nowhere to save and no other server.
+	If Profile.prepare refuses the table (false, "test profile <id> refused: ..."), nothing is
+	held, but because prepare works in place the caller's table may already be partly migrated
+	or stamped (schema, userId, daily counters). Throw it away and build a fresh one; never
+	retry with the same table.
 
 	releaseTestProfile(userId) is a leave: getProfile returns nil, then onProfileReleasing
-	listeners run. Returns false (and why) while an escrow for that id is still open here
-	(EscrowService's guard), so no raid is ever left needing a profile that is gone.
+	listeners run. Fails closed: returns false (and why) while an escrow for that id is still
+	open here (EscrowService's guard), when no guard was ever registered (EscrowService.start has
+	not run, so nobody can say no escrow is open), or when the guard errors. So no raid is ever
+	left needing a profile that is gone.
 ]]
 function DataService.loadTestProfile(userId: number, profile: PlayerProfile): (boolean, string?)
 	if not RunService:IsStudio() then
@@ -446,10 +467,18 @@ function DataService.releaseTestProfile(userId: number): (boolean, string?)
 	if profile == nil then
 		return true, nil -- nothing held
 	end
-	local why = if testReleaseGuard then testReleaseGuard(userId) else nil
-	if why then
+	-- Fail closed: only EscrowService's guard can say no escrow is open for this id.
+	local guard = testReleaseGuard
+	if guard == nil then
+		local why = "no escrow guard registered (EscrowService.start has not run)"
 		warn(`[DataService] test profile {userId} kept: {why}`)
 		return false, why
+	end
+	local checked, why = pcall(guard, userId)
+	if not checked or why ~= nil then
+		local reason = if checked then why else `escrow guard failed: {why}`
+		warn(`[DataService] test profile {userId} kept: {reason}`)
+		return false, reason
 	end
 	testProfiles[userId] = nil
 	runReleasing(userId, profile)
@@ -459,6 +488,7 @@ end
 
 -- EscrowService only: guard(userId) returns why a test profile must stay (an escrow for it is
 -- still open here), or nil. DataService cannot require EscrowService (it requires DataService).
+-- Until a guard is registered, releaseTestProfile refuses every release.
 function DataService.guardTestRelease(guard: (userId: number) -> string?)
 	testReleaseGuard = guard
 end

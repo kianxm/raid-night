@@ -15,7 +15,8 @@
 	    (workspace:GetServerTimeNow()) and the red border are display only, never read back.
 
 	API (RaidService only):
-	  start(remotes, ownerUserIdOf, rootOf, onPushed)
+	  start(remotes, ownerUserIdOf, rootOf, onPushed)   onPushed(player, delta): delta is how far
+	                                                    the SERVER moved them (X/Z), nothing else
 	  request(userId, plot) -> (boolean, reason?)   start one if userId owns plot and the rules allow
 	  isActive(plot) -> boolean
 	  blocks(player, plot) -> boolean               would this player be pushed out if in it now?
@@ -52,7 +53,7 @@ end
 local rootOf: (Player) -> BasePart? = function(_player: Player): BasePart?
 	return nil
 end
-local onPushed: (Player) -> () = function(_player: Player) end
+local onPushed: (Player, Vector3) -> () = function(_player: Player, _delta: Vector3) end
 
 local function now(): number
 	return workspace:GetServerTimeNow()
@@ -136,7 +137,9 @@ local function pushOut(player: Player, root: BasePart, plot: number)
 	local character = player.Character
 	if character then
 		character:PivotTo(CFrame.new(x, pos.Y, z) * root.CFrame.Rotation)
-		onPushed(player)
+		-- Only the server's own move is reported, so a carrier's movement budget is still charged
+		-- for everything the client moved before the push (e.g. a teleport into this den).
+		onPushed(player, Vector3.new(x - pos.X, 0, z - pos.Z))
 	end
 end
 
@@ -165,7 +168,7 @@ function Lockdown.start(
 	remotes: Folder,
 	getOwnerUserId: (number) -> number?,
 	getRoot: (Player) -> BasePart?,
-	pushed: (Player) -> ()
+	pushed: (Player, Vector3) -> ()
 )
 	ownerUserIdOf, rootOf, onPushed = getOwnerUserId, getRoot, pushed
 	local existing = remotes:FindFirstChild(Net.Requests.Lockdown)
