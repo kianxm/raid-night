@@ -26,6 +26,7 @@ local Strings = require(Hud:WaitForChild("Strings"))
 local RaidApi = require(Raid:WaitForChild("RaidApi"))
 local RaidMath = require(Raid:WaitForChild("RaidMath"))
 local Ui = require(Raid:WaitForChild("Ui"))
+local RevengeController = require(script.Parent:WaitForChild("RevengeController")) :: any
 
 local COLOR = Ui.COLOR
 local ROW_HEIGHT = 78
@@ -107,9 +108,15 @@ local function addRow(entry: any, name: string, order: number, now: number)
 		revenge.Position = UDim2.new(1, -8, 0.5, 0)
 		revenge.Activated:Connect(function()
 			task.spawn(function()
-				if RaidApi.startRaid(entry.otherUserId, entry.raidId) then
-					panel.Visible = false
+				-- raiderOnline lives on the revenge row of GetRaidTargets (cached in RaidApi).
+				local online = false
+				for _, target in RaidApi.getTargets() do
+					if target.revengeRaidId == entry.raidId then
+						online = target.raiderOnline == true
+					end
 				end
+				panel.Visible = false
+				RevengeController.begin(entry.otherUserId, entry.raidId, online)
 			end)
 		end)
 	end
@@ -140,10 +147,28 @@ local function render(entries: { any }, title: string)
 	end
 end
 
+-- RaidLogSeenAt is written by the server a moment after join (0 = never opened). Wait briefly
+-- for it so "while you were away" is exact; fall back to the last day if it never arrives.
+local function waitSeenAt(): number?
+	if type(player:GetAttribute("RaidLogSeenAt")) ~= "number" then
+		local arrived = false
+		local conn = player:GetAttributeChangedSignal("RaidLogSeenAt"):Connect(function()
+			arrived = true
+		end)
+		local deadline = os.clock() + 5
+		while not arrived and os.clock() < deadline do
+			task.wait(0.1)
+		end
+		conn:Disconnect()
+	end
+	local seenAt = player:GetAttribute("RaidLogSeenAt")
+	return if type(seenAt) == "number" then seenAt else nil
+end
+
 -- Incoming raids newer than the last time the player saw the log.
 local function unseen(entries: { any }): { any }
-	local seenAt = player:GetAttribute("RaidLogSeenAt")
-	local since = if type(seenAt) == "number" then seenAt else workspace:GetServerTimeNow() - FALLBACK_WINDOW
+	local seenAt = waitSeenAt()
+	local since = if seenAt then seenAt else workspace:GetServerTimeNow() - FALLBACK_WINDOW
 	local out = {}
 	for _, entry in entries do
 		if entry.direction == "Incoming" and entry.at > since then

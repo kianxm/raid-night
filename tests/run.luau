@@ -49,6 +49,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "AsyncRaidRules",
+		load = function()
+			return require("./specs/AsyncRaidRules.spec")
+		end,
+	},
+	{
 		name = "LiveLossRules",
 		load = function()
 			return require("./specs/LiveLossRules.spec")
@@ -58,6 +64,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		name = "RaidServiceSource",
 		load = function()
 			return require("./specs/RaidServiceSource.spec")
+		end,
+	},
+	{
+		name = "Replay",
+		load = function()
+			return require("./specs/Replay.spec")
 		end,
 	},
 	{
@@ -82,6 +94,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		name = "Escrow",
 		load = function()
 			return require("./specs/Escrow.spec")
+		end,
+	},
+	{
+		name = "EscrowServiceSource",
+		load = function()
+			return require("./specs/EscrowServiceSource.spec")
 		end,
 	},
 	{

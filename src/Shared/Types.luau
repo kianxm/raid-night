@@ -146,6 +146,9 @@ export type PlayerProfile = {
 	-- Social and notifications
 	nemesisUserId: number?,
 	notificationPromptedAt: number?,
+	-- When the player last opened their raid log (unix seconds), set server-side on GetRaidLog.
+	-- Missing = never (old saves), so no migration (D-005).
+	raidLogSeenAt: number?,
 }
 
 -- Snapshots and matchmaking ---------------------------------------------------------------------
@@ -198,10 +201,12 @@ export type EscrowRecord = {
 	raiderUserId: number,
 	defenderUserId: number,
 	critterUid: string?, -- the critter the raider grabbed, if any
-	glowRequested: number, -- loot Glow computed from the snapshot
+	-- Loot Glow computed from the snapshot. Live: the most the debit takes. Async: only the raid's
+	-- estimate; the debit takes its share of what is stored when it lands (P1.1).
+	glowRequested: number,
 	state: EscrowState,
 	critter: Critter?, -- filled at Debited: the exact critter taken (nil if it was gone)
-	glow: number, -- filled at Debited: Glow actually taken (<= glowRequested)
+	glow: number, -- filled at Debited: Glow actually taken (Live: <= glowRequested; Async: its share of stored at the debit)
 	isRevenge: boolean,
 	createdAt: number,
 	updatedAt: number,
@@ -220,6 +225,13 @@ export type EscrowRecord = {
 	-- measurement (records written before it existed, Async): the debit measures the den instead.
 	-- No migration.
 	liveBaseRate: number?,
+	-- Async revenge only (P1.3d): the raider's revenge token this raid uses (its key in the
+	-- raider's revengeTokens: the raidId of the raid on them that granted it), from the raid's
+	-- start. A credit that moved something removes that token (D-054). Set by Escrow.create (checked by
+	-- Escrow.checkRevengeRaidId) and never changed; part of the transfer's identity
+	-- (Escrow.sameTransfer). Missing = no token named (records written before it existed,
+	-- non-revenge, Live): the credit spends none. No migration.
+	revengeRaidId: string?,
 }
 
 -- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.

@@ -26,6 +26,8 @@
 	  getProfile(userId)      the live profile for a player in THIS server, or nil
 	  onProfileLoaded(fn)     fn(player, profile) after a load; also runs for already-loaded ones
 	  onProfileReleasing(fn)  fn(userId, profile) right before the final save; must not yield
+	  markRaidLogSeen(userId, now)  sets the loaded profile's raidLogSeenAt to the server's now
+	                          (Profile.markRaidLogSeen: forward only). No-op if not loaded here
 	  saveNow(userId, confirm)  saves now and yields until a save whose written data passes
 	                          confirm(savedData) lands: (true) or (false, reason). Bounded: 3 tries
 	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
@@ -36,7 +38,19 @@
 	                          switch below) or nil (start() has not run yet, or ProfileStore is
 	                          still checking access). nil means "not decided": never pick a mode
 	                          from it, ask again later
-	  sendMessage             Phase 1, errors until then
+	  sendMessage(userId, topic, data)  queues { topic, data } on the user's profile (ProfileStore
+	                          message), loaded anywhere or not. Yields up to 15 s: (true) once
+	                          written, else (false, reason); a write still pending may land later,
+	                          so every message must be safe to receive twice
+	  onMessage(topic, fn)    fn(userId, data) for each message of that topic to a profile loaded
+	                          here (on load for queued ones, then on its saves). It must not yield;
+	                          once it returns the message is processed, and it leaves the queue in
+	                          the same save as whatever fn changed. An error, or no listener, keeps
+	                          it queued for the profile's next load. Register in start()
+	  updateOffline(userId, fn)  fn(profile) on the saved profile of a player NO server holds, in
+	                          one atomic write that lands only while no session lock is held (see
+	                          the section near the end). For EscrowService's async debits
+	  peekOffline(userId)     Studio-only, read-only copy of a saved profile (playtests)
 	  loadTestProfile(userId, profile), releaseTestProfile(userId), guardTestRelease(guard)
 	                          Studio-only fake profiles for RaidService's single-client test hook
 	                          (decision D-019), memory persistence only. See the section at the end.
@@ -51,15 +65,13 @@
 	DataStore. Missing or false: normal behavior. Outside Studio it is never read. Set it back to
 	false (or delete it) to test real saves again.
 
-	TODO (Phase 1, async core):
-	  [ ] Message handler: apply incoming escrow debits (Escrow.debitDefender) inside this session
-	  [ ] sendMessage via ProfileStore:MessageAsync. It retries forever internally, so call it from
-	      a background thread; the escrow record and recovery sweep stay the source of truth.
-	      The queue keeps at most 1000 messages per profile and drops the oldest.
-	  [ ] withOfflineProfile(userId, fn): load an offline profile, run fn, save, release
-	      (used by EscrowService when the defender is not online anywhere)
+	Messages (P1.1) ride ProfileStore's queue in the profile's own key: it keeps at most 1000 per
+	profile and drops the oldest, and MessageAsync retries forever, so sendMessage runs it on its
+	own thread and waits a bounded time. Messages are wake-ups, never the only record of anything:
+	EscrowService's records and recovery stay the source of truth.
 ]]
 
+local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -81,6 +93,8 @@ local LOAD_TIMEOUT_SECONDS = 60
 local SAVE_NOW_ATTEMPTS = 3
 local SAVE_NOW_WAIT_SECONDS = 10
 local SAVE_NOW_FIRST_BACKOFF_SECONDS = 2
+local MESSAGE_SEND_WAIT_SECONDS = 15
+local OFFLINE_RETRY_DELAYS = { 1, 2, 4 } -- seconds between offline-write attempts
 
 local MESSAGE_LOAD_FAILED = "We couldn't load your save, so we stopped before anything changed. "
 	.. "Nothing was lost. Please rejoin in a minute."
@@ -105,6 +119,8 @@ local leaving: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any --
 local handled: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any -- loading or loaded
 local testProfiles: { [number]: PlayerProfile } = {} -- Studio only (D-019); never saved
 local testReleaseGuard: ((userId: number) -> string?)? = nil -- set by EscrowService
+local messageListeners: { [string]: (number, any) -> () } = {}
+local rawProfiles: DataStore? = nil -- the profiles DataStore itself, for updateOffline only
 local memoryOnly = false -- Studio memory switch on: every profile is in ProfileStore's mock store
 -- Set once by start(), after the switch is read. Until then persistence() is nil, so nothing
 -- (EscrowService above all) can choose a storage mode the switch would contradict.
@@ -143,6 +159,28 @@ local function runReleasing(userId: number, profile: PlayerProfile)
 			warn(`[DataService] onProfileReleasing listener failed for {userId}: {err}`)
 		end
 	end
+end
+
+-- One ProfileStore message { topic, data } for a profile loaded here (onMessage). The listener
+-- runs on this thread; processed() only once it returns, so the message leaves the queue in the
+-- same save that writes whatever the listener changed. Malformed messages are dropped.
+local function handleMessage(userId: number, message: any, processed: () -> ())
+	if type(message) ~= "table" or type(message.topic) ~= "string" then
+		warn(`[DataService] dropping a malformed message for {userId}`)
+		processed()
+		return
+	end
+	local listener = messageListeners[message.topic]
+	if listener == nil then
+		warn(`[DataService] no listener for message topic {message.topic}; kept for {userId}'s next load`)
+		return
+	end
+	local ok, err = pcall(listener, userId, message.data)
+	if not ok then
+		warn(`[DataService] {message.topic} message for {userId} failed; kept for their next load: {err}`)
+		return
+	end
+	processed()
 end
 
 local function onPlayerAdded(player: Player)
@@ -205,6 +243,10 @@ local function onPlayerAdded(player: Player)
 
 	sessions[userId] = { session = session, player = player }
 	print(`[DataService] loaded {userId} (schema {profile.schemaVersion}, glow {profile.glow})`)
+	-- Queued messages are handed over now, later ones after each save; only while active.
+	session:MessageHandler(function(message: any, processed: () -> ())
+		handleMessage(userId, message, processed)
+	end)
 	for _, fn in table.clone(loadedListeners) do
 		task.spawn(fn, player, profile)
 	end
@@ -303,6 +345,20 @@ function DataService.onProfileReleasing(fn: (number, PlayerProfile) -> ()): () -
 			table.remove(releasingListeners, index)
 		end
 	end
+end
+
+-- RaidService's GetRaidLog: marks the player's raid log seen at `now`, which must be the
+-- server's os.time(), never a client value (Profile.markRaidLogSeen ignores a non-finite or
+-- earlier time). Does nothing when the profile is not loaded in this server. Never yields and
+-- never forces a save: a display-only time can wait for the next autosave or the leave. It leaves
+-- the RaidLogSeenAt attribute alone, since that keeps its load-time value all session
+-- (docs/contracts.md). Returns whether it wrote.
+function DataService.markRaidLogSeen(userId: number, now: number): boolean
+	local profile = DataService.getProfile(userId)
+	if profile == nil then
+		return false
+	end
+	return Profile.markRaidLogSeen(profile, now)
 end
 
 -- One save request. "saved": a save landed whose written data passes `confirm`. "lost": the
@@ -405,10 +461,128 @@ function DataService.persistence(): ("DataStore" | "Memory")?
 	return "Memory"
 end
 
--- Phase 1: sends a message to a player's profile wherever it is loaded (ProfileStore message
--- queue). Errors until implemented so no caller mistakes a no-op for a delivered transfer.
-function DataService.sendMessage(_userId: number, _message: { [string]: any })
-	error("DataService.sendMessage is not implemented until Phase 1 (async raids)")
+-- Queues { topic = topic, data = data } on a user's profile, loaded anywhere or nowhere
+-- (ProfileStore:MessageAsync; it pings a holding server to save, and so receive it, sooner).
+-- MessageAsync retries forever, so it runs on its own thread: true once written, false when
+-- refused or unconfirmed within MESSAGE_SEND_WAIT_SECONDS. A false may still land later, and
+-- DataStore can repeat a write, so receivers must treat every message as possibly repeated.
+function DataService.sendMessage(userId: number, topic: string, data: any): (boolean, string?)
+	if store == nil then
+		return false, "DataService not started"
+	end
+	local outcome: boolean? = nil
+	task.spawn(function()
+		local ok, sent = pcall(store.MessageAsync, store, keyFor(userId), { topic = topic, data = data })
+		if not ok then
+			warn(`[DataService] message {topic} to {userId} errored: {sent}`)
+		end
+		outcome = ok and sent == true
+	end)
+	local deadline = os.clock() + MESSAGE_SEND_WAIT_SECONDS
+	while outcome == nil and os.clock() < deadline do
+		task.wait(0.25)
+	end
+	if outcome then
+		return true, nil
+	elseif outcome == false then
+		return false, "message refused (the server is closing, or MessageAsync errored)"
+	end
+	return false, `message not confirmed within {MESSAGE_SEND_WAIT_SECONDS} s; it may still land`
+end
+
+-- Calls fn(userId, data) for each message of `topic` (sendMessage) to a profile loaded here.
+-- One listener per topic; fn must not yield. Returns a function that disconnects.
+function DataService.onMessage(topic: string, fn: (userId: number, data: any) -> ()): () -> ()
+	assert(messageListeners[topic] == nil, `DataService.onMessage: {topic} already has a listener`)
+	messageListeners[topic] = fn
+	return function()
+		if messageListeners[topic] == fn then
+			messageListeners[topic] = nil
+		end
+	end
+end
+
+--[[
+	Offline profiles (P1.1). updateOffline(userId, fn) runs fn on the latest saved profile of a
+	player whom NO server holds, in one UpdateAsync on the profile's own key. It lands only while
+	ProfileStore's MetaData.ActiveSession is empty, so a held profile is never written behind its
+	server's back, and it keeps ProfileStore's metadata, message queue, UserIds and RobloxMetaData.
+	It takes no session lock, so it never makes a server release (and kick) its player. The data
+	goes through Profile.prepare first, as on a load. fn(profile) must not yield and must be safe
+	to run again on a fresh copy (UpdateAsync may retry); it returns (write: boolean, result).
+	Returns:
+	  "done", result  fn ran on the latest saved data, and its write (if any) landed
+	  "held"          a server holds the profile (here too; always in Memory mode): message it
+	  "missing"       no save, or only ProfileStore's template (never played)
+	  "refused", why  the save cannot be trusted here (newer schema, wrong owner)
+	Errors when the DataStore keeps failing (4 attempts, 1/2/4 s apart) or DataService has not
+	started. Never call it from code a player's load waits on.
+]]
+local function isTemplate(data: any): boolean
+	return type(data) ~= "table" or (data.createdAt == 0 and data.userId == 0)
+end
+
+local function offlineWrite(userId: number, fn: (PlayerProfile) -> (boolean, any)): (string, any)
+	local raw = rawProfiles or DataStoreService:GetDataStore(STORE_NAME)
+	rawProfiles = raw
+	local outcome, result = "missing", nil
+	local lastError: any = nil
+	for attempt = 1, #OFFLINE_RETRY_DELAYS + 1 do
+		local ok, err = pcall(function()
+			raw:UpdateAsync(keyFor(userId), function(latest: any)
+				outcome, result = "missing", nil
+				if type(latest) ~= "table" or type(latest.MetaData) ~= "table" or isTemplate(latest.Data) then
+					return nil
+				end
+				if latest.MetaData.ActiveSession ~= nil then
+					outcome = "held"
+					return nil
+				end
+				local prepared, profile = pcall(Profile.prepare, deepCopy(latest.Data), userId, os.time())
+				if not prepared then
+					outcome, result = "refused", profile
+					return nil
+				end
+				local write, value = fn(profile)
+				outcome, result = "done", value
+				if not write then
+					return nil
+				end
+				latest.Data = profile
+				return latest, latest.UserIds, latest.RobloxMetaData
+			end)
+		end)
+		if ok then
+			return outcome, result
+		end
+		lastError = err
+		if attempt <= #OFFLINE_RETRY_DELAYS then
+			task.wait(OFFLINE_RETRY_DELAYS[attempt])
+		end
+	end
+	error(`offline write for {userId} failed after {#OFFLINE_RETRY_DELAYS + 1} attempts: {lastError}`, 0)
+end
+
+function DataService.updateOffline(userId: number, fn: (profile: PlayerProfile) -> (boolean, any)): (string, any)
+	local mode = DataService.persistence()
+	if mode == nil then
+		error("DataService not started (or still checking DataStore access)", 0)
+	end
+	-- Memory mode: the mock store is ProfileStore's own; a message reaches it (on its next load).
+	if mode == "Memory" or sessions[userId] or testProfiles[userId] then
+		return "held", nil
+	end
+	return offlineWrite(userId, fn)
+end
+
+-- Studio only: a read-only copy of a user's saved profile, or nil (playtest checks).
+function DataService.peekOffline(userId: number): PlayerProfile?
+	if not RunService:IsStudio() then
+		error("DataService.peekOffline is Studio-only")
+	end
+	assert(store, "DataService not started")
+	local view = store:GetAsync(keyFor(userId))
+	return if view then deepCopy(view.Data) else nil
 end
 
 --[[
