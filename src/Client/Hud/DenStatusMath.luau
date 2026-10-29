@@ -31,10 +31,10 @@ function DenStatusMath.secondsLeft(readyAt: any, now: number): number?
 	return nil
 end
 
--- Marker text for another player's den: "Protected today", else "Safe for 0:42", else nil (hide).
+-- Marker text for another player's den: "Protected", else "Safe for 0:42", else nil (hide).
 function DenStatusMath.markerText(protected: any, readyAt: any, now: number): string?
 	if DenStatusMath.isProtected(protected) then
-		return Strings.protectedToday
+		return Strings.protected
 	end
 	local left = DenStatusMath.secondsLeft(readyAt, now)
 	if left then
@@ -46,7 +46,7 @@ end
 -- Copy for the two new grab refusal reasons, or nil for any other reason (caller keeps its own).
 function DenStatusMath.refusalText(reason: string, readyAt: any, now: number): string?
 	if reason == DenStatusMath.REASON_LIVE_PROTECTED then
-		return Strings.protectedToday
+		return Strings.protected
 	elseif reason == DenStatusMath.REASON_POST_LOSS_SAFETY then
 		local left = DenStatusMath.secondsLeft(readyAt, now)
 		if left then

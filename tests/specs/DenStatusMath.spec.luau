@@ -1,11 +1,17 @@
 --!strict
 local expect = require("../lib/expect")
 local DenStatusMath = require("../../src/Client/Hud/DenStatusMath")
+local Strings = require("../../src/Client/Hud/Strings")
 
 local tests = {}
 
+tests["own-den chip copy (D-036) is not a today promise"] = function()
+	expect.eq(Strings.protectedOwn, "Protected from steals")
+	expect.falsy(string.find(string.lower(Strings.protected .. Strings.protectedOwn), "today", 1, true), "no today")
+end
+
 tests["protected wins over the countdown"] = function()
-	expect.eq(DenStatusMath.markerText(true, 150, 100), "Protected today", "protected")
+	expect.eq(DenStatusMath.markerText(true, 150, 100), "Protected", "protected")
 end
 
 tests["countdown shows while readyAt is in the future"] = function()
@@ -22,7 +28,7 @@ tests["hidden when absent, past or malformed"] = function()
 end
 
 tests["refusal copy"] = function()
-	expect.eq(DenStatusMath.refusalText("LiveProtected", nil, 100), "Protected today", "protected")
+	expect.eq(DenStatusMath.refusalText("LiveProtected", nil, 100), "Protected", "protected")
 	expect.eq(DenStatusMath.refusalText("PostLossSafety", 165, 100), "Safe for 1:05", "countdown")
 	expect.eq(DenStatusMath.refusalText("PostLossSafety", nil, 100), "Someone is already stealing here", "absent")
 	expect.eq(DenStatusMath.refusalText("PostLossSafety", 90, 100), "Someone is already stealing here", "past")
