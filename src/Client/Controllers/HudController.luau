@@ -175,6 +175,12 @@ local function build(): { [string]: any }
 	toastText.Size = UDim2.new(1, -16, 1, 0)
 	toastText.Position = UDim2.fromOffset(8, 0)
 	toastText.ZIndex = 6
+	local toastSub = label(toast, BODY_FONT, 14)
+	toastSub.Name = "Sub"
+	toastSub.Size = UDim2.new(1, -16, 0, 22)
+	toastSub.Position = UDim2.fromOffset(8, 32)
+	toastSub.ZIndex = 6
+	toastSub.Visible = false
 
 	-- Right column, above the default jump button (bottom ~150 px stays clear).
 	local column = Instance.new("Frame")
@@ -203,6 +209,7 @@ local function build(): { [string]: any }
 		carryText = carryText,
 		toast = toast,
 		toastText = toastText,
+		toastSub = toastSub,
 		collect = collect,
 		collectTitle = collectTitle,
 		collectSub = collectSub,
@@ -294,10 +301,15 @@ function HudController.start()
 		request(Net.Requests.BuyEgg, busy)
 	end)
 	local toastToken = 0
-	local function showToast(text: string)
+	local function showToast(text: string, sub: string?)
 		toastToken += 1
 		local token = toastToken
 		ui.toastText.Text = text
+		-- A second short line grows the toast; the main line keeps the top 40 px.
+		ui.toastSub.Text = sub or ""
+		ui.toastSub.Visible = sub ~= nil
+		ui.toast.Size = UDim2.fromOffset(280, if sub then 62 else 40)
+		ui.toastText.Size = UDim2.new(1, -16, 0, 40)
 		ui.toast.Visible = true
 		task.delay(TOAST_SECONDS, function()
 			if token == toastToken then
@@ -324,6 +336,28 @@ function HudController.start()
 				name = if found then found.DisplayName else nil
 			end
 			showToast(if name then Strings.format(Strings.beingRaided, { name = name }) else Strings.beingRaidedUnknown)
+		end)
+	end)
+
+	-- Live steal outcome for the raider. Display only: the server already decided (D-020).
+	whenRemote(Net.Pushes.RaidEnded, function(remote)
+		if not remote:IsA("RemoteEvent") then
+			return
+		end
+		remote.OnClientEvent:Connect(function(payload: any)
+			if type(payload) ~= "table" then
+				return
+			end
+			local speciesId = payload.speciesId
+			local species = if type(speciesId) == "string" then CritterCatalog.get(speciesId) else nil
+			local name = if species then species.name else "?"
+			if payload.raidId == "" then
+				showToast(Strings.format(Strings.dropped, { name = name }))
+			elseif payload.escaped == true then
+				showToast(Strings.format(Strings.stolen, { name = name }))
+			else
+				showToast(Strings.stealUnconfirmed, Strings.stealUnconfirmedSub)
+			end
 		end)
 	end)
 

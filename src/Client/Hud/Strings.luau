@@ -20,6 +20,10 @@ local Strings = {
 	lockdownRefused = "Can't lock down now",
 	beingRaided = "{name} is raiding your den!",
 	beingRaidedUnknown = "You're being raided!",
+	dropped = "Dropped {name}!",
+	stolen = "You stole {name}! It's in your den.",
+	stealUnconfirmed = "Steal not confirmed",
+	stealUnconfirmedSub = "If it went through, it'll show up in your den.",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string
