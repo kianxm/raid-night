@@ -17,8 +17,11 @@
 	  onLoss(event)                       a defender lost something in a raid (see LossReport).
 	                                      raiderName is the Roblox DisplayName/username, never
 	                                      player-typed text.
-	                                      Call after the escrow debit has committed, from the
-	                                      raider's server, for online and offline defenders.
+	                                      Call after the escrow debit has committed. It can run on
+	                                      either server: the raider's, or the defender's (message
+	                                      path), so two servers may report the same loss. Deduped
+	                                      by raidId in the NotificationState_v1 record, so a loss
+	                                      is handled once. Works for online and offline defenders.
 	  onStorageSample(userId, stored, capacity)
 	                                      owner of storage numbers calls this (login, collect,
 	                                      periodic); sends the combined Glow-loss notification.
@@ -39,7 +42,9 @@
 	with UpdateAsync) so it works for offline defenders without touching another player's
 	profile. If data adds profile fields instead, swap `Store` (get/update) and nothing else.
 
-	Analytics (task P2.9 fills this in): every event goes through `track` below.
+	Analytics: every event goes through `track` below, which forwards to
+	AnalyticsService.trackNotification (notification_sent incl. result Throttled,
+	notification_join, optin_prompted, optin_result).
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -50,6 +55,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config")) :: any
 local Rules = require(Shared:WaitForChild("NotificationRules")) :: any
+local AnalyticsService = require(script.Parent:WaitForChild("AnalyticsService")) :: any
 
 local SECRET_API_KEY = "NotificationsApiKey"
 -- Message ids are not secret (they only name a dashboard string). Kian pastes them here after
@@ -80,12 +86,12 @@ local function enabled(): boolean
 	return Config.Flags.notifications == true
 end
 
--- Single analytics call point (P2.9 wires this to the analytics service).
--- Events: notification_sent, notification_join, optin_prompted, optin_result.
+-- Single analytics call point: forwards to AnalyticsService, which maps and validates the fields.
+-- Events: notification_sent, notification_join, optin_prompted, optin_result. Never throws.
 local function track(event: string, fields: { [string]: any })
-	-- P2.9: forward to analytics. Until then a debug line only.
-	if Config.Flags.notifications then
-		print(`[Notifications] {event}`, HttpService:JSONEncode(fields))
+	local ok, err = pcall(AnalyticsService.trackNotification, event, fields)
+	if not ok then
+		warn(`[Notifications] analytics {event} errored: {err}`)
 	end
 end
 
@@ -105,6 +111,7 @@ local function loadState(userId: number): Rules.State?
 				lastSentDay = if type(value.lastSentDay) == "number" then value.lastSentDay else nil,
 				glowLossPending = value.glowLossPending == true,
 				promptedAt = if type(value.promptedAt) == "number" then value.promptedAt else nil,
+				seenRaids = if type(value.seenRaids) == "table" then value.seenRaids else nil,
 			}
 		elseif not ok then
 			warn(`[Notifications] state read failed for {userId}; skipping`)
@@ -142,6 +149,7 @@ local function claimDay(userId: number, now: number): (boolean, number?)
 				lastSentDay = today,
 				glowLossPending = record.glowLossPending == true,
 				promptedAt = if type(record.promptedAt) == "number" then record.promptedAt else nil,
+				seenRaids = record.seenRaids,
 			}
 		end)
 	end)
@@ -151,6 +159,41 @@ local function claimDay(userId: number, now: number): (boolean, number?)
 	end
 	-- UpdateAsync returns nil when the transform aborted.
 	return result ~= nil, previous
+end
+
+-- Marks a raidId handled in the stored record (inside UpdateAsync, so two servers cannot both
+-- pass). Returns true when this call is the first to see it; false for a duplicate or when the
+-- store could not be reached (fail closed: no send).
+local function claimRaid(userId: number, raidId: string): boolean
+	if not store then
+		local cached = cache[userId] or {}
+		local list, isNew = Rules.noteRaid(cached.seenRaids, raidId)
+		cached.seenRaids = list
+		cache[userId] = cached
+		return isNew
+	end
+	local ok, result = pcall(function()
+		return (store :: DataStore):UpdateAsync(tostring(userId), function(old)
+			local record: { [string]: any } = if type(old) == "table" then old else {}
+			local list, isNew = Rules.noteRaid(record.seenRaids, raidId)
+			if not isNew then
+				return nil -- abort: another server already handled this raid
+			end
+			record.seenRaids = list
+			return record
+		end)
+	end)
+	if not ok then
+		warn(`[Notifications] raid dedupe failed for {userId}; skipping`)
+		return false
+	end
+	if result ~= nil and type(result.seenRaids) == "table" then
+		local cached = cache[userId]
+		if cached then
+			cached.seenRaids = result.seenRaids
+		end
+	end
+	return result ~= nil
 end
 
 -- Gives the slot back after a failed POST (best effort; only if it is still our claim).
@@ -291,6 +334,9 @@ function NotificationService.onLoss(report: LossReport)
 		if not state then
 			return
 		end
+		if not claimRaid(userId, report.raidId) then
+			return -- duplicate report (both servers saved Debited) or store unreachable
+		end
 		local event: Rules.LossEvent = {
 			kind = report.kind,
 			raidId = report.raidId,
@@ -307,6 +353,7 @@ function NotificationService.onLoss(report: LossReport)
 
 		local claimed, previous = claimDay(userId, now)
 		if not claimed then
+			track("notification_sent", { userId = userId, category = "revenge", result = "Throttled" })
 			return
 		end
 		local sent = postNotification(userId, "revenge", {
@@ -339,6 +386,7 @@ function NotificationService.onStorageSample(userId: number, stored: number, cap
 		end
 		local claimed, previous = claimDay(userId, now)
 		if not claimed then
+			track("notification_sent", { userId = userId, category = "storage", result = "Throttled" })
 			return
 		end
 		if not postNotification(userId, "storage", {}, nil) then

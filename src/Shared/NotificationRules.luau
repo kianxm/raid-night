@@ -11,6 +11,9 @@
 	  glowLossPending    true after a Glow-only loss that has not been sent about yet
 	  promptedAt         unix seconds of the last opt-in prompt
 
+	  seenRaids        bounded list of raidIds onLoss already handled (two servers can both
+	                   report the same loss; see Rules.noteRaid)
+
 	Day boundary is UTC. A failed send never spends the slot (see Rules.afterSend).
 ]]
 
@@ -20,6 +23,7 @@ export type State = {
 	lastSentDay: number?,
 	glowLossPending: boolean?,
 	promptedAt: number?,
+	seenRaids: { string }?,
 }
 
 export type Category = "revenge" | "storage"
@@ -46,6 +50,7 @@ Rules.PROMPT_COOLDOWN_SECONDS = 30 * 86400
 Rules.MAX_LAUNCH_DATA = 200 -- platform limit on launch data length
 Rules.MAX_PARAM_LENGTH = 40
 Rules.LAUNCH_PREFIX = "revenge:"
+Rules.MAX_SEEN_RAIDS = 20
 
 function Rules.dayOf(now: number): number
 	return math.floor(now / Rules.SECONDS_PER_DAY)
@@ -117,6 +122,7 @@ function Rules.afterSend(state: State, category: Category, sent: boolean, now: n
 		lastSentDay = Rules.dayOf(now),
 		glowLossPending = state.glowLossPending,
 		promptedAt = state.promptedAt,
+		seenRaids = state.seenRaids,
 	}
 	if category == "storage" then
 		nextState.glowLossPending = false
@@ -125,7 +131,31 @@ function Rules.afterSend(state: State, category: Category, sent: boolean, now: n
 end
 
 function Rules.afterGlowLoss(state: State): State
-	return { lastSentDay = state.lastSentDay, glowLossPending = true, promptedAt = state.promptedAt }
+	return {
+		lastSentDay = state.lastSentDay,
+		glowLossPending = true,
+		promptedAt = state.promptedAt,
+		seenRaids = state.seenRaids,
+	}
+end
+
+-- Records a raidId in the bounded seen list. Returns (list, isNew); a raidId already in the list
+-- returns isNew = false and the list unchanged. The oldest entries drop past MAX_SEEN_RAIDS.
+function Rules.noteRaid(seen: { string }?, raidId: string): ({ string }, boolean)
+	local list: { string } = {}
+	if seen then
+		for _, id in seen do
+			if id == raidId then
+				return seen, false
+			end
+			table.insert(list, id)
+		end
+	end
+	table.insert(list, raidId)
+	while #list > Rules.MAX_SEEN_RAIDS do
+		table.remove(list, 1)
+	end
+	return list, true
 end
 
 -- Prompt only right after the player's first successful raid, at most once per 30 days.
@@ -138,7 +168,12 @@ function Rules.shouldPromptOptIn(state: State, successfulRaids: number, now: num
 end
 
 function Rules.afterPrompt(state: State, now: number): State
-	return { lastSentDay = state.lastSentDay, glowLossPending = state.glowLossPending, promptedAt = now }
+	return {
+		lastSentDay = state.lastSentDay,
+		glowLossPending = state.glowLossPending,
+		promptedAt = now,
+		seenRaids = state.seenRaids,
+	}
 end
 
 -- Copy parameters: short, printable, no braces or angle brackets. Usernames and catalog names only.
