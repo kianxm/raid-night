@@ -170,9 +170,10 @@ end
 RaidRules.Live = table.freeze({
 	-- Movement budget (see carryStep). It refills at moveRefill x the carry walk speed and holds
 	-- at most budgetSeconds of walking plus budgetSlack studs. A carry starts with the slack only,
-	-- so a speed hack fails within a second or two, while a lag freeze of up to budgetSeconds
-	-- (no samples, then one catch-up jump) still passes: the budget refills during the freeze.
-	moveRefill = 1.25,
+	-- so a speed hack fails quickly (1.5x within a second, 1.15x within 40 / walkSpeed s), while a
+	-- lag freeze of up to budgetSeconds (no samples, then one catch-up jump) still passes: the
+	-- budget refills during the freeze.
+	moveRefill = 1.1,
 	budgetSeconds = 1,
 	budgetSlack = 2,
 	maxCarryHeight = 16, -- studs of root part above the den floor (a jump off the den station fits)
@@ -215,7 +216,8 @@ export type CarryStep = {
 	insideOwnDen: boolean,
 	wasInsideDefenderDen: boolean,
 	insideDefenderDen: boolean,
-	crossedStreet: boolean, -- an earlier sample was outside both dens
+	-- An earlier sample was outside both dens, with no return into the owner's den since.
+	crossedStreet: boolean,
 	lockdownActive: boolean, -- the defender's den is locked down right now
 	-- The critter's OWNER to the carrier on X/Z only (height never dodges a tag; nobody else can
 	-- tag); nil when the owner has no character.
@@ -311,15 +313,19 @@ end
 	  TooHigh        root part more than maxCarryHeight above the den floor (flying)
 	  DropAtBorder   left the owner's den during a Lockdown (checked before an escape, so no jump
 	                 out of a locked den lands as one)
-	  SkippedStreet  reached your own den without ever being seen outside both dens: a hop across
-	                 the gap between neighbouring dens never escapes (the critter drops)
+	  SkippedStreet  reached your own den without being seen outside both dens since last leaving
+	                 the owner's den: a hop across the gap between neighbouring dens never escapes
+	                 (the critter drops)
 	  Escape         inside your own den; home is safe even with the owner close behind
 	  Tagged         the owner within tagRange on X/Z
 ]]
 function RaidRules.carryStep(s: CarryStep): (CarryOutcome, number, boolean)
 	local refill = RaidRules.Live.moveRefill * s.walkSpeed * math.max(s.dt, 0)
 	local budget = math.min(RaidRules.carryBudgetCap(s.walkSpeed), s.budget + refill) - s.moved
-	local crossedStreet = s.crossedStreet or (not s.insideDefenderDen and not s.insideOwnDen)
+	-- Going back into the owner's den forgets the street: a carrier cannot step out once, come
+	-- back, bank budget and then hop the gap into their own den.
+	local outsideBoth = not s.insideDefenderDen and not s.insideOwnDen
+	local crossedStreet = (s.crossedStreet and not s.insideDefenderDen) or outsideBoth
 	if not (budget >= 0) then -- NaN fails too
 		return "TooFast", budget, crossedStreet
 	end
