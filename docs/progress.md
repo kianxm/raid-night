@@ -66,18 +66,20 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| C6 | data | — | In progress | agent/data/C6 | 1 | Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
+| C6 | data | — | In review | #123 | 1 | 365 tests. 7 optional fields, no migration; reviewer (xhigh) running. D-063. Was: Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
 | P2.1 | assets | — | Blocked | #87 (open) | 1 | Generation paused: no credits (D-057); Gate 1 picks are Kian's. Prompts and 40 fronts done in #87 |
 | P2.2 | assets | — | Blocked | #122 (stacked on #87) | 1 | Briefs done: 19 pieces, kit manifest (ids empty), credit estimate ~263 (38 images + 25 meshes incl. retries). Generation + Asset Gates wait for credits (D-057) |
 | P2.3 | raid | — | In progress | agent/raid/P2.3 | 1 | Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
 | P2.4 | economy | — | In progress | agent/economy/P2.4 | 1 | Was P2.1: model-id seam with placeholder fallback, mutation effects, eggMaxTier → Mythic (D-057) |
 | P2.5 | ui | — | In review | #119, #120, #121 (stacked) | 1 | 358 tests. Shop + strings table, Bag + Den mgmt, Settings + silent sound cues. Needs GetSettings/SaveSettings remotes on C6 (data) and DenState.vaultSlots. Not run in Studio. Was: Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
-| P2.6 | ui | P2.5, C6 | Todo | | 0 | Onboarding (Appendix C) |
+| P2.6 | ui | P2.5, C6b, P2.6r | Todo | | 0 | Onboarding (Appendix C) |
 | P2.7 | notifications | — | In review | #118 | 1 | Reviewer APPROVED; fail-closed reads + atomic day claim + merged saveState folded in. 359 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
-| P2.8 | economy | C6 | Todo | | 0 | Passes/products, glow-factor helper, policy audit; products for Kian |
+| P2.8 | economy | C6 | In progress | agent/economy/P2.8 (stacked on C6) | 1 | Passes/products, glow-factor helper, policy audit; products for Kian |
 | P2.9 | data | C6 | Todo | | 0 | Analytics events (Appendix A) + funnels |
 | P2.10 | raid | C6, P2.3 | Todo | | 0 | Gear (live only for lockpick) |
 | P2.11 | assets | — | Blocked | | 0 | No credits (D-057); sound hooks ship empty in P2.5 |
+| C6b | data | C6 | In progress | agent/data/C6b (stacked on C6) | 1 | Settings + onboarding remotes and server handlers (D-063) |
+| P2.6r | raid | C6b, P2.3 | Todo | | 0 | Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
 | P2.12 | integration | all | Todo | | 0 | Closed-test build + kit; access setup is Kian's |
 
 ## Setup notes

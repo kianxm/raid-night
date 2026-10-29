@@ -3,6 +3,17 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-063 · 2026-10-29 · C6 follow-ups: who wires remotes, accessories stay with the buyer, gear 0 = not owned
+Context: data on #123. Decision: (1) data writes the server handlers and Net remotes for settings
+and onboarding (C6b, stacked on C6); onboarding steps advance server-side from real events, the
+client may only acknowledge client-only tips. (2) Accessories are owned per player; a worn
+accessory is a binding on the owner's profile, so a stolen critter arrives bare and the
+accessory stays in the buyer's inventory; nothing in Escrow carries it. (3) Gear level 0 means not
+owned; gear is bought and upgraded with Glow (P2.10). (4) Appendix C's free 30-minute shield and
+the tutorial den are raid's (new task P2.6r): live steals must respect a new-player window from
+createdAt (Config key), and escapes call Profile.countSuccessfulRaid then onSuccessfulRaid.
+Why: rule 4 / principle 1 (a stolen purchase is a lost purchase); server authority. Reversible: yes.
+
 ### D-062 · 2026-10-29 · Notification state lives in its own DataStore; storage-full sends stay off
 Context: P2.7 (#118). Decision: NotificationService keeps last-sent day, pending loss and
 opt-in-prompted time in its own `NotificationState_v1` DataStore keyed by user id, not in the
