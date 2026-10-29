@@ -496,8 +496,8 @@ odds, lighting, music), so a new event should take a day to configure.
 | 4    | Raid the Creator                                          | Creator den event tooling                                                     |
 | 5    | —                                                         | Trading beta (two-step confirm, 7-day new-account lock, PolicyService gating) |
 
-Phase 2 paid randomness (Robux eggs, Blood Moon summon) is its own mini-phase: odds panel,
-live odds during boosts, PolicyService gating, reviewer audit, **human gate** before shipping.
+Phase 2 paid randomness (Robux eggs, Blood Moon summon, Glow packs per D-028) is its own mini-phase: odds panel,
+live odds during boosts, PolicyService region gating, reviewer audit, **human gate** before shipping.
 
 ---
 

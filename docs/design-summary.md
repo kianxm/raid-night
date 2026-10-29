@@ -64,8 +64,10 @@ amplify it.
 
 Protection, convenience, status, social moments. Never ransom. No paid randomness at launch.
 Passes: VIP 399, vault slot 199, auto-collect 149, raid scout 249, themes and gear skins.
-Products: shield 49, Glow packs, timer skips, event pass 399. Phase 2: paid eggs and Blood
-Moon summon with full odds disclosure and PolicyService checks.
+Products: shield 49, timer skips, event pass 399. Glow is earn-only at launch (D-028). Phase 2
+paid-randomness mini-phase: paid eggs, Blood Moon summon and Glow packs (Glow buys eggs), with
+full odds disclosure, PolicyService region checks and a reviewer audit. Egg odds are shown on
+screen for every egg from Phase 0.
 
 ## Compliance (non-negotiable)
 

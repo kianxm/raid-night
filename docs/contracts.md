@@ -218,9 +218,11 @@ Tiers up to it keep their `Config.EggOdds` ratios, renormalized to sum to 1
 Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table (from
 P0.4b) and ignores `eggMaxTier` (decision D-004).
 
-If Glow became purchasable with Robux, Glow eggs would become paid random items. CLAUDE.md rule
-6 forbids this at launch: Glow stays non-purchasable while it buys eggs, unless Kian changes the
-rule. If he does, show the odds and pass PolicyService before shipping.
+Glow is earn-only at launch (D-028): no product may grant Glow for Robux. Glow buys eggs, so
+Glow packs would make every egg a paid random item; they ship only in the Phase 2
+paid-randomness mini-phase with on-screen odds, PolicyService region checks and a reviewer
+audit. Egg odds are shown on screen for every egg from Phase 0, from Economy's odds helpers
+(Config.EggOdds after the eggMaxTier renormalization; rescue egg: Common 100%).
 
 ## Tradeability
 
