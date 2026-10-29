@@ -300,7 +300,10 @@ local function storeFor(raidId: string, last: { record: EscrowRecord? }): Escrow
 			if not profile then
 				error(`profile {userId} is not loaded in this server`, 0)
 			end
-			Economy.accrue(profile, os.time()) -- money model: accrue before `stored` changes
+			-- Money model: accrue before `stored` changes. TODO (P2.8, D-032): pass the player's
+			-- Economy.glowBoostFactor here, or accrue after a call that did. Factor 1 only under-pays
+			-- a boosted window, never over-pays, and today every factor is 1 (purchases is off).
+			Economy.accrue(profile, os.time())
 			return profile
 		end,
 		saveProfile = function(profile: PlayerProfile)
