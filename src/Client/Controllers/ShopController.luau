@@ -23,6 +23,7 @@ local ShopMath = require(Client:WaitForChild("Hud"):WaitForChild("ShopMath"))
 local LanternBanner = require(Client:WaitForChild("Hud"):WaitForChild("LanternBanner"))
 local Request = require(Client:WaitForChild("Request"))
 local MenuController = require(script.Parent:WaitForChild("MenuController")) :: any
+local GearController = require(script.Parent:WaitForChild("GearController")) :: any
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
 local ShopController = {}
@@ -194,6 +195,7 @@ local function buildExtras(body: Instance)
 							else Strings.shopGearFailed
 						lastFetch = 0
 						task.delay(0.3, fetch)
+						task.delay(0.5, GearController.refresh) -- the HUD bar's levels and cooldowns
 					end, slot.id)
 				end)
 				local on = GearRules.switchedOn(Config.Gear, slot.id)
