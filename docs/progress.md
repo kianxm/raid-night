@@ -10,7 +10,7 @@ Current phase: 0 · Last updated: 2026-10-28 (evening)
 | P0.2 | raid | — | Done | #3, #4 | 1 | 107 parts, 48 lights. Studio (1 client): own den + sign, respawn, walkable border, leave clears den. Multi-client spawn/reassign verified by Lune tests only; 3-client Studio check pending (Kian) |
 | P0.3 | data | — | Done | #2 | 1 | Reviewer APPROVED. Studio: survives rejoin on real DataStore, fresh-save stamping, flags. Not verified: 2-player leave, session-steal kick (needs 2 servers) |
 | P0.3a | data | P0.3b | Todo | | 0 | Reviewer follow-ups on #2: S3 stamp only true templates, S4 session/Player guard, S6-S8 docs. S1 moved into P0.3b (same file). Runs after P0.3b to avoid DataService conflicts |
-| P0.3b | data | P0.3 | In progress | agent/data/P0.3b | 1 | Reviewer S5 + S1 + S2 (enforce flag inside the entry point): DataService save-now-and-confirm + same-server Escrow.Store so P0.5 live steals go through Escrow durably. Prerequisite for P0.5 |
+| P0.3b | data | P0.3 | In progress | agent/data/P0.3b | 1 | Kill-switch contract change (approved 2026-10-28): `raids` is the master switch, async/revenge also need `asyncRaids`, recovery never gated; pure check + flag-combination and recovery-while-off tests; reviewer pass. Reviewer S5 + S1 + S2 (enforce flag inside the entry point): DataService save-now-and-confirm + same-server Escrow.Store so P0.5 live steals go through Escrow durably. Prerequisite for P0.5 |
 | P0.4 | economy | P0.3 | In progress | agent/economy/P0.4 | 1 | |
 | P0.5 | raid | P0.2, P0.4, P0.3b | Todo | | 0 | P0.3b added: live steals are cross-profile moves (golden rule 4) |
 | P0.6 | ui | P0.4 | Todo | | 0 | |
@@ -45,15 +45,17 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 - Multi-client check (Studio MCP can't start Test > Clients and Servers): run a 3-player Local
   Server once. Each player in a different den with their name on the sign; Player2 leaving doesn't
   affect Player1; a new join gets the freed den with empty pads. Also folded into P0.8.
-- Flag semantics (reviewer S2 on #2, not urgent): should `raids` be a master switch, so offline
-  raids need both `raids` and `asyncRaids`? Today `raids=false, asyncRaids=true` still allows
-  offline raids. Changes `docs/contracts.md` Kill switches, so it needs your approval. Matters
-  from Phase 1 (async raids are off until then).
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
   `integration`: changes only by PR, required status check `check` (CI), no force-push, no
   deletion, 0 approvals, no bypass. Ledger updates go through PRs too; no direct commits.
+
+## Decisions
+- 2026-10-28 (Kian): `Config.Flags.raids` is the master kill switch. Any raid (live, async,
+  revenge) starts only if `raids` is on; async and revenge raids also need `asyncRaids`. Switches
+  block new raids only; escrow recovery and in-flight transfers always complete. Implemented in
+  P0.3b; RaidService must call the same check (hand-off to `raid` for P0.5).
 
 ## Gate history
 - G0: cleared 2026-10-27 (Kian, in chat)
