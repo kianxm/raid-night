@@ -413,6 +413,7 @@ fixes from the analytics funnels; rerun the closed test.
 | P3.6 | economy     | P3.1    | Price tests on passes and products                        |
 | P3.7 | assets      | —       | Icon + thumbnail sets (3 each) for A/B tests              |
 | P3.8 | reviewer    | —       | Full security and policy audit before launch              |
+| P3.9 | economy     | P3.1    | Tune live loss rules from live data                       |
 
 **P3.1 Go public.** Publish with public visibility, no promotion. Build a daily dashboard of
 the metrics in the design doc. _Done when:_ dashboard live; daily summary posts to the ledger.
@@ -438,6 +439,12 @@ generated key art. **Stop** for selection. _Done when:_ A/B tests running.
 
 **P3.8 Audit.** Reviewer audits duplication paths, client trust, purchases, text filtering,
 policy compliance and kill switches. _Done when:_ no blocking findings.
+
+**P3.9 Live loss rules tuning.** Tune `Config.LiveRaid.postLossSafetySeconds`,
+`protectionLossShare` (live protection share) and `maxStealsPerPairPerDay` (live pair limit),
+driven by churn after first loss, raid success rate and like ratio. Propose with expected
+effect, **stop** for approval, apply. Needs analytics for first live loss and churn after it
+(Appendix A). _Done when:_ one tuning round applied with before/after numbers.
 
 **Exit checks:** zero duplication alarms for 14 days; audit clean; all tests green.
 

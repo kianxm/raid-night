@@ -74,13 +74,14 @@ Kian takes notes. You do not need to do anything for this part.
 
 ## 4. Questions after
 
-Five quick ones. Honest answers beat polite ones.
+Six quick ones. Honest answers beat polite ones.
 
 1. What was the most fun moment?
 2. When did you want to stop?
 3. Did losing a critter feel fair?
 4. Would you come back tomorrow, and why?
 5. What confused you?
+6. Did you chase the thief after being robbed?
 
 ## 5. Pass criteria
 
@@ -160,5 +161,6 @@ Q2 When wanted to stop:
 Q3 Losing a critter fair?:
 Q4 Come back tomorrow, and why:
 Q5 Confused by:
+Q6 Chased the thief after being robbed? (yes / no / why not):
 Notable quotes:
 ```

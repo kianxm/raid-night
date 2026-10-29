@@ -26,9 +26,12 @@ Current phase: 0 (at the Phase 0 gate) · Last updated: 2026-10-28
 | P0.9 | economy | — | In progress | agent/economy/P0.9 | 1 | Egg odds helpers (tier, rescue, species, next egg) matching the real rolls; Glow packs out of PurchaseService (D-028) |
 | P0.10 | ui | P0.9 | Done | #51 | 1 | Odds chip + panel (D-028). Studio-checked. Fixes for #54 (phone layout) and #55 (per-species rounding) in P0.10b |
 | P0.11 | economy | — | Done | #53 | 1 | PurchaseService catalog header for D-029 |
-| P0.10b | ui | P0.10 | In progress | agent/ui/P0.10b | 1 | Fixes #54, #55 |
-| C2 | data | — | Todo | | 0 | Config.Boosts (vipGlowBonus 0.5, lanternNightGlowBonus 0.5, lanternNightSeconds 900) + contracts.md Robux-linked multiplier rule (D-030). Reviewer |
+| P0.10b | ui | P0.10 | Done | #57 | 1 | Fixes #54 (compact column on short screens, fit tested 320-900 px) and #55 (true per-species odds). Studio-simulated; real phone check deferred |
+| C2 | data | — | In review | #59 | 1 | Config.Boosts + contracts.md Robux-linked multiplier rule (D-030). Reviewer running |
 | P0.12 | economy | C2 | Todo | | 0 | Pure Robux-linked Glow multiplier by policy flag + accrue factor + tests; PurchaseService header (D-030) |
+| P0.5g | data | — | In progress | agent/data/C3 | 1 | D-031 live loss rules: Config.LiveRaid (postLossSafetySeconds 60, maxStealsPerPairPerDay 2, protectionLossShare 0.5), optional liveLossBaseRate/liveLossRateToday, EscrowRecord.kind, value-based debit, pure rules + tests, contracts.md. Reviewer |
+| P0.5h | raid | P0.5g | Todo | | 0 | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
+| P0.5i | ui | P0.5h | Todo | | 0 | Show "Protected today" and the post-loss countdown from den LiveProtected / LiveGrabReadyAt (display only) |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
@@ -78,6 +81,8 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
   doesn't cause false drops; moveRefill 1.1 feels fair.
 - 2 players: a critter being carried is never auto-placed or redrawn (#47; covered by a Lune spec).
 - 2 players: limit refusals (PairLimit, daily loss cap) show no message; judge if testers need one.
+- Phone emulator: compact HUD column actually switches on a real small screen (#57), and the
+  floor below ~330 px usable height.
 - Phone emulator: HUD layout and the top-bar fix (P0.6, #17); "Free" egg label on a wiped
   profile.
 
