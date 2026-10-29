@@ -13,8 +13,8 @@
 	    (Config.Purchases <item>.robuxLinked) never takes effect for a player whose PolicyService
 	    info has ArePaidRandomItemsRestricted, and fails closed: until PolicyService answers, or
 	    when it can't be read, the player counts as restricted. Such items are not offered to them
-	    unless the item's offerRestricted says so (VIP keeps its non-Glow perks; its Glow bonus is
-	    Economy.glowBoostFactor's). A receipt for an item the player may not get answers
+	    unless the item's offerRestricted says so (none does at launch; VIP is hidden too, D-065,
+	    and its Glow bonus is Economy.glowBoostFactor's). A receipt for an item the player may not get answers
 	    NotProcessedYet and grants nothing.
 	  - Everything is off while Config.Flags.purchases is false, and an item whose id is still 0
 	    (not created in the Creator Dashboard) is never offered, granted or checked.
@@ -29,7 +29,10 @@
 	  - otherwise: may the product be granted now? record the receipt (Profile.recordReceipt;
 	    false = bad input: NotProcessedYet) and grant in the same step with no yield between; then
 	    DataService.saveNow confirming the saved data holds the receipt; only then PurchaseGranted;
-	  - player not here, profile not loaded, unknown product, an error anywhere: NotProcessedYet.
+	  - first it waits (up to RECEIPT_WAIT_SECONDS, while the player is here) for the profile to
+	    load, and for a first grant of a Robux-linked product for loadPolicy to finish, since
+	    Roblox may redeliver only at join; then it fetches player and profile again;
+	  - player gone, profile still not loaded, unknown product, an error anywhere: NotProcessedYet.
 	  Roblox redelivers a receipt until it is granted, so a forced shutdown mid-purchase either
 	  lost the in-memory grant with the receipt (granted again on redelivery) or saved both
 	  (acknowledged on redelivery, granted nothing).
@@ -65,9 +68,16 @@ local IncomeService = require(script.Parent.IncomeService) :: any
 
 local POLICY_ATTEMPTS = 3
 local POLICY_BACKOFF_SECONDS = 2
+-- How long ProcessReceipt waits for the profile to load (a rejoin after a forced shutdown waits
+-- for the dead server's lock, about 45 s) and for loadPolicy to finish. Roblox may redeliver a
+-- receipt only when the player joins, so answering before the load could leave it unprocessed
+-- on every rejoin.
+local RECEIPT_WAIT_SECONDS = 60
+local PASS_CHECK_ATTEMPTS = 3
 
 type PlayerState = {
 	restricted: boolean?, -- PolicyService ArePaidRandomItemsRestricted; nil = unknown (restricted)
+	policyDone: boolean, -- loadPolicy finished (answered, or gave up: restricted stays nil)
 	owns: { [string]: boolean }, -- pass key -> owned
 }
 
@@ -80,7 +90,7 @@ local PurchaseService = {}
 local function stateOf(userId: number): PlayerState
 	local state = states[userId]
 	if not state then
-		state = { restricted = nil, owns = {} }
+		state = { restricted = nil, policyDone = false, owns = {} }
 		states[userId] = state
 	end
 	return state :: PlayerState
@@ -131,17 +141,21 @@ end
 -- Policy and pass ownership ----------------------------------------------------------------------
 
 -- Reads the player's paid-random-items restriction. Leaves it unknown (= restricted) when
--- PolicyService fails every attempt or answers without a boolean.
+-- PolicyService fails every attempt or answers without a boolean. Marks the state policyDone
+-- either way, so ProcessReceipt stops waiting for it.
 local function loadPolicy(player: Player)
+	local userId = player.UserId
 	for attempt = 1, POLICY_ATTEMPTS do
 		local ok, info = pcall(function(): any
 			return PolicyService:GetPolicyInfoForPlayerAsync(player)
 		end)
 		if ok and type(info) == "table" and type(info.ArePaidRandomItemsRestricted) == "boolean" then
-			if player.Parent == Players then
-				stateOf(player.UserId).restricted = info.ArePaidRandomItemsRestricted
+			local state = states[userId]
+			if state and player.Parent == Players then
+				state.restricted = info.ArePaidRandomItemsRestricted
+				state.policyDone = true
 				IncomeService.setGlowInputs(
-					player.UserId,
+					userId,
 					{ paidRandomRestricted = info.ArePaidRandomItemsRestricted },
 					os.time()
 				)
@@ -152,33 +166,54 @@ local function loadPolicy(player: Player)
 			task.wait(POLICY_BACKOFF_SECONDS * attempt)
 		end
 	end
-	warn(`[PurchaseService] no PolicyService answer for {player.UserId}; Robux-linked items stay off`)
+	local state = states[userId]
+	if state then
+		state.policyDone = true
+	end
+	warn(`[PurchaseService] no PolicyService answer for {userId}; Robux-linked items stay off`)
+end
+
+-- Runs IncomeService.refresh on its own thread, so its errors never reach the caller (a saved
+-- grant must never turn into NotProcessedYet because a DenState push failed).
+local function refreshLater(player: Player)
+	task.spawn(function()
+		if player.Parent == Players then
+			local ok, err = pcall(IncomeService.refresh, player)
+			if not ok then
+				warn(`[PurchaseService] refresh failed for {player.UserId}: {err}`)
+			end
+		end
+	end)
 end
 
 local function setOwned(player: Player, passKey: string, owned: boolean)
-	if player.Parent ~= Players then
+	local state = states[player.UserId]
+	if player.Parent ~= Players or not state then
 		return
 	end
-	stateOf(player.UserId).owns[passKey] = owned
+	state.owns[passKey] = owned
 	if passKey == "vip" then
 		IncomeService.setGlowInputs(player.UserId, { vip = owned }, os.time())
 	end
 	if owned then
-		IncomeService.refresh(player) -- e.g. a new vault slot or auto-collect shows at once
+		refreshLater(player) -- e.g. a new vault slot or auto-collect shows at once
 	end
+end
+
+-- MarketplaceService's own answer on whether `player` owns pass `passId`; false when it fails.
+local function ownsPassAsync(player: Player, passId: number): boolean
+	local ok, owned = pcall(function(): any
+		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
+	end)
+	return ok and owned == true
 end
 
 -- Checks every created pass. A failed check counts as not owned (fail closed); a later purchase
 -- in this session still turns it on (PromptGamePassPurchaseFinished).
 local function loadPasses(player: Player)
 	for key, item in Config.Purchases.passes do
-		if item.id > 0 then
-			local ok, owned = pcall(function(): any
-				return MarketplaceService:UserOwnsGamePassAsync(player.UserId, item.id)
-			end)
-			if ok and owned == true then
-				setOwned(player, key, true)
-			end
+		if item.id > 0 and ownsPassAsync(player, item.id) then
+			setOwned(player, key, true)
 		end
 	end
 end
@@ -255,12 +290,39 @@ local function decide(info: any): string
 	local userId: number = info.PlayerId
 	local purchaseId: any = info.PurchaseId
 	local productId: number = info.ProductId
+	local _, item = Economy.productById(productId)
+	-- Roblox may redeliver only when the player joins, before their profile loads (after a forced
+	-- shutdown the load waits ~45 s for the dead server's lock). So wait while they are here: for
+	-- the profile, and for a first grant of a Robux-linked product, for loadPolicy to finish.
+	local deadline = os.clock() + RECEIPT_WAIT_SECONDS
+	local function waitFor(ready: () -> boolean): boolean
+		while not ready() do
+			local here = Players:GetPlayerByUserId(userId)
+			if not here or here.Parent ~= Players or os.clock() >= deadline then
+				return false
+			end
+			task.wait(1)
+		end
+		return true
+	end
+	if not waitFor(function(): boolean
+		return DataService.getProfile(userId) ~= nil
+	end) then
+		return "NotProcessedYet" -- redelivered when they are back
+	end
+	local loaded = DataService.getProfile(userId)
+	if item and item.robuxLinked and loaded and not Profile.hasReceipt(loaded, purchaseId) then
+		waitFor(function(): boolean
+			local state = states[userId]
+			return state ~= nil and state.policyDone
+		end) -- gave up: the policy stays unknown and canGrant refuses (fail closed)
+	end
+	-- Fetched again after the waits: the session may have changed while we yielded.
 	local player = Players:GetPlayerByUserId(userId)
 	local profile = DataService.getProfile(userId)
 	if not player or not profile then
-		return "NotProcessedYet" -- redelivered when they are back
+		return "NotProcessedYet"
 	end
-	local _, item = Economy.productById(productId)
 	local now = os.time()
 	local decision = Economy.processReceipt({
 		hasReceipt = function(): boolean
@@ -291,8 +353,8 @@ local function decide(info: any): string
 			return saved == true
 		end,
 	})
-	if decision == "PurchaseGranted" and player.Parent == Players then
-		IncomeService.refresh(player) -- a shield shows in DenState
+	if decision == "PurchaseGranted" then
+		refreshLater(player) -- a shield shows in DenState
 	end
 	return decision
 end
@@ -352,9 +414,26 @@ function PurchaseService.start()
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(
 		function(player: Player, passId: number, purchased: boolean)
 			local key = passKeyById(passId)
-			if key and purchased then
-				setOwned(player, key, true)
+			if not (key and purchased) then
+				return
 			end
+			-- Trust MarketplaceService, not the event alone. Its answer can lag a fresh purchase,
+			-- so retry a little; still false means not owned (fail closed) until the next join.
+			task.spawn(function()
+				for attempt = 1, PASS_CHECK_ATTEMPTS do
+					if player.Parent ~= Players then
+						return
+					end
+					if ownsPassAsync(player, passId) then
+						setOwned(player, key, true)
+						return
+					end
+					if attempt < PASS_CHECK_ATTEMPTS then
+						task.wait(2 * attempt)
+					end
+				end
+				warn(`[PurchaseService] pass {passId} purchase by {player.UserId} not confirmed by MarketplaceService`)
+			end)
 		end
 	)
 	Players.PlayerAdded:Connect(onPlayerAdded)
