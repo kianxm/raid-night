@@ -20,7 +20,9 @@ Current phase: 0 · Last updated: 2026-10-28 (evening)
 | P0.7 | assets | — | Done | #5 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible). Stage 1 follow-up: `tools/assets/generate.sh` STYLE_REFS still lists ref-03/ref-04, which do not exist |
 | P0.5e | data | P0.5 | Done | #37, #38 | 1 | Reviewer APPROVED both. Studio memory switch (ServerStorage StudioMemoryProfiles), test profiles (ids <= -1_000_000), grabRange in Config, storage mode fixed before use. 122 tests |
 | P0.4c | economy | — | Done | #36 | 1 | Placement never moves a carried critter (as mover or swapped occupant). 115 tests |
-| P0.8 | integration | P0.5, P0.6, P0.6b | In progress | #20 | 2 | Kit merged (#20). Final single-client Studio pass + kit correction running. Multi-client session deferred to the end |
+| P0.4d | economy | — | In progress | agent/economy/P0.4d | 1 | Fixes #43: Inventory critters auto-fill free pads (D-027) |
+| P0.6c | ui | — | In progress | agent/ui/P0.6c | 1 | Fixes #41: toast on RaidEnded (stolen / dropped / not confirmed) |
+| P0.8 | integration | P0.5, P0.6, P0.6b | In review | #20, #44 | 2 | Single-client Studio pass PASSED (persistence, economy, HUD, Lockdown 45/120, live steal via test hook in Memory mode: grab/carry/tag/escape → Committed, TooFast/TooHigh/speed-hack drops, lockdown push-out and border drop, no Memory-mode leak). Output clean. Issues #41, #43 being fixed (D-027); #42 deferred. Kit correction #44 held until fixes land |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
