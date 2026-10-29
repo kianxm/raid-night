@@ -50,7 +50,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) on both. Own Studio run waits for merge (D-044) |
 | P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
 | P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: agent/raid/P1.3a | 1 | Split (D-046): P1.3a = StartRaid, pocket den, traps, guards, timer, grabs (from integration); P1.3b = escrow handoff, shield, revenge token, logs (after P1.1) |
-| P1.4 | raid | P1.3 | In progress | P1.4a: agent/raid/P1.4a | 1 | Split (D-046): P1.4a = codec + store (new files); P1.4b = hook into raids (after P1.3) |
+| P1.4 | raid | P1.3 | In progress | P1.4a: #99 (approved); P1.4b: Todo | 1 | Split (D-046). #99: 3-min raid = 1,768 bytes, ±0.25 stud, reviewer APPROVED (decode fuzzed), 281 tests; GetReplay limit 3 and 7-day index cleanup approved (D-048). P1.4b = hook into raids after P1.3a, using save() not saveNow() |
 | P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
 | P1.6 | ui | P1.3, P1.5 | Todo | | | |
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
@@ -154,6 +154,7 @@ dropped based on real play.
 - Raider's own block list is session-only until their first ReportBlocked; fall back to the last snapshot (reviewer #91; small).
 - Studio hook `targets` also skips the `raids` gate; doc says asyncRaids only (reviewer #91; Studio only, doc fix).
 - Finished escrow records are never deleted (D-008 cleanup deferred, D-047; storage growth only; proposal in #98).
+- ReplayStore: cap expired-replay deletes per save (~4) so a returning raider's 64-delete burst can't drain the DataStore budget; delete the dropped list even if SetAsync fails; cache fetched records; finite startedAt check (reviewer #99; small).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 - Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
 - Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).

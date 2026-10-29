@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-048 · 2026-10-29 · Replay fetch limit and 7-day cleanup
+Context: raid on #99. Decision: GetReplay is limited to 3 per 10 s; DataStores have no expiry, so
+each raider keeps an index of their replays and every new save deletes their expired ones and
+any beyond 64; a save whose index write fails is skipped, and reads refuse replays older than
+7 days. Why: replays are a nice-to-have that must never cost raid results or DataStore budget.
+Reviewer approved. Reversible: yes.
+
 ### D-047 · 2026-10-29 · Async escrow records are never voided; cleanup deferred
 Context: data on #97/#98. Decision: close D-012 #6 by never voiding Async records (any server may
 redeliver the debit; it applies once per raidId) instead of a void tombstone. Deleting finished
