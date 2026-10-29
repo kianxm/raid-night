@@ -167,6 +167,23 @@ function Rules.shouldPromptOptIn(state: State, successfulRaids: number, now: num
 	return at == nil or now - at >= Rules.PROMPT_COOLDOWN_SECONDS
 end
 
+-- The client's report after its opt-in prompt: a table with boolean `shown` and `accepted`
+-- (accepted needs shown). Anything else is nil (refused). Extra keys are ignored.
+function Rules.cleanOptInReport(payload: any): { shown: boolean, accepted: boolean }?
+	if type(payload) ~= "table" then
+		return nil
+	end
+	local shown = (payload :: any).shown
+	local accepted = (payload :: any).accepted
+	if type(shown) ~= "boolean" or type(accepted) ~= "boolean" then
+		return nil
+	end
+	if accepted and not shown then
+		return nil
+	end
+	return { shown = shown, accepted = accepted }
+end
+
 function Rules.afterPrompt(state: State, now: number): State
 	return {
 		lastSentDay = state.lastSentDay,

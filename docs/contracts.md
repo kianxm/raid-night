@@ -265,6 +265,19 @@ Schema: `src/Shared/Analytics.luau` (pure, tested in `Analytics.spec`). Sender:
 `raided_offline` is logged on the defender when they are in the server that saved the debit,
 otherwise on the raider (`attributedTo = "Raider"`), since a profile no server holds has no Player.
 
+## Notification opt-in remotes (P2.7c, D-059)
+
+`ExperienceNotificationService:PromptOptIn` is client-only, so NotificationService (created even
+when `Flags.notifications` is off, so clients can `WaitForChild` them; inert while off) owns two
+additive remotes in `ReplicatedStorage.Remotes`:
+
+| Remote | Shape | Limit / 10 s | Rules |
+| --- | --- | --- | --- |
+| `Net.Pushes.PromptNotificationOptIn` | RemoteEvent, no payload | | Sent to the raider right after their first successful raid when the 30-day rule allows. At most one pending per player. The client checks `CanPromptOptInAsync`, calls `PromptOptIn`, then reports |
+| `Net.Requests.ReportOptInResult` | RemoteEvent `({ shown: boolean, accepted: boolean })` | 3 | Accepted only while a push is pending for that player (cleared on use or leave). `NotificationRules.cleanOptInReport`: both booleans, `accepted` needs `shown`; malformed is ignored and the prompt stays pending. `shown = true` saves `promptedAt` (30-day clock) and logs `optin_result`; `shown = false` clears the pending prompt, saves nothing |
+
+`optin_prompted` is logged at the push. Nothing new is persisted.
+
 ## Money model
 
 - `stored`: Glow in the den. Accrues lazily. Stealable (25% per raid, capped by what is there).
