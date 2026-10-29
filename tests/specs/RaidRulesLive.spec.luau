@@ -37,6 +37,8 @@ local function grab(overrides: { [string]: any }?): RaidRules.LiveGrab
 		padIndex = 1,
 		carrying = false,
 		isLocked = never,
+		inFlightForOwner = 0,
+		inFlightForPair = 0,
 		distance = 4,
 		now = NOW,
 	}
@@ -51,16 +53,66 @@ local function step(overrides: { [string]: any }?): RaidRules.CarryStep
 		moved = 1,
 		dt = 0.1,
 		walkSpeed = 12,
+		budget = RaidRules.carryStartBudget(),
+		height = 3,
 		insideOwnDen = false,
 		wasInsideDefenderDen = true,
 		insideDefenderDen = true,
+		crossedStreet = false,
 		lockdownActive = false,
 		ownerDistance = nil,
 	}
 	for key, value in overrides or {} do
-		(s :: any)[key] = value
+		(s :: any)[key] = if value == NIL then nil else value
 	end
 	return s
+end
+
+local function outcome(overrides: { [string]: any }?): RaidRules.CarryOutcome
+	return (RaidRules.carryStep(step(overrides)))
+end
+
+local SPEEDS = { -- carry walk speeds at the default base of 16
+	Light = RaidRules.carryWalkSpeed(16, "Light"),
+	Medium = RaidRules.carryWalkSpeed(16, "Medium"),
+	Heavy = RaidRules.carryWalkSpeed(16, "Heavy"),
+	VeryHeavy = RaidRules.carryWalkSpeed(16, "VeryHeavy"),
+}
+
+--[[
+	Samples a carrier on the street every 0.1 s, as RaidService does, from the grab on.
+	`position(t)` is where the client really is (studs along the street). While `seen(t)` is false
+	no update reaches the server, which keeps seeing the last position it got (a freeze). Returns
+	the first outcome that is not "Continue", and when.
+]]
+local function simulate(
+	walkSpeed: number,
+	seconds: number,
+	position: (number) -> number,
+	seen: ((number) -> boolean)?
+): (RaidRules.CarryOutcome, number)
+	local budget = RaidRules.carryStartBudget()
+	local observed, last = 0, 0
+	for tick = 1, math.floor(seconds * 10 + 0.5) do
+		local t = tick / 10
+		if seen == nil or seen(t) then
+			observed = position(t)
+		end
+		local result
+		result, budget = RaidRules.carryStep(step({
+			moved = math.abs(observed - last),
+			walkSpeed = walkSpeed,
+			budget = budget,
+			wasInsideDefenderDen = false,
+			insideDefenderDen = false,
+			crossedStreet = true,
+		}))
+		last = observed
+		if result ~= "Continue" then
+			return result, t
+		end
+	end
+	return "Continue", seconds
 end
 
 local tests = {}
@@ -148,6 +200,34 @@ tests["owners at today's loss cap cannot be robbed; yesterday's losses do not co
 	expect.eq(owner.lossesToday, Config.Limits.maxLossesPerDay, "the check never writes the profile")
 end
 
+tests["steals still in flight count against the owner's loss cap"] = function()
+	local g = grab({ inFlightForOwner = 1 })
+	local owner = g.ownerProfile :: any
+	owner.lossesToday = Config.Limits.maxLossesPerDay - 1
+	local _, reason = RaidRules.canGrabLive(g)
+	expect.eq(reason, Reason.DefenderLossCap, "the last allowed loss is already being carried")
+	g.inFlightForOwner = 0
+	expect.truthy((RaidRules.canGrabLive(g)))
+end
+
+tests["the same-pair daily limit applies to live grabs, in-flight steals included"] = function()
+	local g = grab()
+	local owner = g.ownerProfile :: any
+	owner.pairRaidsToday["1"] = Config.Limits.maxRaidsPerPairPerDay
+	local _, reason = RaidRules.canGrabLive(g)
+	expect.eq(reason, Reason.PairLimit)
+	owner.lossDay = RaidRules.dayIndex(NOW) - 1
+	expect.truthy((RaidRules.canGrabLive(g)), "yesterday's pair count does not count")
+	owner.lossDay = RaidRules.dayIndex(NOW)
+	owner.pairRaidsToday["1"] = Config.Limits.maxRaidsPerPairPerDay - 1
+	expect.truthy((RaidRules.canGrabLive(g)))
+	g.inFlightForPair = 1
+	expect.eq(select(2, RaidRules.canGrabLive(g)), Reason.PairLimit)
+	g.inFlightForPair = 0
+	g.raiderUserId = 3
+	expect.truthy((RaidRules.canGrabLive(g)), "another raider has their own pair count")
+end
+
 tests["grab range is checked on server distance, inclusive, and NaN is refused"] = function()
 	expect.truthy((RaidRules.canGrabLive(grab({ distance = RaidRules.Live.grabRange }))))
 	local _, far = RaidRules.canGrabLive(grab({ distance = RaidRules.Live.grabRange + 0.01 }))
@@ -180,37 +260,106 @@ tests["carry speed follows the critter's weight"] = function()
 	expect.truthy(RaidRules.carryWalkSpeed(16, "Medium") < RaidRules.carryWalkSpeed(16, "Light"))
 end
 
-tests["walking is fine; a teleport is not"] = function()
-	expect.truthy(RaidRules.carryMoveOk(12 * 0.1, 0.1, 12))
-	expect.truthy(RaidRules.carryMoveOk(8, 0.1, 12), "replication jitter is absorbed")
-	expect.falsy(RaidRules.carryMoveOk(20, 0.1, 12), "a 12-stud den gap cannot be skipped")
-	expect.falsy(RaidRules.carryMoveOk(0 / 0, 0.1, 12))
+tests["walking at carry speed passes for a minute at every weight, even with bursty updates"] = function()
+	for weight, v in SPEEDS do
+		local steady = simulate(v, 60, function(t)
+			return v * t
+		end)
+		expect.eq(steady, "Continue", `{weight} steady`)
+		local bursty = simulate(v, 60, function(t)
+			return v * t
+		end, function(t)
+			return math.floor(t * 10 + 0.5) % 4 == 0 -- an update only every 0.4 s
+		end)
+		expect.eq(bursty, "Continue", `{weight} bursty`)
+	end
 end
 
-tests["crossing into your own den is an escape"] = function()
-	expect.eq(RaidRules.carryStep(step({ insideOwnDen = true, insideDefenderDen = false })), "Escape")
+tests["a 1.5x speed hack fails within 2 s at every weight"] = function()
+	for weight, v in SPEEDS do
+		local result, at = simulate(v, 2, function(t)
+			return 1.5 * v * t
+		end)
+		expect.eq(result, "TooFast", weight)
+		expect.truthy(at <= 2, `{weight} lasted {at} s`)
+	end
+end
+
+tests["chained 7-stud hops fail"] = function()
+	local v = SPEEDS.VeryHeavy
+	local result = simulate(v, 3, function(t)
+		return 7 * math.floor(t / 0.3) -- a 7-stud hop every 0.3 s
+	end)
+	expect.eq(result, "TooFast")
+end
+
+tests["a 1 s freeze and its catch-up pass, even right after the grab"] = function()
+	for weight, v in SPEEDS do
+		local result = simulate(v, 4, function(t)
+			return v * t
+		end, function(t)
+			return t < 0.05 or t > 1.05
+		end)
+		expect.eq(result, "Continue", weight)
+	end
+end
+
+tests["a jump bigger than about a second of walking fails, however long you waited"] = function()
+	for weight, v in SPEEDS do
+		local cap = RaidRules.carryBudgetCap(v)
+		expect.near(cap, v * RaidRules.Live.budgetSeconds + RaidRules.Live.budgetSlack, 1e-9)
+		local result = simulate(v, 12, function(t)
+			return if t < 10 then 0 else cap + 0.5 -- stand still 10 s, then teleport
+		end)
+		expect.eq(result, "TooFast", weight)
+	end
+end
+
+tests["flying above maxCarryHeight drops; a jump does not"] = function()
+	expect.eq(outcome({ height = 10 }), "Continue", "a normal jump")
+	expect.eq(outcome({ height = RaidRules.Live.maxCarryHeight }), "Continue")
+	expect.eq(outcome({ height = RaidRules.Live.maxCarryHeight + 0.1 }), "TooHigh")
+	expect.eq(outcome({ height = 0 / 0 }), "TooHigh")
+end
+
+tests["height never dodges a tag: the owner tags on X/Z within tagRange"] = function()
+	expect.eq(outcome({ height = 12, ownerDistance = Live.tagRange }), "Tagged")
+	expect.eq(outcome({ ownerDistance = Live.tagRange + 0.01 }), "Continue")
+end
+
+tests["crossing the street into your own den is an escape"] = function()
+	local street =
+		{ wasInsideDefenderDen = false, insideDefenderDen = false, crossedStreet = true, insideOwnDen = true }
+	expect.eq(outcome(street), "Escape")
+	local _, _, crossed = RaidRules.carryStep(step({ wasInsideDefenderDen = true, insideDefenderDen = false }))
+	expect.truthy(crossed, "a sample outside both dens marks the street as crossed")
+end
+
+tests["a hop from the owner's den straight into yours never escapes"] = function()
+	expect.eq(outcome({ insideDefenderDen = false, insideOwnDen = true, moved = 1 }), "SkippedStreet")
 end
 
 tests["a teleport home is refused before the escape counts"] = function()
-	expect.eq(RaidRules.carryStep(step({ insideOwnDen = true, moved = 60 })), "TooFast")
-end
-
-tests["the owner within tagRange makes the carrier drop"] = function()
-	expect.eq(RaidRules.carryStep(step({ ownerDistance = Live.tagRange })), "Tagged")
-	expect.eq(RaidRules.carryStep(step({ ownerDistance = Live.tagRange + 1 })), "Continue")
+	expect.eq(outcome({ insideDefenderDen = false, insideOwnDen = true, crossedStreet = true, moved = 60 }), "TooFast")
 end
 
 tests["home is safe even with the owner close behind"] = function()
-	expect.eq(RaidRules.carryStep(step({ insideOwnDen = true, ownerDistance = 1 })), "Escape")
+	local home = { insideDefenderDen = false, insideOwnDen = true, crossedStreet = true, ownerDistance = 1 }
+	expect.eq(outcome(home), "Escape")
 end
 
 tests["leaving the den during a Lockdown drops the critter at the border"] = function()
 	local crossing = { wasInsideDefenderDen = true, insideDefenderDen = false }
-	expect.eq(RaidRules.carryStep(step(crossing)), "Continue", "no Lockdown")
+	expect.eq(outcome(crossing), "Continue", "no Lockdown")
 	local locked = { wasInsideDefenderDen = true, insideDefenderDen = false, lockdownActive = true }
-	expect.eq(RaidRules.carryStep(step(locked)), "DropAtBorder")
+	expect.eq(outcome(locked), "DropAtBorder")
 	local alreadyOut = { wasInsideDefenderDen = false, insideDefenderDen = false, lockdownActive = true }
-	expect.eq(RaidRules.carryStep(step(alreadyOut)), "Continue", "already on the street")
+	expect.eq(outcome(alreadyOut), "Continue", "already on the street")
+end
+
+tests["a jump out of a locked den into your own den drops at the border, not escapes"] = function()
+	local hop = { insideDefenderDen = false, insideOwnDen = true, crossedStreet = true, lockdownActive = true }
+	expect.eq(outcome(hop), "DropAtBorder")
 end
 
 -- Lockdown ----------------------------------------------------------------------------------------
