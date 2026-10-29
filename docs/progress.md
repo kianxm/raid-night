@@ -41,6 +41,25 @@ Current phase: 0 → 1 (Phase 0 gate approved, follow-ups done, main promoted; P
 Read `docs/orchestrator-handoff.md` first; it is the current state. Follow the playbook's
 "Context discipline" (section 2).
 
+## P2.1 critter art, pulled ahead of Phase 1 (D-040, paused 2026-10-29)
+
+Prompts: `tools/assets/Prompts.luau` (body plans, named glows, wow ladder, no names or tier words).
+Raw images: `assets/raw/<id>/` (git-ignored; open `assets/raw/index.html`). Every generation and
+note: `assets/generation-log.md`. Higgsfield: 25 credits left; trial ends ~2026-11-01, Kian may
+renew.
+
+- Fronts: all 40 done. Gate 1 picks so far (Kian): snooze_bat front-03 (hovering),
+  midnight_mew front-07 (galaxy body). The rest await Gate 1; my suggested picks are in the log.
+- Wow ladder top tiers, suggested picks: eclipse_wyrm front-04, nebula_owl front-03,
+  storm_hare front-03, king_bandit front-01.
+- Redo list (each about 1 credit): abyss_angler (legless, try an image edit of front-01),
+  lunar_kitsune (three tails, on four legs, image edit), nimbus_lamb, comet_ferret (four legs),
+  crumb_rat and fuzz_owlet (fur), puddle_newt (reads as a frog), lantern_snail (hanger string).
+- 3D: snooze_bat `model.glb` via Tripo multiview (9 credits) is 1.44M triangles. Re-run with
+  `face_limit` about 3000 (9 credits) or decimate in Blender (not installed here).
+- Handoff to `economy`: snooze_bat's `look` in Critters.luau still says "hanging upside down";
+  Prompts.luau overrides it to hovering (Kian).
+
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
 P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
