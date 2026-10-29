@@ -36,6 +36,7 @@
 	                                  raider's DenChanged/Inventory shows the truth when it lands.
 
 	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
+	  Studio only: Raid/TestHook.luau seeds a stand-in den for single-client tests (D-010)
 
 	Server API:
 	  requestGrab(player, plot, padIndex) -> (ok, reason?)  start a server-timed grab hold
@@ -74,6 +75,14 @@ local Lockdown = require(RaidFolder.Lockdown)
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
+
+-- A Studio-only fake den owner (TestHook, decision D-010). Never set in a live server.
+export type StandIn = {
+	userId: number, -- negative, so never a real player
+	profile: PlayerProfile, -- used until DataService holds a profile for userId
+	root: BasePart?, -- where the stand-in owner stands (tags like a real owner)
+	redraw: () -> (), -- draws its pad critters (IncomeService only draws real players' dens)
+}
 
 type Hold = { plot: number, padIndex: number, critterUid: string, startedAt: number }
 type Carry = {
@@ -114,6 +123,7 @@ local carries: { [Player]: Carry } = {}
 local locked: { [string]: { owner: number, raider: number } } = {}
 local prompts: { [BasePart]: ProximityPrompt } = {}
 local windows: { [Player]: { start: number, count: number } } = {}
+local standIns: { [number]: StandIn } = {} -- plot -> stand-in; stays empty outside Studio
 local beingRaided: RemoteEvent
 local raidEnded: RemoteEvent
 local started = false
@@ -174,6 +184,11 @@ end
 
 -- Who owns a den: userId, their loaded profile, and their root part.
 local function ownerOf(plot: number): (number?, PlayerProfile?, BasePart?)
+	local standIn = standIns[plot]
+	if standIn then
+		local root = if standIn.root and standIn.root.Parent then standIn.root else nil
+		return standIn.userId, DataService.getProfile(standIn.userId) or standIn.profile, root
+	end
 	local owner = DenWorldService.getOwner(plot)
 	if not owner then
 		return nil, nil, nil
@@ -181,10 +196,26 @@ local function ownerOf(plot: number): (number?, PlayerProfile?, BasePart?)
 	return owner.UserId, DataService.getProfile(owner.UserId), rootOf(owner)
 end
 
+-- Studio stand-ins only: their escrow may run only while the whole server keeps profiles and
+-- escrow in memory (decision D-019). Real players are never stand-ins.
+local function standInEscrowBlocked(userId: number): boolean
+	for _, standIn in standIns do
+		if standIn.userId == userId then
+			return DataService.persistence() ~= "Memory"
+		end
+	end
+	return false
+end
+
 local function refreshUser(userId: number)
 	local player = Players:GetPlayerByUserId(userId)
 	if player then
 		IncomeService.refresh(player)
+	end
+	for _, standIn in standIns do
+		if standIn.userId == userId then
+			standIn.redraw()
+		end
 	end
 end
 
@@ -425,8 +456,12 @@ local function escape(player: Player, carry: Carry)
 	debugLog(`{player.Name} escaped with {carry.speciesId}; raid {raidId} handed to EscrowService`)
 	task.spawn(function()
 		local status, reason = "InFlight", nil
+		local attempts = #ESCAPE_RETRY_DELAYS + 1
+		if standInEscrowBlocked(defenderUserId) then
+			status, reason, attempts = "Refused", "test escape needs Memory persistence; transferLive not called", 0
+		end
 		local firstCallAt = os.clock()
-		for attempt = 1, #ESCAPE_RETRY_DELAYS + 1 do
+		for attempt = 1, attempts do
 			local ok, s, r =
 				pcall(EscrowService.transferLive, raidId, raiderUserId, defenderUserId, critterUid, LIVE_GLOW, false)
 			status, reason = if ok then s else "InFlight", if ok then r else tostring(s)
@@ -566,6 +601,42 @@ local function syncPrompts()
 	end
 end
 
+-- Studio test hook -------------------------------------------------------------------------------
+
+local function setStandIn(plot: number, standIn: StandIn?)
+	assert(RunService:IsStudio(), "stand-ins are Studio-only")
+	local old = standIns[plot]
+	standIns[plot] = standIn
+	if old and old ~= standIn then
+		for raider, carry in carries do
+			if carry.defenderUserId == old.userId then
+				drop(raider, carry, "stand-in removed")
+			end
+		end
+	end
+end
+
+local function describe(): string
+	local parts = {}
+	for player, hold in holds do
+		table.insert(parts, `{player.Name} holding den {hold.plot} pad {hold.padIndex}`)
+	end
+	for player, carry in carries do
+		table.insert(parts, `{player.Name} carrying {carry.speciesId} from den {carry.plot} pad {carry.padIndex}`)
+	end
+	local lockCount = 0
+	for _ in locked do
+		lockCount += 1
+	end
+	table.insert(parts, `{lockCount} critter lock(s)`)
+	for plot = 1, Plots.Layout.plotCount do
+		if Lockdown.isActive(plot) then
+			table.insert(parts, `den {plot} in Lockdown`)
+		end
+	end
+	return table.concat(parts, "; ")
+end
+
 -- Lifecycle ---------------------------------------------------------------------------------------
 
 -- One failing step must not stop the others or the next frame.
@@ -631,6 +702,15 @@ function RaidService.start()
 			end
 		end
 	)
+	if RunService:IsStudio() then
+		local TestHook = require(RaidFolder.TestHook)
+		TestHook.install({
+			setStandIn = setStandIn,
+			requestGrab = RaidService.requestGrab,
+			isLocked = isLocked,
+			describe = describe,
+		})
+	end
 
 	local carryClock, promptClock = 0, PROMPT_TICK
 	RunService.Heartbeat:Connect(function(dt: number)

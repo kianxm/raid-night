@@ -26,6 +26,7 @@
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Plots = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Plots")) :: any
 
@@ -331,15 +332,9 @@ local function onPlayerAdded(player: Player)
 	end
 end
 
-local function onPlayerRemoving(player: Player)
-	local plot, nextUserId = Plots.release(state, player.UserId)
-	player:SetAttribute("Plot", nil)
-	if not plot then
-		return
-	end
-	fire(released, player, plot)
+-- Empties a released den and hands it to the first waiting player still in the server.
+local function freePlot(plot: number, nextUserId: number?)
 	emptyDen(plot)
-	-- Hand the freed den to the first waiting player still in the server.
 	while nextUserId do
 		local nextPlayer = Players:GetPlayerByUserId(nextUserId)
 		if nextPlayer then
@@ -348,6 +343,16 @@ local function onPlayerRemoving(player: Player)
 		end
 		nextUserId = select(2, Plots.release(state, nextUserId)) -- they left; free it again
 	end
+end
+
+local function onPlayerRemoving(player: Player)
+	local plot, nextUserId = Plots.release(state, player.UserId)
+	player:SetAttribute("Plot", nil)
+	if not plot then
+		return
+	end
+	fire(released, player, plot)
+	freePlot(plot, nextUserId)
 end
 
 function DenWorldService.start()
@@ -399,6 +404,35 @@ end
 
 function DenWorldService.plotAt(position: Vector3): number?
 	return Plots.plotAt(position.X, position.Z)
+end
+
+-- Studio test stand-ins (RaidService's TestHook, decision D-010) --------------------------------
+
+-- Gives a free den to a fake owner so one client has a den to raid. The id must be a reserved
+-- test id (<= -1_000_000): Studio's Local Server players are -1, -2, ... and must never be
+-- matched. Never queues: returns nil when no den is free. Listeners are not called (they expect a
+-- Player), and getOwner(plot) stays nil.
+function DenWorldService.assignStandIn(userId: number, displayName: string): number?
+	assert(RunService:IsStudio(), "stand-in dens are Studio-only")
+	assert(userId <= -1_000_000, "stand-in userIds are reserved test ids (<= -1000000)")
+	assert(Players:GetPlayerByUserId(userId) == nil, "a player has this userId")
+	assert(Plots.plotOf(state, userId) == nil, "this stand-in already has a den")
+	if Plots.freeCount(state) == 0 then
+		return nil
+	end
+	local plot = Plots.assign(state, userId) :: number
+	dens[plot].model:SetAttribute("OwnerUserId", userId)
+	dens[plot].signLabel.Text = `{displayName}'s Den`
+	return plot
+end
+
+function DenWorldService.releaseStandIn(userId: number)
+	assert(RunService:IsStudio(), "stand-in dens are Studio-only")
+	assert(userId <= -1_000_000, "stand-in userIds are reserved test ids (<= -1000000)")
+	local plot, nextUserId = Plots.release(state, userId)
+	if plot then
+		freePlot(plot, nextUserId)
+	end
 end
 
 function DenWorldService.onPlotAssigned(fn: Callback): () -> ()
