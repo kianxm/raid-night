@@ -3,15 +3,17 @@ local expect = require("../lib/expect")
 local fixtures = require("../lib/fixtures")
 local Escrow = require("../../src/Shared/Escrow")
 local Config = require("../../src/Shared/Config")
+local RaidRules = require("../../src/Shared/RaidRules")
+local Types = require("../../src/Shared/Types")
 
 local NOW = 1_800_000_000
 
-local function setup()
+local function setup(kind: Types.TransferKind?)
 	local raider = fixtures.veteran(1, NOW)
 	local defender = fixtures.veteran(2, NOW)
 	fixtures.give(defender, fixtures.critter("fox", "crescent_fox", "Pad", 1))
 	defender.stored = 1000
-	local record = Escrow.create("raid-1", raider.userId, defender.userId, "fox", 250, false, NOW)
+	local record = Escrow.create("raid-1", raider.userId, defender.userId, "fox", 250, false, NOW, kind or "Live")
 	return raider, defender, record
 end
 
@@ -73,12 +75,90 @@ tests["a critter moved to the vault before the debit is safe; Glow is still take
 	expect.eq(defender.lossesToday, 0, "no critter lost")
 end
 
-tests["the loss cap is enforced at debit time, even if a raid slipped through"] = function()
-	local raider, defender, record = setup()
+tests["the async loss cap is enforced at debit time, even if a raid slipped through"] = function()
+	local raider, defender, record = setup("Async")
 	defender.lossesToday = Config.Limits.maxLossesPerDay
 	runAll(raider, defender, record)
 	expect.truthy(defender.critters["fox"], "fox protected by the cap")
 	expect.eq(raider.glow, 250, "Glow still taken")
+	expect.eq(defender.liveLossRateToday, nil, "an async loss is not a live loss")
+end
+
+-- Live loss rules (decision D-031) ----------------------------------------------------------------
+
+tests["a live debit ignores the count cap and values the loss before the critter leaves"] = function()
+	local raider, defender, record = setup("Live")
+	fixtures.give(defender, fixtures.critter("fox2", "crescent_fox", "Pad", 2))
+	fixtures.give(defender, fixtures.critter("fox3", "crescent_fox", "Pad", 3))
+	defender.lossesToday = Config.Limits.maxLossesPerDay
+	runAll(raider, defender, record)
+	expect.truthy(raider.critters["fox"], "the count cap does not stop live steals")
+	expect.eq(defender.lossesToday, Config.Limits.maxLossesPerDay + 1, "still counted")
+	expect.eq(defender.liveLossBaseRate, 75, "three foxes, the stolen one included")
+	expect.eq(defender.liveLossRateToday, 25)
+	Escrow.debitDefender(defender, record, NOW + 5)
+	expect.eq(defender.liveLossRateToday, 25, "a repeated debit records nothing more")
+end
+
+tests["a live debit takes nothing from a protected den; the Glow still moves"] = function()
+	local raider, defender, record = setup("Live")
+	defender.liveLossBaseRate, defender.liveLossRateToday = 100, 50
+	expect.truthy(RaidRules.liveProtected(defender, NOW))
+	runAll(raider, defender, record)
+	expect.truthy(defender.critters["fox"], "fox protected for the rest of the day")
+	expect.eq(raider.critters["fox"], nil)
+	expect.eq(raider.glow, 250, "Glow still taken")
+	expect.eq(defender.liveLossRateToday, 50, "nothing more lost")
+	expect.eq(record.state, "Committed", "the raid still settles")
+end
+
+tests["the live debit that crosses the threshold lands; the next one takes nothing"] = function()
+	local raider, defender, record = setup("Live")
+	fixtures.give(defender, fixtures.critter("fox2", "crescent_fox", "Pad", 2))
+	runAll(raider, defender, record) -- 25 of a 50 base: exactly the share
+	expect.truthy(raider.critters["fox"], "the crossing steal lands")
+	expect.truthy(RaidRules.liveProtected(defender, NOW))
+	local second = Escrow.create("raid-2", raider.userId, defender.userId, "fox2", 0, false, NOW + 60, "Live")
+	runAll(raider, defender, second)
+	expect.truthy(defender.critters["fox2"], "nothing after it")
+	expect.eq(raider.critters["fox2"], nil)
+end
+
+tests["yesterday's protection does not stop today's live debit"] = function()
+	local raider, defender, record = setup("Live")
+	defender.lossDay = RaidRules.dayIndex(NOW) - 1
+	defender.liveLossBaseRate, defender.liveLossRateToday = 100, 90
+	runAll(raider, defender, record)
+	expect.truthy(raider.critters["fox"])
+	expect.eq(defender.liveLossBaseRate, 25, "a new day measures a new base")
+end
+
+tests["a record without a kind is Live"] = function()
+	local raider, defender, record = setup("Live")
+	record.kind = nil -- written before the field existed
+	expect.eq(Escrow.kindOf(record), "Live")
+	expect.eq(Escrow.kindOf(select(3, setup("Async"))), "Async")
+	defender.lossesToday = Config.Limits.maxLossesPerDay
+	runAll(raider, defender, record)
+	expect.truthy(raider.critters["fox"], "the live rule applies, not the count cap")
+	expect.eq(defender.liveLossRateToday, 25)
+end
+
+tests["a record's kind is written once"] = function()
+	local _, _, record = setup("Live")
+	expect.throws(function()
+		Escrow.create("raid-x", 1, 2, nil, 0, false, NOW, "Trade" :: any)
+	end, "unknown kind")
+	local async = table.clone(record)
+	async.kind = "Async"
+	expect.falsy(Escrow.sameTransfer(record, async), "another kind is another transfer")
+	expect.falsy(Escrow.canReplace(record, async))
+	local missing = table.clone(record)
+	missing.kind = nil
+	expect.truthy(Escrow.sameTransfer(record, missing), "missing means Live: a retry still matches")
+	expect.falsy(Escrow.canReplace(missing, record), "the store never fills in a missing kind")
+	expect.falsy(Escrow.canReplace(record, missing), "nor drops one")
+	expect.truthy(Escrow.canReplace(missing, table.clone(missing)), "an old record still moves forward")
 end
 
 tests["Glow taken never exceeds what is stored"] = function()

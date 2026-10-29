@@ -21,6 +21,10 @@
 	     defender's appliedTransfers entry until recovery copies it to the record.
 	  2. Glow is conserved: Glow taken from a defender equals Glow given to the raider.
 	  3. Repeating any step, any number of times, changes nothing after the first success.
+	  4. Daily loss limits hold at the debit, by the record's kind (decision D-031). Live: nothing
+	     is taken from a den already protected (RaidRules.liveProtected), so the steal that
+	     crosses the line is the last. Async: nothing once the defender lost maxLossesPerDay
+	     critters that day.
 
 	Transport today (Phase 0; server layer, not this module):
 	  - Only same-server live transfers exist. EscrowService.transferLive runs `advance` with both
@@ -35,8 +39,8 @@
 	debits. A debit delivered by ProfileStore message, or applied to an offline profile, can land
 	after recovery voided the record, stranding the loot. Before adding either, make the void
 	something a later debit must see and refuse (for example a tombstone entry on the defender,
-	written inside the void proof save; see EscrowService saveProfileWithoutEntry), and give
-	EscrowRecord a `kind` (it has none, so recovery cannot tell live from async).
+	written inside the void proof save; see EscrowService saveProfileWithoutEntry). Recovery can
+	tell live from async by `Escrow.kindOf(record)` (D-031).
 ]]
 
 local Types = require("./Types")
@@ -48,6 +52,7 @@ type EscrowRecord = Types.EscrowRecord
 type AppliedTransfer = Types.AppliedTransfer
 type Critter = Types.Critter
 type EscrowOpenIndex = Types.EscrowOpenIndex
+type TransferKind = Types.TransferKind
 
 local Escrow = {}
 
@@ -69,6 +74,7 @@ local function cloneCritter(critter: Critter): Critter
 	return table.clone(critter)
 end
 
+-- `kind` is required: it picks the debit's daily loss rule, so no caller may leave it to chance.
 function Escrow.create(
 	raidId: string,
 	raiderUserId: number,
@@ -76,10 +82,12 @@ function Escrow.create(
 	critterUid: string?,
 	glowRequested: number,
 	isRevenge: boolean,
-	now: number
+	now: number,
+	kind: TransferKind
 ): EscrowRecord
 	assert(raiderUserId ~= defenderUserId, "Escrow.create: raider and defender must differ")
 	assert(glowRequested >= 0, "Escrow.create: glowRequested must be >= 0")
+	assert(kind == "Live" or kind == "Async", `Escrow.create: unknown kind {kind}`)
 	return {
 		raidId = raidId,
 		raiderUserId = raiderUserId,
@@ -92,14 +100,23 @@ function Escrow.create(
 		isRevenge = isRevenge,
 		createdAt = now,
 		updatedAt = now,
+		kind = kind,
 	}
 end
 
+-- A record's kind. Missing means "Live": every record written before the field existed is a
+-- Phase 0 live steal (decision D-031).
+function Escrow.kindOf(record: EscrowRecord): TransferKind
+	return record.kind or "Live"
+end
+
 --[[
-	Step 1, on the DEFENDER's profile. Takes the grabbed critter (if it is still on a pad and the
-	defender is under the daily loss cap) and up to `glowRequested` from storage. Records the
-	defender-side consequences (shield, revenge token, log). Idempotent: a repeat returns the
-	first result unchanged.
+	Step 1, on the DEFENDER's profile. Takes the grabbed critter if it is still on a pad and the
+	den's daily loss rule allows it (decision D-031): a Live record takes nothing from a den that
+	is protected for the day (RaidRules.liveProtected), an Async record nothing once the defender
+	is at Config.Limits.maxLossesPerDay. Takes up to `glowRequested` from storage either way.
+	Records the defender-side consequences (live loss value, shield, revenge token, log).
+	Idempotent: a repeat returns the first result unchanged.
 ]]
 function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now: number): AppliedTransfer
 	assert(defender.userId == record.defenderUserId, "debitDefender: wrong profile")
@@ -112,13 +129,20 @@ function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now
 
 	RaidRules.resetDailyIfNeeded(defender, now)
 
+	local live = Escrow.kindOf(record) == "Live"
 	local taken: Critter? = nil
 	if record.critterUid then
 		local critter = defender.critters[record.critterUid]
-		local underLossCap = defender.lossesToday < Config.Limits.maxLossesPerDay
+		local mayLose = if live
+			then not RaidRules.liveProtected(defender, now)
+			else defender.lossesToday < Config.Limits.maxLossesPerDay
 		-- The critter may have moved to the vault, been sold, or been stolen by a concurrent raid
-		-- since the snapshot. In those cases the raid still succeeds, with Glow only.
-		if critter and critter.placement == "Pad" and underLossCap then
+		-- since the snapshot, or the den may be at its daily limit. In those cases the raid still
+		-- succeeds, with Glow only.
+		if critter and critter.placement == "Pad" and mayLose then
+			if live then
+				RaidRules.recordLiveLoss(defender, critter, now) -- while it is still in the den
+			end
 			taken = cloneCritter(critter)
 			defender.critters[record.critterUid] = nil
 		end
@@ -254,7 +278,8 @@ function Escrow.canStartTransfer(flags: KillSwitches, kind: string, isRevenge: b
 	return true, nil
 end
 
--- Whether two records describe the same transfer (same raid, parties, request and revenge).
+-- Whether two records describe the same transfer (same raid, parties, request, revenge and kind;
+-- a missing kind is "Live").
 function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
 	return a.raidId == b.raidId
 		and a.raiderUserId == b.raiderUserId
@@ -262,6 +287,7 @@ function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
 		and a.critterUid == b.critterUid
 		and a.glowRequested == b.glowRequested
 		and a.isRevenge == b.isRevenge
+		and Escrow.kindOf(a) == Escrow.kindOf(b)
 end
 
 local FORWARD: { [string]: { [string]: true } } = {
@@ -289,6 +315,9 @@ function Escrow.canReplace(stored: EscrowRecord?, incoming: EscrowRecord): (bool
 	end
 	if stored.createNonce ~= incoming.createNonce then
 		return false, "the creating call's nonce never changes"
+	end
+	if stored.kind ~= incoming.kind then
+		return false, "a record's kind never changes" -- not even filling in a missing one
 	end
 	local allowed = FORWARD[stored.state]
 	if not allowed or not allowed[incoming.state] then
