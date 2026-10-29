@@ -3,6 +3,11 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-016 · 2026-10-28 · DenState.eggCost deferred to the Phase 2 UI pass
+Context: economy proposed adding eggCost to Net.DenState so the HUD stops mirroring the rescue
+rule. Decision: defer to P2.5. The client copy is display-only and matches the server after
+P0.4b; a three-lane contract change is not worth it for the Phase 0 gate. Reversible: yes.
+
 ### D-015 · 2026-10-28 · Phase 0 live steals take the critter only
 Decision: transferLive glowRequested = 0 for live steals in Phase 0; stored Glow is only taken by
 async raids (Phase 1). Why: simplest loop for the "is stealing fun" gate. Reversible: yes.
