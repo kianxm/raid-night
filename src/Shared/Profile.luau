@@ -107,6 +107,28 @@ function Profile.isTestUserId(userId: number): boolean
 	return type(userId) == "number" and userId % 1 == 0 and userId <= Profile.TEST_USER_ID_MAX
 end
 
+local function isFinite(value: any): boolean
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+end
+
+--[[
+	Marks the raid log seen at `now`: the server's clock (os.time()), never a client value.
+	Forward only: a `now` that is not a finite number, or is earlier than the stored time, is
+	ignored. A stored value that is not finite counts as never seen (0), so a bad save cannot pin
+	it. The field is optional (missing = never), so it needs no migration. Returns whether it wrote.
+]]
+function Profile.markRaidLogSeen(profile: PlayerProfile, now: number): boolean
+	if not isFinite(now) then
+		return false
+	end
+	local stored = profile.raidLogSeenAt
+	if now < (if isFinite(stored) then stored :: number else 0) then
+		return false
+	end
+	profile.raidLogSeenAt = now
+	return true
+end
+
 --[[
 	Whether a critter may leave its owner by trade or gift. Any trading or gifting code must
 	refuse a critter this returns false for (the reviewer checks). Raids are not trades: escrow
