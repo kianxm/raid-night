@@ -20,6 +20,7 @@ type RaidLogEntry = Types.RaidLogEntry
 type Trap = Types.Trap
 type TrapKind = Types.TrapKind
 type Mutation = Types.Mutation
+type AppliedTransfer = Types.AppliedTransfer
 
 local DAY = 86400
 
@@ -56,6 +57,7 @@ RaidRules.Reason = table.freeze({
 	NoSnapshot = "NoSnapshot", -- no snapshot saved, or it could not be read
 	Blocked = "Blocked", -- one of the two blocked the other
 	DefenderOnline = "DefenderOnline", -- the owner is online: raided live, never async (D-043)
+	PresenceUnknown = "PresenceUnknown", -- the presence read failed: they may be online (fail closed)
 	Locked = "Locked", -- another raider holds the defender's raid lock
 	NoPocket = "NoPocket", -- no free pocket den in this server
 	TimeUp = "TimeUp", -- the raid timer has run out
@@ -973,6 +975,48 @@ function RaidRules.canGrabAsync(
 		end
 	end
 	return false, RaidRules.Reason.NotInSnapshot, nil
+end
+
+export type EscapeOutcome = {
+	escaped: boolean, -- loot (a critter or Glow) is in the raider's profile
+	pending: boolean, -- escrow is still delivering (InFlight): it lands on its own, never voided
+	speciesId: string?, -- what moved, or what is on its way; on a refusal, what was carried
+	glow: number, -- Glow credited; the estimate while pending; 0 when refused
+	shieldUntil: number, -- the defender's new shield for the matchmaking pool; 0 = none
+}
+
+--[[
+	What an async escape's EscrowService.transferAsync result means for the raider (P1.3b).
+	`credit` is the raider profile's appliedTransfers entry for the raid, read after the call:
+	the real outcome, never the snapshot. The escrow debit may land Glow only (the critter left
+	its pad, or the den hit its daily loss cap) or nothing. An Async debit always records the
+	defender's shield, revenge token and log (Escrow.debitDefender), so Committed and InFlight
+	both shield the den. "Refused" (or anything else) moved nothing.
+]]
+function RaidRules.asyncEscapeOutcome(
+	status: string,
+	credit: AppliedTransfer?,
+	carriedSpeciesId: string,
+	glowEstimate: number,
+	now: number
+): EscapeOutcome
+	local shield = now + Config.Shield.afterSuccessfulRaidSeconds
+	local estimate = if glowEstimate == glowEstimate then math.max(0, math.floor(glowEstimate)) else 0
+	if status == "Committed" and credit and credit.role == "Credit" then
+		local speciesId = if credit.critter then credit.critter.speciesId else nil
+		return {
+			escaped = speciesId ~= nil or credit.glow > 0,
+			pending = false,
+			speciesId = speciesId,
+			glow = credit.glow,
+			shieldUntil = shield,
+		}
+	elseif status == "Committed" or status == "InFlight" then
+		-- Committed without a readable credit (the raider's profile just left): it is there, so
+		-- say it is on its way; DenChanged and the inventory show the truth.
+		return { escaped = false, pending = true, speciesId = carriedSpeciesId, glow = estimate, shieldUntil = shield }
+	end
+	return { escaped = false, pending = false, speciesId = carriedSpeciesId, glow = 0, shieldUntil = 0 }
 end
 
 -- When the player last opened their raid log (unix seconds); 0 = never or an old save (D-005).

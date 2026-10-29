@@ -373,6 +373,48 @@ The last three are Kian's launch values, tuned in Phase 3 from live data (P3.9).
 - Duration and cooldown are enforced server-side from the server's own state. The client only
   asks; `LockdownUntil` and `LockdownReadyAt` below are for display.
 
+## Async raids
+
+Raids on an offline den, rebuilt from its snapshot in a pocket den far off-map in the raider's
+own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async raids").
+
+- `Net.Requests.StartRaid` `(targetUserId, revengeRaidId?) -> RaidStart?` (nil = refused),
+  `Net.Limits.StartRaid` per 10 s and one call at a time. The server re-checks everything the
+  target list did, from the snapshot: `Escrow.canStartTransfer(Config.Flags, "Async", isRevenge)`,
+  blocks both ways, the owner not online (a player here, or presence younger than
+  `RaidRules.Pocket.presenceFreshSeconds`: raided live instead), `RaidRules.canRaid`, at least one
+  Pad critter. A revenge id must be a token in the raider's own profile against that target.
+  Then it takes the defender's raid lock, released on every end.
+- `RaidStart`: `raidId`, `targetUserId`, `endsAt` (server time, `workspace:GetServerTimeNow()`,
+  start + `Config.Raid.durationSeconds`), `gatePosition` (Vector3), `critters`
+  (`{ PocketCritter }`: uid, speciesId, mutation, padIndex, position; Pad critters only),
+  `isRevenge`. Nothing in it carries Glow or the owner's block list.
+- `Net.Requests.GrabCritter` (RemoteEvent `(raidId, critterUid)`, `Net.Limits.GrabCritter`), or the
+  pocket pad's prompt. The server checks the timer, one carry at a time, that the uid is a Pad
+  critter of the raid's own snapshot copy that the pocket laid out, and range from the server
+  root part to the server pad (`Config.LiveRaid.grabRange`). Vault critters are never in a
+  snapshot, so never stealable.
+- Carry speed is `RaidRules.carryWalkSpeed`, times any trap slow. Too fast (movement budget) or
+  too high while carrying, or a Trapdoor, puts the critter back on its pad; the raid goes on.
+- `Net.Pushes.RaidEnded` ends every async raid, with `reason`: `"Escaped"` (gate while carrying;
+  `escaped` is true only once the loot has moved), `"Timeout"`, `"Tagged"` (a guard),
+  `"Retreat"` (gate with nothing), `"Left"`, `"Error"`. The raider is sent back to their den.
+  For `"Escaped"` the push comes once escrow answers (`RaidRules.asyncEscapeOutcome`, P1.3b):
+  - `escaped = true`: the loot is in the raider's profile. `speciesId` and `glow` are what was
+    credited (the raider's `appliedTransfers` entry), never the snapshot's figure. `speciesId` is
+    nil when only Glow moved (the critter had left its pad, or the den hit its daily loss cap).
+  - `pending = true` (additive, optional): escrow is still delivering, usually because the owner
+    is online in another server. It lands on its own and never voids; `speciesId` and `glow` are
+    the carried critter and the estimate. Show "on its way"; DenChanged shows the truth.
+  - `escaped = false` and no `pending`: nothing moved (Refused). `speciesId` is what was carried,
+    `glow` is 0.
+- `Net.Requests.GetRaidLog` `() -> { RaidLogEntry }`: the player's own log, newest first.
+- Raid code never writes a profile. An escape goes to `RaidService.onAsyncEscape`, which calls
+  `EscrowService.transferAsync` (Async kind). The escrow debit writes the defender's shield,
+  revenge token, pair count and Incoming log entry (`RaidRules.recordIncoming`).
+- StartRaid fails closed when the owner's presence cannot be read (`PresenceUnknown`), and also
+  honours, until the den's next snapshot, the shield of an escape this server just completed.
+
 ## Replays
 
 Raid replays (`src/Shared/Replay.luau`, pure; `src/Server/Raid/ReplayStore.luau`). A replay never
@@ -412,36 +454,6 @@ defenderUserId, startedAt, data }`), limited by `Net.Limits.GetReplay` (3 per 10
 at a time per player. Only the raider and the defender named in the stored record (written by the
 server from its own raid state) get it; anything else, including a missing, expired or unsaved
 replay, returns nil. The client decodes `data` with `Replay.decode`.
-
-## Async raids
-
-Raids on an offline den, rebuilt from its snapshot in a pocket den far off-map in the raider's
-own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async raids").
-
-- `Net.Requests.StartRaid` `(targetUserId, revengeRaidId?) -> RaidStart?` (nil = refused),
-  `Net.Limits.StartRaid` per 10 s and one call at a time. The server re-checks everything the
-  target list did, from the snapshot: `Escrow.canStartTransfer(Config.Flags, "Async", isRevenge)`,
-  blocks both ways, the owner not online (a player here, or presence younger than
-  `RaidRules.Pocket.presenceFreshSeconds`: raided live instead), `RaidRules.canRaid`, at least one
-  Pad critter. A revenge id must be a token in the raider's own profile against that target.
-  Then it takes the defender's raid lock, released on every end.
-- `RaidStart`: `raidId`, `targetUserId`, `endsAt` (server time, `workspace:GetServerTimeNow()`,
-  start + `Config.Raid.durationSeconds`), `gatePosition` (Vector3), `critters`
-  (`{ PocketCritter }`: uid, speciesId, mutation, padIndex, position; Pad critters only),
-  `isRevenge`. Nothing in it carries Glow or the owner's block list.
-- `Net.Requests.GrabCritter` (RemoteEvent `(raidId, critterUid)`, `Net.Limits.GrabCritter`), or the
-  pocket pad's prompt. The server checks the timer, one carry at a time, that the uid is a Pad
-  critter of the raid's own snapshot copy that the pocket laid out, and range from the server
-  root part to the server pad (`Config.LiveRaid.grabRange`). Vault critters are never in a
-  snapshot, so never stealable.
-- Carry speed is `RaidRules.carryWalkSpeed`, times any trap slow. Too fast (movement budget) or
-  too high while carrying, or a Trapdoor, puts the critter back on its pad; the raid goes on.
-- `Net.Pushes.RaidEnded` ends every async raid, with `reason`: `"Escaped"` (gate while carrying;
-  `escaped` is true only once the loot has moved), `"Timeout"`, `"Tagged"` (a guard),
-  `"Retreat"` (gate with nothing), `"Left"`, `"Error"`. The raider is sent back to their den.
-- `Net.Requests.GetRaidLog` `() -> { RaidLogEntry }`: the player's own log, newest first.
-- Raid code never writes a profile. An escape goes to `RaidService.onAsyncEscape`, which hands it
-  to EscrowService (P1.3b; until then nothing moves).
 
 ## Live loss rules
 

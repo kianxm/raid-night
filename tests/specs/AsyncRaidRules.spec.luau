@@ -255,4 +255,56 @@ tests["raidLogSeenAt: an old save without it reads as never"] = function()
 	expect.eq(RaidRules.raidLogSeenAt(old), NOW - 5)
 end
 
+tests["asyncEscapeOutcome: Committed reports what the raider's credit holds, never the estimate"] = function()
+	local shield = NOW + Config.Shield.afterSuccessfulRaidSeconds
+	local both = RaidRules.asyncEscapeOutcome("Committed", {
+		role = "Credit",
+		at = NOW,
+		critter = fixtures.critter("pad1", "crescent_fox", "Inventory"),
+		glow = 37,
+	}, "crescent_fox", 250, NOW)
+	expect.eq(both.escaped, true)
+	expect.eq(both.pending, false)
+	expect.eq(both.speciesId, "crescent_fox")
+	expect.eq(both.glow, 37, "the Glow actually credited, not the snapshot's 250")
+	expect.eq(both.shieldUntil, shield)
+
+	local glowOnly =
+		RaidRules.asyncEscapeOutcome("Committed", { role = "Credit", at = NOW, glow = 12 }, "crescent_fox", 250, NOW)
+	expect.eq(glowOnly.escaped, true, "Glow alone still counts as loot")
+	expect.eq(glowOnly.speciesId, nil, "the critter had left its pad or the den hit its loss cap")
+
+	local empty =
+		RaidRules.asyncEscapeOutcome("Committed", { role = "Credit", at = NOW, glow = 0 }, "crescent_fox", 250, NOW)
+	expect.eq(empty.escaped, false, "nothing moved")
+	expect.eq(empty.pending, false)
+	expect.eq(empty.shieldUntil, shield, "an Async debit always shields the den")
+
+	local debit =
+		RaidRules.asyncEscapeOutcome("Committed", { role = "Debit", at = NOW, glow = 5 }, "crescent_fox", 9, NOW)
+	expect.eq(debit.escaped, false, "a Debit entry is never read as the raider's credit")
+	expect.eq(debit.pending, true)
+end
+
+tests["asyncEscapeOutcome: InFlight is on its way; Refused moved nothing"] = function()
+	local flight = RaidRules.asyncEscapeOutcome("InFlight", nil, "dusk_mouse", 80.7, NOW)
+	expect.eq(flight.escaped, false)
+	expect.eq(flight.pending, true)
+	expect.eq(flight.speciesId, "dusk_mouse")
+	expect.eq(flight.glow, 80, "the estimate, floored")
+	expect.eq(flight.shieldUntil, NOW + Config.Shield.afterSuccessfulRaidSeconds, "Async records are never voided")
+	expect.eq(RaidRules.asyncEscapeOutcome("InFlight", nil, "dusk_mouse", 0 / 0, NOW).glow, 0)
+	expect.eq(RaidRules.asyncEscapeOutcome("InFlight", nil, "dusk_mouse", -4, NOW).glow, 0)
+
+	for _, status in { "Refused", "Weird" } do
+		local refused =
+			RaidRules.asyncEscapeOutcome(status, { role = "Credit", at = NOW, glow = 9 }, "dusk_mouse", 80, NOW)
+		expect.eq(refused.escaped, false, status)
+		expect.eq(refused.pending, false, status)
+		expect.eq(refused.glow, 0, status)
+		expect.eq(refused.speciesId, "dusk_mouse", "what was carried")
+		expect.eq(refused.shieldUntil, 0, "no shield: nothing landed")
+	end
+end
+
 return tests
