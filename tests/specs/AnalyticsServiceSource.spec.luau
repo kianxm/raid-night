@@ -162,6 +162,17 @@ tests["DataService logs onboarding_step only after an onboarding advance wrote"]
 		string.find(trackOnboarding, 'AnalyticsService%.track%(userId, "onboarding_step", fields%)'),
 		"fire-and-forget"
 	)
+	-- Never throws into advanceOnboarding: its callers act on the result after the write
+	-- (IncomeService.grantTutorialCritter's once-only claim), so all of it runs in pcall.
+	local guarded = string.find(trackOnboarding, "local ok, err = pcall%(function%(%)")
+	local events = string.find(trackOnboarding, "Analytics%.onboardingStepEvents%(")
+	local tracked = string.find(trackOnboarding, "AnalyticsService%.track%(")
+	local closed = string.find(trackOnboarding, "\n\tend%)\n\tif not ok then")
+	expect.truthy(guarded and events and tracked and closed, "guarded: found")
+	expect.truthy(
+		(guarded :: number) < (events :: number) and (tracked :: number) < (closed :: number),
+		"the step count, the events and every track call run inside the pcall"
+	)
 	for _, banned in { "task%.wait", "task%.delay", "saveNow", ":Wait%(" } do
 		expect.falsy(string.find(trackOnboarding, banned), `never yields ({banned})`)
 	end

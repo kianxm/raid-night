@@ -499,11 +499,18 @@ end
 -- onboarding_step (P2.9b): after an advance wrote, one event per step it completed (`before` is
 -- Profile.onboardingStep read just before it), with the seconds since the account's first join at
 -- the advance's `now`. Only ever called after a write, which happens once per step (forward only),
--- so each step logs once. Never yields or throws: AnalyticsService.track is fire-and-forget.
+-- so each step logs once. Never yields, and never throws: everything runs inside pcall, because
+-- callers act on advanceOnboarding's result after the write (IncomeService.grantTutorialCritter
+-- spends its once-only claim on it), so an analytics error must never cut that short.
 local function trackOnboarding(userId: number, profile: PlayerProfile, before: number, now: number)
-	local after = Profile.onboardingStep(profile)
-	for _, fields in Analytics.onboardingStepEvents(before, after, profile.createdAt, now) do
-		AnalyticsService.track(userId, "onboarding_step", fields)
+	local ok, err = pcall(function()
+		local after = Profile.onboardingStep(profile)
+		for _, fields in Analytics.onboardingStepEvents(before, after, profile.createdAt, now) do
+			AnalyticsService.track(userId, "onboarding_step", fields)
+		end
+	end)
+	if not ok then
+		warn(`[DataService] onboarding_step for {userId} failed: {err}`)
 	end
 end
 
