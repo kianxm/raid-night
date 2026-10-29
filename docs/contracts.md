@@ -218,7 +218,10 @@ Tiers up to it keep their `Config.EggOdds` ratios, renormalized to sum to 1
 Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table (from
 P0.4b) and ignores `eggMaxTier` (decision D-004).
 
-Glow is earn-only at launch (D-028): no product may grant Glow for Robux. Glow buys eggs, so
+Glow is earn-only at launch (D-028): no product may grant Glow for Robux. The "Lantern Night"
+server boost (D-029) multiplies Glow earned in play (+50% for everyone in the server, 15 min);
+it never grants Glow directly, and it needs a reviewer policy audit and PolicyService checks
+before it ships (does a Robux-bought earning boost make Glow eggs paid random items?). Glow buys eggs, so
 Glow packs would make every egg a paid random item; they ship only in the Phase 2
 paid-randomness mini-phase with on-screen odds, PolicyService region checks and a reviewer
 audit. Egg odds are shown on screen for every egg from Phase 0, from Economy's odds helpers
