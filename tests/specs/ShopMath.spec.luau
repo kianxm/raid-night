@@ -30,4 +30,33 @@ tests["upgrade handles max level, poor and rich"] = function()
 	expect.truthy(ShopMath.upgrade(50, 50).enabled, "affordable")
 end
 
+tests["robux row with id 0 is not available"] = function()
+	expect.eq(ShopMath.robux(0, 99).available, false, "zero")
+	expect.eq(ShopMath.robux(-3, 99).available, false, "negative")
+	expect.eq(ShopMath.robux(1.5, 99).available, false, "fraction")
+	expect.eq(ShopMath.robux("7", 99).available, false, "string")
+	expect.truthy(ShopMath.robux(123, 99).available, "real id")
+	expect.eq(ShopMath.robux(123, 99).price, 99, "price")
+end
+
+tests["gear row: buy, upgrade, need, max"] = function()
+	expect.eq(ShopMath.gear(0, 100, 50, false).label, "buy", "buy")
+	expect.eq(ShopMath.gear(2, 100, 50, false).label, "upgrade", "upgrade")
+	local need = ShopMath.gear(1, 10.2, 50, false)
+	expect.eq(need.label, "need", "need")
+	expect.eq(need.missing, 40, "missing")
+	expect.eq(need.enabled, false, "disabled")
+	expect.eq(ShopMath.gear(5, 1e9, nil, true).label, "max", "max")
+	expect.eq(ShopMath.gear(0, 1e9, nil, false).label, "off", "off")
+end
+
+tests["lantern claims a boost only on literal true"] = function()
+	expect.eq(ShopMath.lantern({ buyerName = "Ana", boosted = true }).boosted, true, "boosted")
+	expect.eq(ShopMath.lantern({ buyerName = "Ana", boosted = false }).boosted, false, "not")
+	expect.eq(ShopMath.lantern({ buyerName = "Ana", boosted = "yes" }).boosted, false, "truthy string")
+	expect.eq(ShopMath.lantern({ buyerName = "Ana" }).boosted, false, "missing")
+	expect.eq(ShopMath.lantern({ boosted = true }), nil, "no name")
+	expect.eq(ShopMath.lantern(5), nil, "not a table")
+end
+
 return tests

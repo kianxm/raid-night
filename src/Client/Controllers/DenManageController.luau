@@ -186,7 +186,10 @@ function DenManageController.start()
 				local bagCount = InventoryMath.count(state.critters, "Inventory")
 				counts.Text = table.concat({
 					Strings.format(Strings.denPads, { used = tostring(used), total = tostring(usable) }),
-					Strings.format(Strings.denVault, { used = tostring(#vault) }),
+					Strings.format(
+						Strings.denVault,
+						{ used = tostring(#vault), total = tostring(state.vaultSlots or 1) }
+					),
 					Strings.format(Strings.denBag, { n = tostring(bagCount) }),
 				}, "   ")
 				Ui.setButton(toVault, Strings.denToVault, Ui.COLOR.gold, selected ~= nil)
