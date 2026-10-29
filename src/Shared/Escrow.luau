@@ -33,8 +33,9 @@
 	TODO (P1.1, async raids; decision D-012): the void rule assumes only the creating call
 	debits. A debit delivered by ProfileStore message, or applied to an offline profile, can land
 	after recovery voided the record, stranding the loot. Before adding either, make the void
-	something a later debit must see and refuse (for example a tombstone entry on the defender),
-	and give EscrowRecord a `kind` (it has none, so recovery cannot tell live from async).
+	something a later debit must see and refuse (for example a tombstone entry on the defender,
+	written inside the void proof save; see EscrowService saveProfileWithoutEntry), and give
+	EscrowRecord a `kind` (it has none, so recovery cannot tell live from async).
 ]]
 
 local Types = require("./Types")

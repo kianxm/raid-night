@@ -19,7 +19,9 @@
 
 	Live raids happen between two online players and are driven by Escrow.advance (the call that
 	creates the record, recognised by its createNonce even on a retried create); every later path
-	is Escrow.recover, which never debits afresh.
+	is Escrow.recover, which never debits afresh. A same-server retry of a live call left in
+	flight keeps the first call's createNonce (EscrowService), so it too drives with advance,
+	sometimes after a sweep's recovery already settled or voided the raid.
 
 	Storage behaves like DataStore: every load returns a copy, and nothing persists until saved,
 	so a crash loses unsaved work exactly as a real server would. The record store enforces the
@@ -59,6 +61,7 @@ local VAULT_MOVE_CHANCE = 0.1
 local CONCURRENT_CHANCE = 0.1
 local LEAVE_CHANCE = 0.1 -- per party, after a transfer that did not finish
 local STALE_CHANCE = 0.3 -- per drive: a stale server tries to recover the raid first
+local RETRY_CHANCE = 0.5 -- per live call left in flight: the caller retries it with the same nonce
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -222,6 +225,7 @@ local function runSimulation(seed: number)
 	local retention = Config.Escrow.appliedTransferRetentionSeconds
 	local protected = 0
 	local staleRefused = 0
+	local retried = 0
 
 	local function online(userId: number): boolean
 		return world.now >= world.awayUntil[userId]
@@ -406,6 +410,18 @@ local function runSimulation(seed: number)
 				if rng.chance(STALE_CHANCE) then
 					staleDrive(raidId)
 				end
+				if not Escrow.isTerminal(world.records[raidId]) and rng.chance(RETRY_CHANCE) then
+					-- transferLive returned InFlight and the caller retries with identical arguments.
+					-- The server kept this call's createNonce, so the retry is still the creating
+					-- call and drives with advance. A sweep's recovery may run first.
+					if rng.chance(0.5) then
+						drive(raidId, false)
+					end
+					local _, ours = Escrow.decideCreate(world.records[raidId], record)
+					expect.truthy(ours, `{raidId}: a retry with the kept nonce is the creating call`)
+					drive(raidId, true)
+					retried += 1
+				end
 				if rng.chance(DUPLICATE_CHANCE) then
 					-- The same work delivered twice, either path. A retried create (its first response
 					-- lost) must still be recognised as this call's own.
@@ -470,19 +486,20 @@ local function runSimulation(seed: number)
 	for userId = 1, PLAYERS do
 		expect.eq(next(world.index[userId]), nil, `open index of {userId} not empty`)
 	end
-	return committed, voided, protected, staleRefused
+	return committed, voided, protected, staleRefused, retried
 end
 
 local tests = {}
 
 tests["1,000 raids with crashes, duplicates, races and long absences never duplicate or lose anything"] = function()
-	local committed, voided, protected, staleRefused = runSimulation(1)
+	local committed, voided, protected, staleRefused, retried = runSimulation(1)
 	expect.truthy(committed >= RAIDS * 0.8, `expected most escrows to commit, got {committed}`)
 	expect.truthy(voided > 0, "the void path was exercised")
 	-- Without this the simulation would not prove that pruning skips open raids.
 	expect.truthy(protected > 0, "a join met an open raid's entry older than the retention window")
 	-- Without this it would not prove the void proof stops a stale server.
 	expect.truthy(staleRefused > 0, "a stale server met a Pending record whose debit was saved")
+	expect.truthy(retried > 0, "a live call left in flight was retried with its kept nonce")
 end
 
 tests["the same holds across 5 more random seeds"] = function()

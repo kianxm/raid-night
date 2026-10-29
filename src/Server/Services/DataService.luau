@@ -14,8 +14,9 @@
 	  leave  EndSession, only for the session that leaving Player owns: onProfileReleasing
 	         listeners run, then the final save, then the lock is released.
 	If another server takes the lock outright (its release request unanswered for ~40 s, or no
-	save for 630 s), changes since the last save are dropped and OnLastSave never fires (decision
-	0003): anything that must be durable confirms a save with saveNow first.
+	save for 630 s), changes since the last save are dropped (decision 0003). OnLastSave never
+	fires if our next save is an autosave; if it is the release on leave, listeners run but their
+	write is dropped too. Anything that must be durable confirms a save with saveNow first.
 	  close  ProfileStore's own BindToClose saves and releases every session (reason "Shutdown")
 	         and holds the server open until those saves finish. Listeners run first, as on leave.
 	If a profile cannot load, or the lock is lost mid-session, the player is kicked with a clear
@@ -31,8 +32,22 @@
 	                          not a rollback: the change stays in the live profile and still saves
 	                          on the next autosave or on leave, unless the server dies first.
 	                          Never call it from code a player's load waits on.
-	  persistence()          "DataStore", "Memory" (Studio without API access) or nil (checking)
+	  persistence()          "DataStore", "Memory" (Studio without API access, or the Studio memory
+	                          switch below) or nil (checking)
 	  sendMessage             Phase 1, errors until then
+	  loadTestProfile(userId, profile), releaseTestProfile(userId), guardTestRelease(guard)
+	                          Studio-only fake profiles for RaidService's single-client test hook
+	                          (decision D-019), memory persistence only. See the section at the end.
+
+	Studio memory switch (D-019). To play in Studio with API access on but save NOTHING, set a
+	boolean attribute on ServerStorage before pressing Play (Properties, or the command bar in
+	Edit mode):
+	    game:GetService("ServerStorage"):SetAttribute("StudioMemoryProfiles", true)
+	start() reads it once. When true, every profile loads from ProfileStore's mock store
+	(store.Mock, in memory, a fresh template each Play), persistence() is "Memory", and so
+	EscrowService keeps its records in memory too. Nothing is read from or written to the profiles
+	DataStore. Missing or false: normal behavior. Outside Studio it is never read. Set it back to
+	false (or delete it) to test real saves again.
 
 	TODO (Phase 1, async core):
 	  [ ] Message handler: apply incoming escrow debits (Escrow.debitDefender) inside this session
@@ -45,6 +60,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local ServerStorage = game:GetService("ServerStorage")
 
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore) :: any
 local Profile = require(ReplicatedStorage.Shared.Profile)
@@ -69,6 +86,9 @@ local MESSAGE_UNSAFE_SAVE = "Your save needs a newer server or could not be read
 	.. "It was not changed. Please rejoin."
 local MESSAGE_SESSION_LOST = "Your save was opened in another server. Please rejoin to keep playing."
 
+-- Studio-only memory switch (decision D-019). Read once, in start(), and only in Studio.
+local MEMORY_SWITCH = "StudioMemoryProfiles"
+
 local DataService = {}
 
 -- A loaded session and the Player object it was loaded for. Removal ends a session only if it
@@ -81,6 +101,9 @@ local loadedListeners: { (Player, PlayerProfile) -> () } = {}
 local releasingListeners: { (number, PlayerProfile) -> () } = {}
 local leaving: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any -- weak: no leak
 local handled: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any -- loading or loaded
+local testProfiles: { [number]: PlayerProfile } = {} -- Studio only (D-019); never saved
+local testReleaseGuard: ((userId: number) -> string?)? = nil -- set by EscrowService
+local memoryOnly = false -- Studio memory switch on: every profile is in ProfileStore's mock store
 local closing = false
 
 local function keyFor(userId: number): string
@@ -193,7 +216,14 @@ local function onPlayerRemoving(player: Player)
 end
 
 function DataService.start()
-	store = ProfileStore.New(STORE_NAME, Profile.new(0, 0))
+	-- `IsStudio() and`: a live server never reads the switch, whatever the place file holds.
+	memoryOnly = RunService:IsStudio() and ServerStorage:GetAttribute(MEMORY_SWITCH) == true
+	local profileStore = ProfileStore.New(STORE_NAME, Profile.new(0, 0))
+	-- The mock drops StartSessionAsync's params (Cancel); its loads never wait on another server.
+	store = if memoryOnly then profileStore.Mock else profileStore
+	if memoryOnly then
+		warn(`[DataService] Studio memory switch ({MEMORY_SWITCH}) is on: profiles are mock, nothing saves`)
+	end
 
 	ProfileStore.OnError:Connect(function(message: string, storeName: string, key: string)
 		warn(`[DataService] ProfileStore error ({storeName}/{key}): {message}`)
@@ -220,8 +250,13 @@ end
 
 -- Returns the live profile for an online player in THIS server, or nil (not loaded yet, failed,
 -- or left). Mutations to the returned table are saved. Never cache it across a yield without
--- calling getProfile again: the session can end while you wait.
+-- calling getProfile again: the session can end while you wait. Also returns a Studio test
+-- profile (loadTestProfile), which is never saved.
 function DataService.getProfile(userId: number): PlayerProfile?
+	local test = testProfiles[userId]
+	if test then
+		return test
+	end
 	local entry = sessions[userId]
 	if entry and entry.session:IsActive() then
 		return entry.session.Data
@@ -246,9 +281,10 @@ function DataService.onProfileLoaded(fn: (Player, PlayerProfile) -> ()): () -> (
 	end
 end
 
--- Calls fn(userId, profile) right before a profile's final save (leave, shutdown, or another
--- server taking the lock). Last chance to write, e.g. a final accrue. Must not yield: anything
--- after a yield misses the save. Returns a function that disconnects.
+-- Calls fn(userId, profile) right before a profile's final save (leave or shutdown; also when a
+-- Studio test profile is released). Last chance to write, e.g. a final accrue. Must not yield:
+-- anything after a yield misses the save. Not called when another server took the lock and our
+-- next save is an autosave (decision 0003). Returns a function that disconnects.
 function DataService.onProfileReleasing(fn: (number, PlayerProfile) -> ()): () -> ()
 	table.insert(releasingListeners, fn)
 	return function()
@@ -307,6 +343,16 @@ end
 -- example an onProfileLoaded listener, which runs on its own thread) and never from the loading
 -- code itself.
 function DataService.saveNow(userId: number, confirm: (savedData: any) -> boolean): (boolean, string?)
+	local test = testProfiles[userId]
+	if test then
+		-- A test profile has nowhere to save: its live table is all there is, and no other server
+		-- can hold it. So it counts as saved once the live data passes confirm, decided at once.
+		local ok, passed = pcall(confirm, deepCopy(test))
+		if ok and passed then
+			return true, nil
+		end
+		return false, `test profile {userId}: confirm failed`
+	end
 	local backoff = SAVE_NOW_FIRST_BACKOFF_SECONDS
 	for attempt = 1, SAVE_NOW_ATTEMPTS do
 		local entry = sessions[userId]
@@ -328,10 +374,13 @@ function DataService.saveNow(userId: number, confirm: (savedData: any) -> boolea
 	return false, `no confirmed save for {userId} after {SAVE_NOW_ATTEMPTS} attempts`
 end
 
--- Where saves go: "DataStore", "Memory" (Studio without API access; ProfileStore keeps profiles
--- in memory for this session only), or nil while ProfileStore is still checking access.
--- Services that keep their own records next to profiles must use the same mode.
+-- Where saves go: "DataStore", "Memory" (Studio without API access, or the Studio memory switch;
+-- profiles live in memory for this session only), or nil while ProfileStore is still checking
+-- access. Services that keep their own records next to profiles must use the same mode.
 function DataService.persistence(): ("DataStore" | "Memory")?
+	if memoryOnly then
+		return "Memory"
+	end
 	local state = ProfileStore.DataStoreState
 	if state == "Access" then
 		return "DataStore"
@@ -345,6 +394,73 @@ end
 -- queue). Errors until implemented so no caller mistakes a no-op for a delivered transfer.
 function DataService.sendMessage(_userId: number, _message: { [string]: any })
 	error("DataService.sendMessage is not implemented until Phase 1 (async raids)")
+end
+
+--[[
+	Studio test profiles (decision D-019), for RaidService's single-client test hook (D-010).
+
+	Allowed ONLY in Studio with memory persistence (the memory switch above, or no API access):
+	then every profile and escrow record in the server lives in memory, so a test profile can
+	never be mixed with a saved one (a real profile credited by an escrow that only memory knew).
+
+	loadTestProfile(userId, profile) adopts `profile` BY REFERENCE: Profile.prepare runs on it in
+	place, and getProfile(userId) returns that same table. Errors outside Studio, unless
+	persistence() is "Memory", and for an id outside Profile.isTestUserId (<= -1,000,000), so a
+	real player or a Local Server test player can never be faked. Returns false (and why) if the
+	id is in use by a player, a session or another test profile. Fires no onProfileLoaded
+	listeners (there is no Player). Kept in its own table, so no leave or session end touches it.
+	saveNow on it is decided at once (above): there is nowhere to save and no other server.
+
+	releaseTestProfile(userId) is a leave: getProfile returns nil, then onProfileReleasing
+	listeners run. Returns false (and why) while an escrow for that id is still open here
+	(EscrowService's guard), so no raid is ever left needing a profile that is gone.
+]]
+function DataService.loadTestProfile(userId: number, profile: PlayerProfile): (boolean, string?)
+	if not RunService:IsStudio() then
+		error("DataService.loadTestProfile is Studio-only")
+	end
+	if DataService.persistence() ~= "Memory" then
+		error(`DataService.loadTestProfile needs memory persistence: set ServerStorage.{MEMORY_SWITCH} before Play`)
+	end
+	if not Profile.isTestUserId(userId) then
+		error(`DataService.loadTestProfile: test ids are whole numbers <= {Profile.TEST_USER_ID_MAX}, not {userId}`)
+	end
+	local current = testProfiles[userId]
+	if current then
+		return current == profile, if current == profile then nil else `{userId} already has a test profile`
+	end
+	if sessions[userId] or Players:GetPlayerByUserId(userId) then
+		return false, `{userId} is a player in this server`
+	end
+	local ok, err = pcall(Profile.prepare, profile, userId, os.time())
+	if not ok then
+		return false, `test profile {userId} refused: {err}`
+	end
+	testProfiles[userId] = profile
+	print(`[DataService] loaded test profile {userId} (memory only, never saved)`)
+	return true, nil
+end
+
+function DataService.releaseTestProfile(userId: number): (boolean, string?)
+	local profile = testProfiles[userId]
+	if profile == nil then
+		return true, nil -- nothing held
+	end
+	local why = if testReleaseGuard then testReleaseGuard(userId) else nil
+	if why then
+		warn(`[DataService] test profile {userId} kept: {why}`)
+		return false, why
+	end
+	testProfiles[userId] = nil
+	runReleasing(userId, profile)
+	print(`[DataService] released test profile {userId}`)
+	return true, nil
+end
+
+-- EscrowService only: guard(userId) returns why a test profile must stay (an escrow for it is
+-- still open here), or nil. DataService cannot require EscrowService (it requires DataService).
+function DataService.guardTestRelease(guard: (userId: number) -> string?)
+	testReleaseGuard = guard
 end
 
 return DataService

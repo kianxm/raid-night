@@ -7,9 +7,9 @@
 	  - Switches stop NEW transfers only. Records already in Pending or Debited always finish.
 ]]
 
-local fs = require("@lune/fs")
 local expect = require("../lib/expect")
 local fixtures = require("../lib/fixtures")
+local source = require("../lib/source")
 local Types = require("../../src/Shared/Types")
 local Escrow = require("../../src/Shared/Escrow")
 
@@ -138,26 +138,8 @@ tests["recovery finishes records crashed at every stage with every switch off"] 
 	expect.eq(profiles[1].glow - raider.glow, 300, "raider got each raid's Glow exactly once")
 end
 
--- Strips comments so the guard looks at code only.
-local function codeOnly(source: string): string
-	source = string.gsub(source, "%-%-%[(=*)%[.-%]%1%]", "")
-	source = string.gsub(source, "%-%-[^\n]*", "")
-	return source
-end
-
--- Reads a repo file by its path from the repo root, found from this spec's own location (not
--- the working directory), so the guard checks the right file wherever `lune run` starts.
-local function readRepoFile(relative: string): string
-	local here = debug.info(1, "s")
-	local root = string.match(here, "^(.*)[/\\]tests[/\\]specs[/\\][^/\\]+$")
-	assert(root, `cannot find the repo root from this spec's path "{here}"`)
-	local path = `{root}/{relative}`
-	assert(fs.isFile(path), `guarded source file missing: {path}`)
-	return fs.readFile(path)
-end
-
 tests["EscrowService reads Config.Flags only inside canStartTransfer"] = function()
-	local code = codeOnly(readRepoFile("src/Server/Services/EscrowService.luau"))
+	local code = source.codeOnly(source.read("src/Server/Services/EscrowService.luau"))
 	local first, last = string.find(code, "function EscrowService%.canStartTransfer.-\nend\n")
 	expect.truthy(first and last, "canStartTransfer found")
 	local inside = string.sub(code, first :: number, last :: number)
