@@ -16,7 +16,7 @@
 	lockAfterRelease), so two servers can never both hold a defender. A lost release waits out the TTL.
 
 	Presence: hash map `Presence`, key = userId, value { jobId, placeId, at }, written on load and
-	every Config.Matchmaking.presenceRefreshSeconds, TTL PRESENCE_TTL_SECONDS. Not removed on leave:
+	every Config.Matchmaking.presenceRefreshSeconds, TTL Matchmaking.presenceTtlSeconds. Not removed on leave:
 	a server hop rewrites it from the new server, and a quit expires within the TTL.
 
 	Budget: after any MemoryStore error, calls back off (1 s doubling to 60 s). During a backoff,
@@ -30,6 +30,26 @@
 	    first. Blocked both ways: the raider's reported list and each target's snapshot list.
 	  ReportBlocked (RemoteEvent) ({ number }). Net.Limits.ReportBlocked; Matchmaking.cleanBlockList
 	    or ignored.
+	  JoinRevengeServer (RemoteFunction) (revengeRaidId) -> Net.RevengeJoinStatus. Live revenge,
+	    P1.9: Net.Limits.JoinRevengeServer, one at a time, one teleport in flight per player.
+	  RevengeJoinStatus (RemoteEvent push): a teleport that failed after "Teleporting", or arrival.
+
+	Live revenge (P1.9). Never spends a token: it is spent only when a revenge raid starts.
+	  Ask     The token must be in the caller's own profile (Matchmaking.liveRevengeToken: unexpired,
+	          live pair limit not reached), Config.Flags.raids and asyncRaids on (via
+	          Escrow.canStartTransfer "Live", isRevenge), and no block either way (session report,
+	          else the last snapshot's list; unreadable refuses). Raider in this server: land now.
+	          Else presence (Matchmaking.presenceRoute) -> TeleportService:TeleportAsync with
+	          TeleportOptions.ServerInstanceId and teleport data naming only the token id.
+	  Fail    No presence, server full or gone, teleport error: "Failed" with a reason; the token
+	          is untouched, so the UI offers the async revenge raid instead.
+	  Arrive  Teleport data is a hint only (clients can forge it): after the profile loads, the
+	          landing server runs the same checks on the arriving player's own profile and needs
+	          the raider in THIS server with a den. Then the character lands on the street in
+	          front of that den (Matchmaking.revengeLanding, outside it, so a Lockdown still blocks
+	          entry, D-013) and the revenge is active in server memory.
+	  Use     getLiveRevenge(player) re-checks all of it (no yield) on every call. RaidService runs
+	          the raid itself: Lockdown and the live loss rules apply unchanged.
 
 	Server API:
 	  acquireLock(defenderUserId, raiderUserId, raidId) -> (boolean, reason?)
@@ -38,6 +58,8 @@
 	  noteRaided(defenderUserId, power, at, shieldUntil)  after an async debit, so the pool stops
 	      offering the shielded den (P1.3)
 	  getPresence(userId) -> { jobId: string, placeId: number, at: number }?   (P1.9)
+	  getLiveRevenge(player) -> { raidId: string, targetUserId: number }?   the live revenge this
+	      player may use in this server now, re-verified; nil = none. Never spends the token.
 	Studio only: ServerStorage.MatchmakingTestHook, see the end of this file.
 ]]
 
@@ -47,30 +69,39 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
+local TeleportService = game:GetService("TeleportService")
 local UserService = game:GetService("UserService")
 
 local Shared = ReplicatedStorage.Shared
 local Config = require(Shared.Config)
 local CritterCatalog = require(Shared.CritterCatalog)
+local Escrow = require(Shared.Escrow)
 local Matchmaking = require(Shared.Matchmaking)
 local Net = require(Shared.Net)
+local Plots = require(Shared.Plots)
 local Profile = require(Shared.Profile)
 local Types = require(Shared.Types)
 local DataService = require(script.Parent.DataService) :: any
+local DenWorldService = require(script.Parent.DenWorldService) :: any
 local SnapshotService = require(script.Parent.SnapshotService)
 
 type DenSnapshot = Types.DenSnapshot
 type MatchEntry = Types.MatchEntry
 type PlayerProfile = Types.PlayerProfile
 type RaidTarget = Net.RaidTarget
-type Presence = { jobId: string, placeId: number, at: number }
+type Presence = Matchmaking.Presence
+type RevengeToken = Types.RevengeToken
+type Status = Net.RevengeJoinStatus
+type Revenge = { raidId: string, targetUserId: number }
 
 local LIMIT_WINDOW_SECONDS = 10
 local POOL_READ_COUNT = 20 -- items per band per read; a read costs one request unit per item
 local POOL_CACHE_SECONDS = 60
 local MAX_BACKOFF_SECONDS = 60
 local RELEASED_TTL_SECONDS = 10
-local PRESENCE_TTL_SECONDS = math.floor(Config.Matchmaking.presenceRefreshSeconds * 2.5)
+local PRESENCE_CACHE_SECONDS = 15 -- raiderOnline on Raid Portal revenge rows
+local PENDING_SECONDS = 30 -- one teleport in flight per player; TeleportInitFailed clears it sooner
+local ARRIVAL_WAIT_SECONDS = 20 -- how long an arriving revenge raider's character may take
 local MAX_BLOCK_PASSES = 3 -- re-picks after a target turns out to block the raider
 local MAX_NAMES = 2000
 
@@ -86,6 +117,14 @@ local names: { [number]: string } = {}
 local nameCount = 0
 local windows: { [Player]: { [string]: { start: number, count: number } } } = {}
 local busy: { [Player]: true } = {}
+local joining: { [Player]: true } = {}
+local pending: { [Player]: { untilClock: number, raidId: string, targetUserId: number } } = {}
+local active: { [Player]: Revenge } = {} -- live revenges landed in this server (re-verified on use)
+local hints: { [Player]: string } = {} -- a teleport data hint, held until the profile loads
+local presenceCache: { [number]: { at: number, value: Presence? } } = {}
+local presenceCount = 0
+local testDens: { [number]: number } = {} -- Studio hook only: stand-in den owner -> plot
+local statusPush: RemoteEvent? = nil
 
 -- Storage --------------------------------------------------------------------------------------
 
@@ -268,6 +307,34 @@ local function readBand(band: number): { MatchEntry }
 	return entries
 end
 
+-- The plot of `userId`'s den in this server: a player here with a loaded profile and a den.
+local function denPlot(userId: number): number?
+	local target = Players:GetPlayerByUserId(userId)
+	if target then
+		return if DataService.getProfile(userId) then DenWorldService.getPlot(target) else nil
+	end
+	return testDens[userId]
+end
+
+-- Revenge rows: is the raider online here or in a server we can join? Presence cached briefly.
+local function seenOnline(userId: number): boolean
+	if denPlot(userId) then
+		return true
+	end
+	local hit = presenceCache[userId]
+	if not hit or os.clock() - hit.at >= PRESENCE_CACHE_SECONDS then
+		if presenceCount > MAX_NAMES then
+			presenceCache, presenceCount = {}, 0
+		end
+		local fresh = { at = os.clock(), value = MatchmakingService.getPresence(userId) }
+		presenceCache[userId] = fresh
+		presenceCount += 1
+		hit = fresh
+	end
+	local value = if hit then hit.value else nil
+	return Matchmaking.presenceRoute(value, game.JobId, game.PlaceId, os.time()) == "Teleport"
+end
+
 -- Targets ----------------------------------------------------------------------------------------
 
 local function fillNames(rows: { RaidTarget })
@@ -351,6 +418,11 @@ local function computeTargets(userId: number): { RaidTarget }
 		end
 		if not refused then
 			break
+		end
+	end
+	for _, row in rows do
+		if row.isRevenge then
+			row.raiderOnline = seenOnline(row.userId)
 		end
 	end
 	fillNames(rows)
@@ -438,7 +510,7 @@ end
 local function writePresence(userId: number)
 	if listable(userId) then
 		local value = { jobId = game.JobId, placeId = game.PlaceId, at = os.time() }
-		mapSet("Presence", false, tostring(userId), value, PRESENCE_TTL_SECONDS, nil)
+		mapSet("Presence", false, tostring(userId), value, Matchmaking.presenceTtlSeconds, nil)
 	end
 end
 
@@ -460,6 +532,187 @@ function MatchmakingService.getPresence(userId: number): Presence?
 	return nil
 end
 
+-- Live revenge (P1.9) ------------------------------------------------------------------------------
+
+local function failed(raidId: any, reason: string, targetUserId: number?): Status
+	local id = if type(raidId) == "string" and #raidId <= Config.Escrow.maxRaidIdLength then raidId else ""
+	return { state = "Failed", revengeRaidId = id, targetUserId = targetUserId, reason = reason }
+end
+
+local function push(player: Player, status: Status)
+	if statusPush and player.Parent then
+		statusPush:FireClient(player, status)
+	end
+end
+
+-- Does `userId`'s block list name `other`? Their session report, else (only when `mayYield`) their
+-- last snapshot's list. nil = cannot tell. No report and `mayYield` false: no new block known.
+local function listBlocks(userId: number, other: number, mayYield: boolean): boolean?
+	local list = SnapshotService.blockedBy(userId)
+	if list then
+		return table.find(list, other) ~= nil
+	elseif not mayYield then
+		return false
+	end
+	local snapshot = SnapshotService.get(userId)
+	if snapshot == nil then
+		return nil
+	end
+	return snapshot ~= false and Matchmaking.snapshotBlocks(snapshot, other)
+end
+
+-- Everything a live revenge needs, read now: the gate, the token in the player's OWN profile (never
+-- teleport data) and no block either way. Returns the token, or nil and a reason.
+local function check(player: Player, raidId: any, skipAsyncGate: boolean, mayYield: boolean): (RevengeToken?, string?)
+	local flags: Escrow.KillSwitches = if skipAsyncGate
+		then { raids = Config.Flags.raids, asyncRaids = true }
+		else Config.Flags
+	if not Escrow.canStartTransfer(flags, "Live", true) then
+		return nil, "SwitchedOff"
+	end
+	local profile: PlayerProfile? = DataService.getProfile(player.UserId)
+	if profile == nil then
+		return nil, "Busy"
+	end
+	local token, why = Matchmaking.liveRevengeToken(profile, raidId, {}, os.time())
+	if token == nil then
+		return nil, why
+	end
+	local target = token.targetUserId
+	local mine = listBlocks(player.UserId, target, mayYield)
+	local theirs = listBlocks(target, player.UserId, mayYield)
+	if mine == nil or theirs == nil then
+		return nil, "Busy"
+	end
+	profile = DataService.getProfile(player.UserId) -- re-read after a yield
+	if profile == nil then
+		return nil, "Busy"
+	end
+	local blocked = if mine or theirs then { [target] = true } else {}
+	return Matchmaking.liveRevengeToken(profile, raidId, blocked, os.time())
+end
+
+-- Puts the player on the street in front of the raider's den here, facing it, and marks the
+-- revenge active. Never inside the den, so a Lockdown still blocks entry (D-013).
+local function land(player: Player, token: RevengeToken): Status
+	local plot = denPlot(token.targetUserId)
+	local character = player.Character
+	if plot == nil then
+		return failed(token.raidId, "RaiderOffline", token.targetUserId)
+	elseif not (character and character:FindFirstChild("HumanoidRootPart")) then
+		return failed(token.raidId, "Busy", token.targetUserId)
+	end
+	local x, z = Matchmaking.revengeLanding(plot)
+	local cx, cz = Plots.center(plot)
+	local y = DenWorldService.getSpawnCFrame(plot).Position.Y
+	character:PivotTo(CFrame.lookAt(Vector3.new(x, y, z), Vector3.new(cx, y, cz)))
+	active[player] = { raidId = token.raidId, targetUserId = token.targetUserId }
+	return { state = "Arrived", revengeRaidId = token.raidId, targetUserId = token.targetUserId }
+end
+
+local function join(player: Player, raidId: any, skipAsyncGate: boolean): Status
+	local inFlight = pending[player]
+	if inFlight and os.clock() < inFlight.untilClock then
+		return failed(raidId, "Busy", inFlight.targetUserId)
+	end
+	local token, why = check(player, raidId, skipAsyncGate, true)
+	if token == nil then
+		return failed(raidId, why or "Invalid", nil)
+	end
+	local target = token.targetUserId
+	if denPlot(target) then
+		return land(player, token)
+	end
+	local presence = MatchmakingService.getPresence(target)
+	if presence == nil or Matchmaking.presenceRoute(presence, game.JobId, game.PlaceId, os.time()) ~= "Teleport" then
+		return failed(token.raidId, "RaiderOffline", target)
+	end
+	token, why = check(player, raidId, skipAsyncGate, false) -- re-read after the presence read
+	if token == nil or token.targetUserId ~= target then
+		return failed(raidId, why or "NoToken", nil)
+	end
+	local options = Instance.new("TeleportOptions")
+	options.ServerInstanceId = presence.jobId
+	options:SetTeleportData(Matchmaking.revengeTeleportData(token.raidId))
+	pending[player] = { untilClock = os.clock() + PENDING_SECONDS, raidId = token.raidId, targetUserId = target }
+	local ok, err = pcall(function(): any
+		return TeleportService:TeleportAsync(presence.placeId, { player }, options)
+	end)
+	if not ok then
+		pending[player] = nil
+		warn(`[MatchmakingService] revenge teleport for {player.UserId} failed: {err}`)
+		return failed(token.raidId, "TeleportFailed", target)
+	end
+	return { state = "Teleporting", revengeRaidId = token.raidId, targetUserId = target }
+end
+
+-- The landing server's side. `raidId` came from teleport data, so everything is checked again.
+local function arrive(player: Player, raidId: string, skipAsyncGate: boolean): Status
+	local deadline = os.clock() + ARRIVAL_WAIT_SECONDS
+	while player.Parent and os.clock() < deadline do
+		local character = player.Character
+		if character and character:FindFirstChild("HumanoidRootPart") then
+			task.wait(0.2) -- lets DenWorldService's own spawn move into the home den run first
+			break
+		end
+		task.wait(0.2)
+	end
+	local token, why = check(player, raidId, skipAsyncGate, true)
+	if token == nil then
+		return failed(raidId, why or "Invalid", nil)
+	end
+	return land(player, token)
+end
+
+local function liveRevengeOf(player: Player, skipAsyncGate: boolean): Revenge?
+	local entry = active[player]
+	if entry == nil then
+		return nil
+	end
+	local token = check(player, entry.raidId, skipAsyncGate, false)
+	if token == nil or token.targetUserId ~= entry.targetUserId or denPlot(entry.targetUserId) == nil then
+		return nil
+	end
+	return { raidId = entry.raidId, targetUserId = entry.targetUserId }
+end
+
+function MatchmakingService.getLiveRevenge(player: Player): Revenge?
+	return liveRevengeOf(player, false)
+end
+
+local function onJoinRevenge(player: Player, raidId: any): Status
+	if not allow(player, "JoinRevengeServer") or joining[player] then
+		return failed(raidId, "Busy", nil)
+	end
+	joining[player] = true
+	local ok, status = pcall(join, player, raidId, false)
+	joining[player] = nil
+	if not ok then
+		warn(`[MatchmakingService] JoinRevengeServer for {player.UserId} failed: {status}`)
+		return failed(raidId, "Busy", nil)
+	end
+	return status
+end
+
+local function readHint(player: Player)
+	local ok, data = pcall(function(): any
+		return player:GetJoinData()
+	end)
+	local hint = if ok and type(data) == "table" then Matchmaking.readRevengeHint(data.TeleportData) else nil
+	if hint then
+		hints[player] = hint
+	end
+end
+
+local function onArrival(player: Player)
+	local hint = hints[player]
+	hints[player] = nil
+	if hint then
+		local ok, status = pcall(arrive, player, hint, false)
+		push(player, if ok then status else failed(hint, "Busy", nil))
+	end
+end
+
 -- Studio test hook (D-019) -----------------------------------------------------------------------
 --[[
 	Studio + Memory persistence only (set ServerStorage.StudioMemoryProfiles = true before Play).
@@ -472,10 +725,34 @@ end
 	  hook:Invoke("unblock")
 	  hook:Invoke("lock")     acquire/contend/release a lock on -1000101
 	  hook:Invoke("presence") your presence row
-	  hook:Invoke("clear")    remove both test dens and the revenge token
+	  hook:Invoke("clear")    remove both test dens and the revenge tokens
+	Live revenge (P1.9), against RaidTestHook's stand-in den (-1000001); these skip only the
+	asyncRaids gate:
+	  hook:Invoke("revenge", plot)  a live revenge token vs the stand-in; plot = RaidTestHook seed's
+	  hook:Invoke("join", "here" | "away" | "offline")  JoinRevengeServer as you: stand-in here
+	                          (you land), in another server (the teleport fails in Studio), or gone
+	  hook:Invoke("arrive", raidId?)  the landing server's re-check with that teleport hint
+	                          (default the real token; any other id is a forged hint)
+	  hook:Invoke("live")     getLiveRevenge for you
 ]]
 local TEST_TARGET, TEST_REVENGE, TEST_RAID = -1_000_101, -1_000_102, "studio-revenge"
+local TEST_STAND_IN, TEST_LIVE = -1_000_001, "studio-live-revenge"
 local seeded: { [number]: PlayerProfile } = {}
+local testPlot: number? = nil
+
+local function describe(player: Player, me: PlayerProfile, status: Status): string
+	local kept = me.revengeTokens[TEST_LIVE] ~= nil
+	return `{status.state} {status.reason or ""}; token kept {kept}; active {active[player] ~= nil}`
+end
+
+local function setTestPresence(jobId: string?)
+	if jobId == nil then
+		mapRemove("Presence", false, tostring(TEST_STAND_IN))
+	else
+		local row = { jobId = jobId, placeId = game.PlaceId, at = os.time() }
+		mapSet("Presence", false, tostring(TEST_STAND_IN), row, Matchmaking.presenceTtlSeconds, nil)
+	end
+end
 
 local function testDen(userId: number, power: number): PlayerProfile
 	local now = os.time()
@@ -549,7 +826,39 @@ local function hook(command: string, arg: any): string
 	elseif command == "presence" then
 		local row = MatchmakingService.getPresence(player.UserId)
 		return if row then `{row.jobId} place {row.placeId} at {row.at}` else "none"
+	elseif command == "revenge" then
+		if type(arg) ~= "number" or arg < 1 or arg > Plots.Layout.plotCount or arg % 1 ~= 0 then
+			return "pass the stand-in den's plot (RaidTestHook seed returns it)"
+		end
+		testPlot = arg
+		me.revengeTokens[TEST_LIVE] = {
+			raidId = TEST_LIVE,
+			targetUserId = TEST_STAND_IN,
+			expiresAt = os.time() + Config.Revenge.windowSeconds,
+			shieldBypassUsed = false,
+		}
+		return `token {TEST_LIVE} vs {TEST_STAND_IN} on plot {arg}`
+	elseif command == "join" then
+		local where = if arg == "away" or arg == "offline" then arg else "here"
+		testDens[TEST_STAND_IN] = if where == "here" then testPlot else nil
+		setTestPresence(
+			if where == "offline" then nil elseif where == "away" then "studio-other-server" else game.JobId
+		)
+		active[player], pending[player] = nil, nil
+		return describe(player, me, join(player, TEST_LIVE, true))
+	elseif command == "arrive" then
+		testDens[TEST_STAND_IN] = testPlot
+		active[player] = nil
+		local status = arrive(player, if type(arg) == "string" then arg else TEST_LIVE, true)
+		push(player, status)
+		return describe(player, me, status)
+	elseif command == "live" then
+		local live = liveRevengeOf(player, true)
+		return if live then `active vs {live.targetUserId} ({live.raidId})` else "none"
 	elseif command == "clear" then
+		me.revengeTokens[TEST_LIVE] = nil
+		testDens[TEST_STAND_IN], testPlot, active[player] = nil, nil, nil
+		setTestPresence(nil)
 		me.revengeTokens[TEST_RAID] = nil
 		SnapshotService.setBlocked(player.UserId, {})
 		for userId, den in seeded do
@@ -587,15 +896,40 @@ function MatchmakingService.start()
 		end
 	end)
 	report.Parent = remotes
+	local joinRemote = Instance.new("RemoteFunction")
+	joinRemote.Name = Net.Requests.JoinRevengeServer
+	joinRemote.OnServerInvoke = onJoinRevenge
+	joinRemote.Parent = remotes
+	local status = Instance.new("RemoteEvent")
+	status.Name = Net.Pushes.RevengeJoinStatus
+	status.Parent = remotes
+	statusPush = status
+
+	TeleportService.TeleportInitFailed:Connect(function(player: Player, result: Enum.TeleportResult)
+		local inFlight = pending[player]
+		if inFlight then
+			pending[player] = nil
+			push(player, failed(inFlight.raidId, Matchmaking.teleportFailReason(result.Name), inFlight.targetUserId))
+		end
+	end)
+	-- Join hints first: onProfileLoaded below also runs at once for profiles already loaded.
+	Players.PlayerAdded:Connect(readHint)
+	for _, player in Players:GetPlayers() do
+		readHint(player)
+	end
 
 	SnapshotService.onSaved(publish)
 	DataService.onProfileLoaded(function(player: Player, profile: PlayerProfile)
 		writePresence(player.UserId)
 		withdraw(player.UserId, Matchmaking.denPower(profile))
+		if hints[player] then
+			task.spawn(onArrival, player)
+		end
 	end)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		windows[player] = nil
 		busy[player] = nil
+		joining[player], pending[player], active[player], hints[player] = nil, nil, nil, nil
 	end)
 	task.spawn(function()
 		while true do

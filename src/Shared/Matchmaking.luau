@@ -6,6 +6,11 @@
 	targets, it reads every band the raider's power window touches (`bandsToRead`), decodes the
 	entries (`decodeEntry`), and shows what `selectTargets` returns: revenge targets first, then
 	`pickCandidates`. All live checks (raid lock, loss cap) happen again when the raid starts.
+
+	Live revenge (P1.9): when the raider who robbed you is online, you may join their server.
+	`liveRevengeToken` decides whether a token still gives that right (checked when asked, on
+	arrival, and again at use), `presenceRoute` reads their presence row, and teleport data carries
+	only a hint (`revengeTeleportData` / `readRevengeHint`) that the landing server re-verifies.
 ]]
 
 local Types = require("./Types")
@@ -13,6 +18,7 @@ local Config = require("./Config")
 local Economy = require("./Economy")
 local RaidRules = require("./RaidRules")
 local CritterCatalog = require("./CritterCatalog")
+local Plots = require("./Plots")
 
 type PlayerProfile = Types.PlayerProfile
 type DenSnapshot = Types.DenSnapshot
@@ -28,6 +34,12 @@ export type Target = { userId: number, isRevenge: boolean, revengeRaidId: string
 
 -- [MemoryStore, not persisted] A raid lock on one defender. `released` marks a lock given back.
 export type RaidLock = { raiderUserId: number, raidId: string, released: boolean? }
+
+-- [MemoryStore, not persisted] Which server a player is in. `at` is the writer's os.time().
+export type Presence = { jobId: string, placeId: number, at: number }
+
+-- Where a revenge target is: in no server we can reach, in this one, or in another of this place.
+export type PresenceRoute = "Offline" | "Here" | "Teleport"
 
 local Matchmaking = {}
 
@@ -349,6 +361,101 @@ function Matchmaking.lockAfterRelease(current: any, raidId: string): RaidLock?
 		return { raiderUserId = current.raiderUserId, raidId = raidId, released = true }
 	end
 	return nil
+end
+
+-- Live revenge (P1.9) --------------------------------------------------------------------------
+
+-- How long a presence row lives without a refresh (2.5 refreshes, so one missed write is fine).
+Matchmaking.presenceTtlSeconds = math.floor(Config.Matchmaking.presenceRefreshSeconds * 2.5)
+
+-- Studs in front of a den's street edge where a live revenge raider lands.
+Matchmaking.revengeLandingMargin = 6
+
+--[[
+	Does `profile` still hold the right to a live revenge with token `raidId` (untrusted)? Returns
+	the token, or nil and a reason: "Invalid" (not a raid id), "NoToken" (none, or already spent),
+	"Expired", "Unavailable" (blocked either way; the reason never says who blocked whom) or
+	"PairLimit" (the live pair limit is reached, so no steal could land). Reads only; never spends.
+]]
+function Matchmaking.liveRevengeToken(
+	profile: PlayerProfile,
+	raidId: any,
+	blocked: { [number]: boolean },
+	now: number
+): (RevengeToken?, string?)
+	if type(raidId) ~= "string" or raidId == "" or #raidId > Config.Escrow.maxRaidIdLength then
+		return nil, "Invalid"
+	end
+	local token = profile.revengeTokens[raidId]
+	if token == nil or token.raidId ~= raidId then
+		return nil, "NoToken"
+	end
+	local target = token.targetUserId
+	if not isWhole(target) or target == profile.userId then
+		return nil, "Invalid"
+	end
+	if not (now < token.expiresAt) then
+		return nil, "Expired"
+	end
+	if blocked[target] then
+		return nil, "Unavailable"
+	end
+	local pairLimit = math.min(Config.Limits.maxRaidsPerPairPerDay, Config.LiveRaid.maxStealsPerPairPerDay)
+	if RaidRules.pairCount(profile, target, now) >= pairLimit then
+		return nil, "PairLimit"
+	end
+	return token, nil
+end
+
+-- Reads a presence row (untrusted shape) from this server's point of view. A row older than
+-- presenceTtlSeconds, or for another place, is Offline: only same-place servers can be joined.
+function Matchmaking.presenceRoute(presence: any, jobId: string, placeId: number, now: number): PresenceRoute
+	if
+		type(presence) ~= "table"
+		or type(presence.jobId) ~= "string"
+		or presence.placeId ~= placeId
+		or not isFinite(presence.at)
+		or now - presence.at > Matchmaking.presenceTtlSeconds
+	then
+		return "Offline"
+	end
+	if presence.jobId == jobId then
+		return "Here"
+	end
+	return if presence.jobId == "" then "Offline" else "Teleport"
+end
+
+-- Teleport data for a live revenge join. Clients can forge teleport data, so it only names the
+-- token; the landing server checks that token in the arriving player's own profile.
+function Matchmaking.revengeTeleportData(raidId: string): { [string]: any }
+	return { liveRevengeRaidId = raidId }
+end
+
+-- The token id a join's teleport data names, or nil. A hint only (see revengeTeleportData).
+function Matchmaking.readRevengeHint(data: any): string?
+	local raidId = if type(data) == "table" then data.liveRevengeRaidId else nil
+	if type(raidId) == "string" and raidId ~= "" and #raidId <= Config.Escrow.maxRaidIdLength then
+		return raidId
+	end
+	return nil
+end
+
+-- Where a live revenge raider lands for the den on `plot`: on the street, revengeLandingMargin
+-- studs in front of the den's edge, outside every den (a Lockdown still blocks entry, D-013).
+function Matchmaking.revengeLanding(plot: number): (number, number)
+	return Plots.toWorld(plot, 0, Plots.Layout.plotSize / 2 + Matchmaking.revengeLandingMargin)
+end
+
+-- The client-facing reason for a failed teleport (Enum.TeleportResult name).
+function Matchmaking.teleportFailReason(resultName: string): string
+	if resultName == "GameFull" then
+		return "ServerFull"
+	elseif resultName == "GameEnded" or resultName == "GameNotFound" then
+		return "ServerGone"
+	elseif resultName == "Flooded" then
+		return "Busy"
+	end
+	return "TeleportFailed"
 end
 
 return Matchmaking
