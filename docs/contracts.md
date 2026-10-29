@@ -117,7 +117,7 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
 | --- | --- | --- | --- | --- |
 | `settings` | `PlayerSettings?` (`musicVolume`, `sfxVolume`: 0-1 in 0.01 steps; `reducedMotion`) | `Profile.SETTINGS_DEFAULTS`: 0.6, 0.8, false (the client's defaults) | `settingsOf`, `cleanSettings(request)`, `applySettings(profile, request)` | P2.5 |
 | `onboarding` | `OnboardingState?` (`step`: steps of `ONBOARDING_STEPS` done, 0-6; `completedAt?`) | complete (an old save) | `ONBOARDING_STEPS`, `onboardingStepIndex`, `isOnboardingComplete`, `onboardingStep`, `onboardingStatus`, `advanceOnboardingTo` (server events), `acknowledgeOnboarding` (client acks), `completeOnboarding`; low-level `advanceOnboarding` | P2.6 |
-| `successfulRaids` | `number?` | 0 | `successfulRaids`, `countSuccessfulRaid` | P2.7, P2.9 |
+| `successfulRaids` | `number?` | 0 | `successfulRaids`, `countSuccessfulRaid`; once per raidId: `newCountedRaids`, `countSuccessfulRaidOnce`, `COUNTED_RAIDS_MAX` (32), below | P2.7, P2.9, C6c |
 | `gear` | `{ [GearId]: number }?` | level 0 (not owned) | `GEAR_IDS`, `isGearId`, `gearLevel`, `setGearLevel` | P2.10 |
 | `receipts` | `{ [string]: PurchaseReceipt }?` (`productId`, `at`) | none granted | `hasReceipt`, `recordReceipt`, `MAX_RECEIPTS` (100) | P2.8 |
 | `eventPasses` | `{ [string]: number }?` (event id -> granted at) | none owned | `hasEventPass`, `grantEventPass` | P2.8 |
@@ -160,6 +160,27 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
   is written by the raider's server for an offline defender, and a profile field would need a
   second cross-server write to the defender's key. The older `notificationPromptedAt` field stays
   in the shape (no removal without a migration), but nothing writes it.
+
+### Counting a successful raid (C6c)
+
+`DataService.countSuccessfulRaid(userId: number, raidId: string) -> number?`, for RaidService
+only, at an escape whose loot moved (a live escape whose `transferLive` returned `Committed`, an
+async escape credited to the raider), never the tutorial steal. `raidId` is the escrow raidId.
+
+- **Once per raidId.** It counts the raid on the raider's profile loaded in that server
+  (`Profile.countSuccessfulRaidOnce`) and returns the new lifetime count (1 = the first), which
+  goes to `NotificationService.onSuccessfulRaid`. A raidId already counted (a retried escape)
+  counts nothing and returns nil, so the caller never acts on the count twice.
+- **nil = nothing counted:** the profile is not loaded in that server, the raidId is not a string
+  of 1 to `Config.Escrow.maxRaidIdLength` characters (a call without one included), or it was
+  already counted. Never yields or forces a save; the count rides the next autosave or the final
+  save.
+- **Server memory, not the save.** The counted ids live in DataService's memory
+  (`Profile.newCountedRaids`), weakly keyed by the loaded profile table, so a profile's list goes
+  with its session and a profile loaded again starts an empty one. Each list keeps the newest
+  `Profile.COUNTED_RAIDS_MAX` (32) raidIds. No profile shape change, no migration.
+- The un-keyed `Profile.countSuccessfulRaid(profile)` is the low-level increment only; services
+  never call it.
 
 ### Settings and onboarding remotes (C6b, decisions D-059, D-063)
 

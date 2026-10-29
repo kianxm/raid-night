@@ -419,11 +419,54 @@ function Profile.successfulRaids(profile: PlayerProfile): number
 end
 
 -- Counts one successful raid on the raider's own loaded profile and returns the new lifetime
--- count (1 = their first). Call it once per raid. A corrupt count starts again from 0.
+-- count (1 = their first). A corrupt count starts again from 0. It knows no raid id, so a repeat
+-- counts again: services count through DataService.countSuccessfulRaid (countSuccessfulRaidOnce,
+-- once per raidId), never this.
 function Profile.countSuccessfulRaid(profile: PlayerProfile): number
 	local count = Profile.successfulRaids(profile) + 1
 	profile.successfulRaids = count
 	return count
+end
+
+--[[
+	The raid ids counted lately on each loaded profile (C6c): server memory, never saved, so the
+	save's shape is unchanged. Keys are weak, so a profile's list goes with its table when its
+	session ends, and a profile loaded again starts an empty one. Each list keeps the newest
+	COUNTED_RAIDS_MAX ids: a retried escape repeats within seconds, long before that many other
+	raids could end, so the bound only stops the list growing over a long session.
+]]
+export type CountedRaids = { [PlayerProfile]: { string } }
+
+Profile.COUNTED_RAIDS_MAX = 32
+
+function Profile.newCountedRaids(): CountedRaids
+	return setmetatable({}, { __mode = "k" }) :: any
+end
+
+--[[
+	Counts successful raid `raidId` on `profile` once (Profile.countSuccessfulRaid), remembering it
+	in `counted`. `profile` is the raider's profile loaded in this server, or nil when it is not
+	loaded. Returns the new lifetime count (1 = the first), or nil when nothing was counted: no
+	profile, a raidId that is not a string of 1 to Config.Escrow.maxRaidIdLength characters, or a
+	raidId this profile already counted (a retried escape: it returns nil, so the caller does not
+	act on the count twice). Past COUNTED_RAIDS_MAX ids it forgets the oldest. Never yields.
+]]
+function Profile.countSuccessfulRaidOnce(counted: CountedRaids, profile: PlayerProfile?, raidId: any): number?
+	if profile == nil or type(raidId) ~= "string" or #raidId == 0 or #raidId > Config.Escrow.maxRaidIdLength then
+		return nil
+	end
+	local ids = counted[profile]
+	if ids == nil then
+		ids = {}
+		counted[profile] = ids
+	elseif table.find(ids, raidId) then
+		return nil
+	end
+	table.insert(ids, raidId)
+	if #ids > Profile.COUNTED_RAIDS_MAX then
+		table.remove(ids, 1)
+	end
+	return Profile.countSuccessfulRaid(profile)
 end
 
 -- Gear (P2.10) --------------------------------------------------------------------------------------
