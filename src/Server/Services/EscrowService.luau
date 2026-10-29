@@ -23,28 +23,47 @@
 	                          it can. Only the call that creates the record debits the defender.
 	                          critterUid and glowRequested must come from server state (RaidRules
 	                          loot math, the server-tracked carry), never from a remote.
+	                          Retrying (P0.5): pass IDENTICAL arguments every time (raidId, both
+	                          userIds, critterUid, glowRequested, isRevenge). Once a record exists,
+	                          the same raidId with any other argument returns "Refused" ("raidId
+	                          already used by a different transfer") and changes nothing. While
+	                          this server awaits a retry of the raid, the retry reuses the first
+	                          call's createNonce: a create that landed with its response lost is
+	                          still that call's own, so the steal continues instead of voiding.
 
 	Storage (docs/contracts.md), DataStore "EscrowRecords"; memory instead when
-	DataService.persistence() is "Memory" (Studio without API access):
+	DataService.persistence() is "Memory" (Studio without API access, or Studio's memory switch,
+	the only mode with test profiles):
 	  Escrow_<raidId>  EscrowRecord: created once, then forward only (Escrow.canReplace runs
 	                   inside every UpdateAsync)
 	  Open_<userId>    Types.EscrowOpenIndex, for BOTH parties: written before the record, removed
-	                   once it is terminal; with no record, only once older than 15 minutes
+	                   once it is terminal; with no record, only once older than 15 minutes (a
+	                   re-add by a retry moves createdAt forward, Escrow.indexAdd)
 	Each DataStore call: 4 attempts, 1/2/4 s backoff. Every transform is idempotent.
 
-	New raid: busy lock -> start checks -> index both parties -> create record -> Escrow.advance
+	New raid: busy lock -> start checks -> index both parties -> create record (with a per-call
+	createNonce, so an attempt that landed but errored is still this call's own) -> Escrow.advance
 	(debit + saveNow, record Debited, credit + saveNow, record Committed) -> index cleanup in the
 	background. Profiles come fresh from DataService.getProfile (accrued first), and a profile
 	save counts only when the written data holds this raid's exact appliedTransfers entry.
 
 	Recovery never reads a flag. On every profile load: read Open_<userId>, prune
 	appliedTransfers except open raids, then Escrow.recover each open raid (Pending with the
-	defender here: their saved debit -> Debited, none -> Voided; Debited with the raider here:
-	credit and commit). A sweep retries what this server left in flight, with per-raid backoff,
-	while the party it needs is here; otherwise that party's next load picks it up.
+	defender here: their saved debit -> Debited; none -> a confirmed save by this session without
+	the entry, then Voided; Debited with the raider here: credit and commit). A sweep retries what
+	this server left in flight, with per-raid backoff, while the party the record needs is here
+	(Pending: the defender, Debited: the raider); otherwise that party's next load picks it up.
+
+	Studio test profiles (DataService.loadTestProfile, decision D-019) have no load to recover
+	from, so DataService refuses to release one while an escrow for it is open here.
+
+	TODO (P1.1, decision D-012): the void assumes only the creating call debits. Debits delivered
+	by ProfileStore message (or applied to an offline profile) will race it, and EscrowRecord has
+	no `kind`. Read the TODO in Shared/Escrow.luau before adding any async transport.
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -71,7 +90,8 @@ local CLOSE_WAIT_SECONDS = 25
 
 local EscrowService = {}
 
-type Retry = { from: number, need: number, delay: number, nextAt: number }
+-- `nonce`: the creating call's createNonce, kept for that call's retry (startOrResume).
+type Retry = { from: number, need: number, delay: number, nextAt: number, nonce: string? }
 
 local mode: ("DataStore" | "Memory")? = nil
 local dataStore: DataStore? = nil
@@ -100,7 +120,8 @@ end
 
 local function backoff(previous: Retry?, from: number, need: number): Retry
 	local delay = if previous then math.min(previous.delay * 2, RETRY_MAX_SECONDS) else RETRY_FIRST_SECONDS
-	return { from = from, need = need, delay = delay, nextAt = os.clock() + delay }
+	local nonce = if previous then previous.nonce else nil
+	return { from = from, need = need, delay = delay, nextAt = os.clock() + delay, nonce = nonce }
 end
 
 local function storage(): ("DataStore" | "Memory")?
@@ -109,7 +130,7 @@ local function storage(): ("DataStore" | "Memory")?
 		if mode == "DataStore" then
 			dataStore = DataStoreService:GetDataStore(STORE_NAME)
 		elseif mode == "Memory" then
-			warn("[EscrowService] no DataStore access: escrow records live in memory for this session")
+			warn("[EscrowService] memory persistence: escrow records live in memory for this session")
 		end
 	end
 	return mode
@@ -175,24 +196,23 @@ local function saveRecord(record: EscrowRecord)
 	end
 end
 
--- Write-once. Returns the stored record (an existing one wins) and whether this call wrote it.
+-- Write-once (Escrow.decideCreate). Returns the stored record (an existing one wins) and whether
+-- it is this call's own: written now, or by an earlier attempt of this call whose response was
+-- lost (same createNonce). Only this call's own record may be driven with Escrow.advance.
 local function createRecord(record: EscrowRecord): (EscrowRecord, boolean)
 	local existing: EscrowRecord? = nil
-	update(recordKey(record.raidId), function(stored)
-		existing = stored
-		return if stored == nil then record else nil
+	local ours = false
+	update(recordKey(record.raidId), function(stored: EscrowRecord?)
+		local toWrite, isOurs = Escrow.decideCreate(stored, record)
+		existing, ours = stored, isOurs
+		return toWrite
 	end)
-	return existing or record, existing == nil
+	return existing or record, ours
 end
 
 local function indexAdd(userId: number, raidId: string, role: "Raider" | "Defender", createdAt: number)
 	update(indexKey(userId), function(stored: EscrowOpenIndex?)
-		local open: EscrowOpenIndex = stored or {}
-		if open[raidId] then
-			return nil
-		end
-		open[raidId] = { role = role, createdAt = createdAt }
-		return open
+		return Escrow.indexAdd(stored, raidId, role, createdAt)
 	end)
 end
 
@@ -226,13 +246,20 @@ local function closeIndexes(record: EscrowRecord)
 	end
 end
 
--- Escrow.Store for one raid. Profiles come fresh from DataService each time.
-local function storeFor(raidId: string): Escrow.Store
+-- Escrow.Store for one raid. Profiles come fresh from DataService each time. `last.record` is a
+-- copy of the record as last read or confirmed written, so a drive that errors part-way still
+-- knows which party the record needs next.
+local function storeFor(raidId: string, last: { record: EscrowRecord? }): Escrow.Store
 	return {
 		loadRecord = function(id: string): EscrowRecord?
-			return read(recordKey(id))
+			local record: EscrowRecord? = read(recordKey(id))
+			last.record = if record then table.clone(record) else nil
+			return record
 		end,
-		saveRecord = saveRecord,
+		saveRecord = function(record: EscrowRecord)
+			saveRecord(record)
+			last.record = table.clone(record)
+		end,
 		loadProfile = function(userId: number): PlayerProfile
 			local profile = DataService.getProfile(userId)
 			if not profile then
@@ -260,14 +287,57 @@ local function storeFor(raidId: string): Escrow.Store
 				error(`save not confirmed: {why}`, 0)
 			end
 		end,
+		-- The void proof (Escrow.recover). Only a save THIS session wrote counts: when another
+		-- server has taken the lock, ProfileStore ends this session (IsActive false, so getProfile
+		-- no longer returns this table) BEFORE firing OnAfterSave with that server's data, which
+		-- may lack the entry only because its debit has not saved yet. A final save on leave does
+		-- not count either (the session is already inactive); the void then waits for a later load.
+		--
+		-- TODO (P1.1, decision D-012; #25 review): one window stays open. saveNow accepts any
+		-- OnAfterSave while the session is active, including an autosave whose UpdateAsync was
+		-- already in flight: its transform ran while we held the lock, then another server took
+		-- the lock (about 40 s with no release from us) and debited, and only then did the
+		-- autosave's response arrive. That save "proves" a void the new owner contradicts. Phase 0
+		-- accepts it (it needs a DataStore call hanging for over 40 s). The P1.1 void tombstone
+		-- must be written INSIDE this proof save (in the saved data that confirm checks), so the
+		-- proof and the tombstone land in one write and a later debit sees it and refuses.
+		saveProfileWithoutEntry = function(profile: PlayerProfile, id: string)
+			assert(id == raidId, "escrow store used for another raid")
+			local userId = profile.userId
+			if DataService.getProfile(userId) ~= profile then
+				error(`profile {userId} changed session before its void proof`, 0)
+			end
+			local ok, why = DataService.saveNow(userId, function(saved: any): boolean
+				return DataService.getProfile(userId) == profile
+					and profile.appliedTransfers[raidId] == nil
+					and type(saved) == "table"
+					and type(saved.appliedTransfers) == "table"
+					and saved.appliedTransfers[raidId] == nil
+			end)
+			if not ok then
+				error(`void not proven: {why}`, 0)
+			end
+		end,
 	}
+end
+
+-- The party a record needs next: Pending settles where the defender is loaded, Debited where
+-- the raider is. With no record seen, `from` (whose index led here).
+local function needFor(record: EscrowRecord?, from: number): number
+	if record and record.state == "Pending" then
+		return record.defenderUserId
+	elseif record and record.state == "Debited" then
+		return record.raiderUserId
+	end
+	return from
 end
 
 -- Advances one raid as far as it can go. The caller holds busy[raidId]. `live` only for the call
 -- that created the record; every other path recovers. `from` is whose index led here.
 -- Never reads a kill switch.
 local function drive(raidId: string, from: number, live: boolean): (TransferStatus, string?)
-	local store = storeFor(raidId)
+	local last: { record: EscrowRecord? } = {}
+	local store = storeFor(raidId, last)
 	local now = os.time()
 	local ok, result = pcall(function(): EscrowRecord?
 		if live then
@@ -280,7 +350,7 @@ local function drive(raidId: string, from: number, live: boolean): (TransferStat
 		if string.find(message, "duplicate", 1, true) then
 			warn(`[EscrowService] DUPLICATION ALARM {raidId}: {message}`)
 		end
-		retry[raidId] = backoff(retry[raidId], from, from)
+		retry[raidId] = backoff(retry[raidId], from, needFor(last.record, from))
 		return "InFlight", message
 	end
 	local record: EscrowRecord? = result
@@ -301,8 +371,7 @@ local function drive(raidId: string, from: number, live: boolean): (TransferStat
 		end
 		return "Committed", nil
 	end
-	local need = if record.state == "Pending" then record.defenderUserId else record.raiderUserId
-	retry[raidId] = backoff(retry[raidId], from, need)
+	retry[raidId] = backoff(retry[raidId], from, needFor(record, from))
 	return "InFlight", `record is {record.state}`
 end
 
@@ -380,6 +449,11 @@ local function startOrResume(
 	local now = os.time()
 	local record =
 		Escrow.create(raidId, raiderUserId, defenderUserId, critterUid, math.floor(glowRequested), isRevenge, now)
+	-- This call's own create (decideCreate). A retry while this server awaits one for the raid
+	-- reuses the first call's nonce, so a create that landed with its response lost stays its own.
+	local awaiting = retry[raidId]
+	local nonce = if awaiting and awaiting.nonce then awaiting.nonce else HttpService:GenerateGUID(false)
+	record.createNonce = nonce
 
 	-- An existing raid is never re-gated: report its true state and finish what can be finished.
 	local existing: EscrowRecord? = read(recordKey(raidId))
@@ -387,9 +461,10 @@ local function startOrResume(
 		if not Escrow.sameTransfer(existing, record) then
 			return "Refused", "raidId already used by a different transfer"
 		end
-		return drive(raidId, raiderUserId, false)
+		local _, ours = Escrow.decideCreate(existing, record)
+		return drive(raidId, raiderUserId, ours)
 	end
-	if retry[raidId] then
+	if awaiting and not awaiting.nonce then
 		return "InFlight", "an earlier attempt's record may still land; recovery decides"
 	end
 
@@ -412,15 +487,22 @@ local function startOrResume(
 		return "Refused", `could not start: {indexError}`
 	end
 
-	local created, stored, isNew = pcall(createRecord, record)
+	local created, stored, ours = pcall(createRecord, record)
 	if not created then
-		retry[raidId] = backoff(nil, raiderUserId, raiderUserId)
+		local entry = backoff(awaiting, raiderUserId, raiderUserId)
+		entry.nonce = nonce -- the create may have landed: the retry must still own it
+		retry[raidId] = entry
 		return "InFlight", `record create not confirmed: {stored}`
 	end
 	if not Escrow.sameTransfer(stored, record) then
 		return "Refused", "raidId already used by a different transfer"
 	end
-	return drive(raidId, raiderUserId, isNew)
+	local status, reason = drive(raidId, raiderUserId, ours)
+	local entry = retry[raidId]
+	if ours and entry then
+		entry.nonce = nonce -- still in flight: the caller's retry continues as this call
+	end
+	return status, reason
 end
 
 function EscrowService.transferLive(
@@ -450,11 +532,30 @@ function EscrowService.transferLive(
 	return status, reason
 end
 
+-- Why a Studio test profile must not be released yet (an escrow for it is open here), or nil.
+-- Test profiles exist only with memory persistence, where this server's Open_ index is the whole
+-- truth: an entry is written (with no yield after busy is taken) before the record, and removed
+-- only once the record is terminal. Retry entries are checked too, belt and braces.
+local function openEscrowFor(userId: number): string?
+	local open = memory[indexKey(userId)]
+	local raidId: string? = if open then next(open) else nil
+	if raidId == nil then
+		for id, entry in retry do
+			if entry.from == userId or entry.need == userId then
+				raidId = id
+				break
+			end
+		end
+	end
+	return if raidId then `escrow {raidId} is still open` else nil
+end
+
 function EscrowService.start()
 	-- Recovery is never behind a flag (docs/contracts.md: Kill switches).
 	DataService.onProfileLoaded(function(player: Player)
 		recoverUser(player.UserId)
 	end)
+	DataService.guardTestRelease(openEscrowFor)
 	task.spawn(function()
 		while true do
 			task.wait(SWEEP_SECONDS)

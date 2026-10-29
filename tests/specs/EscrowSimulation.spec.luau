@@ -11,14 +11,22 @@
 	    outlive the 7-day appliedTransfers retention
 	  - on every join: prune appliedTransfers against the player's open-escrow index, then
 	    recover each open raid, exactly as EscrowService does
-	  - recovery that only touches a profile whose player is online (Escrow.recover)
+	  - recovery that only touches a profile whose player is online (Escrow.recover); loading or
+	    saving an away player's profile fails the run
+	  - stale servers: a server whose lock on the defender was taken (it has not noticed yet)
+	    recovers the raid from its copy from before the debit; all its saves of that profile fail,
+	    as ProfileStore's do, so the void proof must stop it from voiding a saved debit
 
 	Live raids happen between two online players and are driven by Escrow.advance (the call that
-	creates the record); every later path is Escrow.recover, which never debits afresh.
+	creates the record, recognised by its createNonce even on a retried create); every later path
+	is Escrow.recover, which never debits afresh. A same-server retry of a live call left in
+	flight keeps the first call's createNonce (EscrowService), so it too drives with advance,
+	sometimes after a sweep's recovery already settled or voided the raid.
 
 	Storage behaves like DataStore: every load returns a copy, and nothing persists until saved,
 	so a crash loses unsaved work exactly as a real server would. The record store enforces the
-	forward-only rule (Escrow.canReplace) on every write.
+	forward-only rule (Escrow.canReplace) on every write; records and open indexes are written
+	through the same pure rules as EscrowService (Escrow.decideCreate, Escrow.indexAdd).
 
 	After every sweep and at the end, it checks:
 	  1. every critter uid exists in exactly one place
@@ -52,6 +60,8 @@ local DUPLICATE_CHANCE = 0.2
 local VAULT_MOVE_CHANCE = 0.1
 local CONCURRENT_CHANCE = 0.1
 local LEAVE_CHANCE = 0.1 -- per party, after a transfer that did not finish
+local STALE_CHANCE = 0.3 -- per drive: a stale server tries to recover the raid first
+local RETRY_CHANCE = 0.5 -- per live call left in flight: the caller retries it with the same nonce
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -65,6 +75,7 @@ local function deepCopy<T>(value: T): T
 end
 
 local CRASH = "simulated crash"
+local STALE = "session lost to another server"
 
 local function newWorld(seed: number)
 	local rng = rngLib.new(seed)
@@ -90,7 +101,24 @@ local function newWorld(seed: number)
 		awayUntil[userId] = 0
 	end
 
-	local store: Escrow.Store = {
+	local world = {
+		rng = rng,
+		profiles = profiles,
+		records = records,
+		index = index,
+		awayUntil = awayUntil,
+		before = {} :: { [string]: PlayerProfile }, -- each raid's defender as saved before it began
+		store = (nil :: any) :: Escrow.Store,
+		now = START,
+	}
+
+	-- A server can load or save only a profile it holds. Touching an away player's profile is a
+	-- bug (recovery ignored presence), not an injected failure, so it fails the run.
+	local function held(userId: number)
+		assert(world.now >= awayUntil[userId], `touched the profile of away player {userId}`)
+	end
+
+	world.store = {
 		loadRecord = function(raidId)
 			local r = records[raidId]
 			return if r then deepCopy(r) else nil
@@ -103,22 +131,24 @@ local function newWorld(seed: number)
 			records[record.raidId] = deepCopy(record)
 		end,
 		loadProfile = function(userId)
+			held(userId)
 			return deepCopy(profiles[userId])
 		end,
 		saveProfile = function(profile)
+			held(profile.userId)
+			profiles[profile.userId] = deepCopy(profile)
+		end,
+		saveProfileWithoutEntry = function(profile, raidId)
+			held(profile.userId)
+			-- This store's sessions are never stale, so the proof passes; it must never pass while
+			-- a debit for the raid is saved (voiding then would strand the loot).
+			assert(profile.appliedTransfers[raidId] == nil, `void proof for {raidId} with a debit in hand`)
+			assert(profiles[profile.userId].appliedTransfers[raidId] == nil, `void proof for {raidId}, debit saved`)
 			profiles[profile.userId] = deepCopy(profile)
 		end,
 	}
 
-	return {
-		rng = rng,
-		profiles = profiles,
-		records = records,
-		index = index,
-		awayUntil = awayUntil,
-		store = store,
-		now = START,
-	}
+	return world
 end
 
 -- What is in flight for one escrow: taken from the defender, not yet credited to the raider.
@@ -194,6 +224,8 @@ local function runSimulation(seed: number)
 	local away: { [number]: true } = {}
 	local retention = Config.Escrow.appliedTransferRetentionSeconds
 	local protected = 0
+	local staleRefused = 0
+	local retried = 0
 
 	local function online(userId: number): boolean
 		return world.now >= world.awayUntil[userId]
@@ -202,6 +234,14 @@ local function runSimulation(seed: number)
 	local function crashy(name: string)
 		if rng.chance(CRASH_CHANCE) then
 			error(CRASH .. " at " .. name)
+		end
+	end
+
+	local function closeIfTerminal(raidId: string)
+		local r = world.records[raidId]
+		if r and Escrow.isTerminal(r) then
+			world.index[r.raiderUserId][raidId] = nil
+			world.index[r.defenderUserId][raidId] = nil
 		end
 	end
 
@@ -217,11 +257,48 @@ local function runSimulation(seed: number)
 		if not ok and not string.find(tostring(err), CRASH, 1, true) then
 			error(err, 0) -- a real bug, not an injected crash
 		end
+		closeIfTerminal(raidId)
+	end
+
+	-- A server that still believes it holds the defender (another server took the lock; it has
+	-- not noticed) recovers from its copy from before the debit. Every save it makes of that
+	-- profile fails, as ProfileStore's do once the lock is gone.
+	local function staleDrive(raidId: string)
 		local r = world.records[raidId]
-		if r and Escrow.isTerminal(r) then
-			world.index[r.raiderUserId][raidId] = nil
-			world.index[r.defenderUserId][raidId] = nil
+		local defenderId = r.defenderUserId
+		local debitSaved = world.profiles[defenderId].appliedTransfers[raidId] ~= nil
+		local base = world.store
+		local function refuse(userId: number)
+			if userId == defenderId then
+				error(`{STALE}: {userId}`, 0)
+			end
 		end
+		local stale: Escrow.Store = {
+			loadRecord = base.loadRecord,
+			saveRecord = base.saveRecord,
+			loadProfile = function(userId)
+				return if userId == defenderId then deepCopy(world.before[raidId]) else base.loadProfile(userId)
+			end,
+			saveProfile = function(profile)
+				refuse(profile.userId)
+				base.saveProfile(profile)
+			end,
+			saveProfileWithoutEntry = function(profile, id)
+				refuse(profile.userId)
+				base.saveProfileWithoutEntry(profile, id)
+			end,
+		}
+		local function present(userId: number): boolean
+			return userId == defenderId or online(userId)
+		end
+		local ok, err = pcall(Escrow.recover, raidId, stale, world.now, present)
+		if not ok and not string.find(tostring(err), STALE, 1, true) then
+			error(err, 0)
+		end
+		if not ok and r.state == "Pending" and debitSaved then
+			staleRefused += 1 -- exactly the case a void without proof would get wrong
+		end
+		closeIfTerminal(raidId)
 	end
 
 	-- A player loads: prune against their open index, then recover each open raid.
@@ -248,6 +325,9 @@ local function runSimulation(seed: number)
 	local function sweep()
 		local stillOpen = {}
 		for _, raidId in open do
+			if rng.chance(STALE_CHANCE) then
+				staleDrive(raidId)
+			end
 			drive(raidId, false) -- recovery can crash too
 			if not Escrow.isTerminal(world.records[raidId]) then
 				table.insert(stillOpen, raidId)
@@ -309,17 +389,45 @@ local function runSimulation(seed: number)
 			end
 
 			for n, thisRaider in raiders do
+				if not (online(thisRaider) and online(defenderId)) then
+					continue -- the server refuses a live transfer unless both are loaded there
+				end
 				local raidId = if n == 1 then `raid-{i}` else `raid-{i}-b`
 				local loot = RaidRules.lootGlow(snapshot, false)
 				local record = Escrow.create(raidId, thisRaider, defenderId, grabbed, loot, false, world.now)
+				record.createNonce = `call-{raidId}`
+				world.before[raidId] = deepCopy(world.profiles[defenderId])
 				-- Index both parties before the record exists, as EscrowService does.
-				world.index[thisRaider][raidId] = { role = "Raider", createdAt = world.now }
-				world.index[defenderId][raidId] = { role = "Defender", createdAt = world.now }
-				world.store.saveRecord(record)
+				local index = world.index
+				index[thisRaider] = Escrow.indexAdd(index[thisRaider], raidId, "Raider", world.now) or index[thisRaider]
+				index[defenderId] = Escrow.indexAdd(index[defenderId], raidId, "Defender", world.now)
+					or index[defenderId]
+				local created, ours = Escrow.decideCreate(world.records[raidId], record)
+				assert(created and ours, `{raidId} is new`)
+				world.store.saveRecord(created)
 				table.insert(open, raidId)
 				drive(raidId, true)
+				if rng.chance(STALE_CHANCE) then
+					staleDrive(raidId)
+				end
+				if not Escrow.isTerminal(world.records[raidId]) and rng.chance(RETRY_CHANCE) then
+					-- transferLive returned InFlight and the caller retries with identical arguments.
+					-- The server kept this call's createNonce, so the retry is still the creating
+					-- call and drives with advance. A sweep's recovery may run first.
+					if rng.chance(0.5) then
+						drive(raidId, false)
+					end
+					local _, ours = Escrow.decideCreate(world.records[raidId], record)
+					expect.truthy(ours, `{raidId}: a retry with the kept nonce is the creating call`)
+					drive(raidId, true)
+					retried += 1
+				end
 				if rng.chance(DUPLICATE_CHANCE) then
-					drive(raidId, rng.chance(0.5)) -- the same work delivered twice, either path
+					-- The same work delivered twice, either path. A retried create (its first response
+					-- lost) must still be recognised as this call's own.
+					local _, again = Escrow.decideCreate(world.records[raidId], record)
+					expect.truthy(again, `{raidId}: a retried create is this call's own`)
+					drive(raidId, rng.chance(0.5))
 				end
 				if not Escrow.isTerminal(world.records[raidId]) then
 					for _, party in { thisRaider, defenderId } do
@@ -378,17 +486,20 @@ local function runSimulation(seed: number)
 	for userId = 1, PLAYERS do
 		expect.eq(next(world.index[userId]), nil, `open index of {userId} not empty`)
 	end
-	return committed, voided, protected
+	return committed, voided, protected, staleRefused, retried
 end
 
 local tests = {}
 
 tests["1,000 raids with crashes, duplicates, races and long absences never duplicate or lose anything"] = function()
-	local committed, voided, protected = runSimulation(1)
+	local committed, voided, protected, staleRefused, retried = runSimulation(1)
 	expect.truthy(committed >= RAIDS * 0.8, `expected most escrows to commit, got {committed}`)
 	expect.truthy(voided > 0, "the void path was exercised")
 	-- Without this the simulation would not prove that pruning skips open raids.
 	expect.truthy(protected > 0, "a join met an open raid's entry older than the retention window")
+	-- Without this it would not prove the void proof stops a stale server.
+	expect.truthy(staleRefused > 0, "a stale server met a Pending record whose debit was saved")
+	expect.truthy(retried > 0, "a live call left in flight was retried with its kept nonce")
 end
 
 tests["the same holds across 5 more random seeds"] = function()

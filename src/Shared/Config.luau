@@ -73,6 +73,9 @@ local Config = {
 		lockdownCooldownSeconds = 120,
 		tagRange = 6, -- studs: how close the owner must be to tag a raider
 		grabHoldSeconds = 1, -- how long a raider holds the grab to pick a critter up
+		-- Studs from the raider's root part to the pad centre: how close a raider must be to start
+		-- a grab, and to stay for the whole hold (decision D-018).
+		grabRange = 10,
 	},
 
 	Income = {

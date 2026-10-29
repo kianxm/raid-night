@@ -25,9 +25,8 @@ local Strings = require(Hud:WaitForChild("Strings"))
 local HudMath = require(Hud:WaitForChild("HudMath"))
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
--- PENDING CONTRACT: "Lockdown" is not in Net.Requests yet. Replace this constant with
--- Net.Requests.Lockdown once the contract is approved.
-local LOCKDOWN_REMOTE = "Lockdown"
+local LOCKDOWN_REMOTE = Net.Requests.Lockdown
+local TOAST_SECONDS = 4
 
 local COLOR = {
 	panel = Color3.fromHex("1B1F3B"),
@@ -168,6 +167,15 @@ local function build(): { [string]: any }
 	carryText.Size = UDim2.new(1, -16, 1, 0)
 	carryText.Position = UDim2.fromOffset(8, 0)
 
+	-- Short toast under the carried pill (raid alerts, Lockdown result).
+	local toast = panel(gui, "Toast", UDim2.fromOffset(280, 40), UDim2.new(0.5, -140, 0, 56))
+	toast.Visible = false
+	toast.ZIndex = 5
+	local toastText = label(toast, DISPLAY_FONT, 20)
+	toastText.Size = UDim2.new(1, -16, 1, 0)
+	toastText.Position = UDim2.fromOffset(8, 0)
+	toastText.ZIndex = 6
+
 	-- Right column, above the default jump button (bottom ~150 px stays clear).
 	local column = Instance.new("Frame")
 	column.Name = "Actions"
@@ -193,6 +201,8 @@ local function build(): { [string]: any }
 		barText = barText,
 		carry = carry,
 		carryText = carryText,
+		toast = toast,
+		toastText = toastText,
 		collect = collect,
 		collectTitle = collectTitle,
 		collectSub = collectSub,
@@ -205,38 +215,70 @@ local function build(): { [string]: any }
 	}
 end
 
--- Lockdown state from the den Model attributes (server time). Pending contract.
-local function lockdownStatus(): (string, number)
-	local plot = player:GetAttribute("Plot")
+-- My den Model: the one whose OwnerUserId is me. Display only.
+local function findMyDen(): Instance?
 	local world = workspace:FindFirstChild("World")
 	local dens = world and world:FindFirstChild("Dens")
-	local den = dens and plot ~= nil and dens:FindFirstChild("Den" .. tostring(plot))
+	if not dens then
+		return nil
+	end
+	for _, den in dens:GetChildren() do
+		if den:GetAttribute("OwnerUserId") == player.UserId then
+			return den
+		end
+	end
+	return nil
+end
+
+-- Lockdown state from my den's attributes (server time, D-011): active, then cooldown, then ready.
+local function lockdownStatus(): (string, number)
+	local den = findMyDen()
 	if not den then
 		return "ready", 0
 	end
 	local now = workspace:GetServerTimeNow()
 	local activeUntil = den:GetAttribute("LockdownUntil")
 	local readyAt = den:GetAttribute("LockdownReadyAt")
-	if type(activeUntil) == "number" and activeUntil > now then
+	if type(activeUntil) == "number" and now < activeUntil then
 		return "active", activeUntil - now
 	end
-	if type(readyAt) == "number" and readyAt > now then
+	if type(readyAt) == "number" and now < readyAt then
 		return "cooldown", readyAt - now
 	end
 	return "ready", 0
 end
 
-local function request(name: string, busy: { [string]: boolean })
+-- Calls `fn(instance)` once the named child of Remotes exists (now or later). The client never
+-- creates remotes; the server owns them.
+local function whenRemote(name: string, fn: (Instance) -> ())
+	local found = remotes:FindFirstChild(name)
+	if found then
+		fn(found)
+		return
+	end
+	local conn: RBXScriptConnection
+	conn = remotes.ChildAdded:Connect(function(child)
+		if child.Name == name then
+			conn:Disconnect()
+			fn(child)
+		end
+	end)
+end
+
+local function request(name: string, busy: { [string]: boolean }, onResult: ((any) -> ())?)
 	local remote = remotes:FindFirstChild(name)
 	if not remote or not remote:IsA("RemoteFunction") or busy[name] then
 		return
 	end
 	busy[name] = true
 	task.spawn(function()
-		pcall(function()
-			remote:InvokeServer()
+		local ok, result = pcall(function()
+			return remote:InvokeServer()
 		end)
 		busy[name] = false
+		if ok and onResult then
+			onResult(result)
+		end
 	end)
 end
 
@@ -251,8 +293,38 @@ function HudController.start()
 	ui.buy.Activated:Connect(function()
 		request(Net.Requests.BuyEgg, busy)
 	end)
+	local toastToken = 0
+	local function showToast(text: string)
+		toastToken += 1
+		local token = toastToken
+		ui.toastText.Text = text
+		ui.toast.Visible = true
+		task.delay(TOAST_SECONDS, function()
+			if token == toastToken then
+				ui.toast.Visible = false
+			end
+		end)
+	end
+
+	-- No optimistic state: the result only picks a toast; the button follows the den attributes.
 	ui.lock.Activated:Connect(function()
-		request(LOCKDOWN_REMOTE, busy)
+		request(LOCKDOWN_REMOTE, busy, function(result)
+			showToast(if result == true then Strings.lockdownStarted else Strings.lockdownRefused)
+		end)
+	end)
+
+	whenRemote(Net.Pushes.BeingRaidedLive, function(remote)
+		if not remote:IsA("RemoteEvent") then
+			return
+		end
+		remote.OnClientEvent:Connect(function(raiderUserId: any)
+			local name: string? = nil
+			if type(raiderUserId) == "number" then
+				local found = Players:GetPlayerByUserId(raiderUserId)
+				name = if found then found.DisplayName else nil
+			end
+			showToast(if name then Strings.format(Strings.beingRaided, { name = name }) else Strings.beingRaidedUnknown)
+		end)
 	end)
 
 	local function render()
@@ -279,12 +351,12 @@ function HudController.start()
 			setEnabled(ui.buy, free or state.glow >= price, COLOR.buy)
 		end
 
-		-- Carried critter (PENDING CONTRACT: absent attribute = not carrying).
+		-- Carried critter: display-only Player attribute; "" or absent = not carrying.
 		local speciesId = player:GetAttribute("CarryingSpecies")
 		local species = if type(speciesId) == "string" and speciesId ~= "" then CritterCatalog.get(speciesId) else nil
 		ui.carry.Visible = species ~= nil
 		if species then
-			ui.carryText.Text = Strings.format(Strings.carrying, { name = species.name })
+			ui.carryText.Text = Strings.format(Strings.carrying, { name = species.name, tier = species.tier })
 		end
 
 		-- Lockdown button.
@@ -305,6 +377,34 @@ function HudController.start()
 			setEnabled(ui.lock, true, COLOR.lock)
 		end
 	end
+
+	-- Re-render when the server changes the attributes we draw, not only on the timer.
+	local watched: { [Instance]: boolean } = {}
+	local function watchDen(den: Instance)
+		if watched[den] then
+			return
+		end
+		watched[den] = true
+		for _, attr in { "OwnerUserId", "LockdownUntil", "LockdownReadyAt" } do
+			den:GetAttributeChangedSignal(attr):Connect(render)
+		end
+	end
+	for _, attr in { "Plot", "CarryingUid", "CarryingSpecies" } do
+		player:GetAttributeChangedSignal(attr):Connect(render)
+	end
+	task.spawn(function()
+		local dens = workspace:WaitForChild("World"):WaitForChild("Dens")
+		for _, den in dens:GetChildren() do
+			watchDen(den)
+		end
+		dens.ChildAdded:Connect(function(den)
+			watchDen(den)
+			render()
+		end)
+	end)
+	remotes.ChildAdded:Connect(function()
+		render()
+	end)
 
 	-- Display only; ~10 Hz is plenty for a bar and countdowns.
 	local acc = 0

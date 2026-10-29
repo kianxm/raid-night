@@ -27,7 +27,7 @@ export type EggRoll = {
 	tierRoll: number, -- uniform in [0, 1)
 	speciesRoll: number, -- uniform in [0, 1)
 	uid: string, -- fresh globally unique id for the new critter
-	maxTier: Tier, -- highest tier this egg can hatch (Phase 0: "Uncommon")
+	maxTier: Tier, -- highest tier a paid egg can hatch (Config.Economy.eggMaxTier); rescue eggs ignore it
 	physicalPads: number, -- pads that exist in the den world (6)
 }
 
@@ -222,6 +222,8 @@ end
 	Moves an owned critter to a Pad (with `padIndex`), the Vault or Inventory. A critter moved
 	onto an occupied pad swaps with the occupant, which takes the mover's old spot, so no slot
 	limit can be broken by a swap. Guard placement is not available yet (no guard slots exist).
+	`isLocked(uid)` marks critters that must not move (a raider is carrying them): a placement
+	never moves a locked critter, neither as the mover nor as a swap's displaced occupant.
 	Accrues first. Returns false and a reason, without changing anything, if the move is invalid.
 ]]
 function Economy.place(
@@ -230,11 +232,15 @@ function Economy.place(
 	placement: Placement,
 	padIndex: number?,
 	physicalPads: number,
-	now: number
+	now: number,
+	isLocked: ((uid: string) -> boolean)?
 ): (boolean, string?)
 	local critter = profile.critters[uid]
 	if not critter then
 		return false, "not your critter"
+	end
+	if isLocked and isLocked(uid) then
+		return false, "critter is busy"
 	end
 	local occupant: Critter? = nil
 	if placement == "Pad" then
@@ -243,6 +249,9 @@ function Economy.place(
 			return false, "pad is locked or does not exist"
 		end
 		occupant = Economy.padOccupant(profile, padIndex)
+		if occupant and occupant ~= critter and isLocked and isLocked(occupant.uid) then
+			return false, "pad is busy"
+		end
 	elseif placement == "Vault" then
 		if critter.placement ~= "Vault" and Economy.vaultCount(profile) >= profile.vaultSlots then
 			return false, "vault is full"
@@ -278,38 +287,53 @@ function Economy.upgradeDen(profile: PlayerProfile, now: number): (boolean, stri
 end
 
 --[[
-	Rescue egg: a player with no critters at all and not enough Glow (banked plus stored) for an
-	egg gets their next egg free. This is how a new player starts (Profile.new gives 0 Glow and
-	no critters), and it means nobody can be raided into a dead end. It cannot be farmed: nothing
-	sells critters, so the only way back to zero critters is losing them all.
+	Rescue egg (decision D-004): a player with no critters at all and not enough Glow (banked plus
+	stored) for an egg gets their next egg free. This is how a new player starts (Profile.new gives
+	0 Glow and no critters), and it means nobody can be raided into a dead end. It cannot be
+	farmed: nothing sells critters, so the only way back to zero critters is losing them all.
+
+	It hatches from its own fixed table (RESCUE_EGG_TIER, Common only), whatever eggMaxTier says,
+	and the critter it hatches is never tradeable (decision D-005).
+
+	`stored` must be current: call accrue(profile, now) first (buyEgg, IncomeService's push and its
+	GetDenState handler all do), so Glow earned but not yet accrued counts as affordable.
 ]]
+local RESCUE_EGG_TIER: Tier = "Common"
+
 function Economy.isRescueEgg(profile: PlayerProfile): boolean
 	return next(profile.critters) == nil
 		and math.floor(profile.glow + profile.stored) < Economy.eggPrice(profile.denLevel)
 end
 
--- What the next egg costs this player in banked Glow (0 for a rescue egg).
+-- What the next egg costs this player in banked Glow (0 for a rescue egg). Accrue first.
 function Economy.eggCost(profile: PlayerProfile): number
 	return if Economy.isRescueEgg(profile) then 0 else Economy.eggPrice(profile.denLevel)
 end
 
--- Buys and hatches one egg: pays from banked Glow, rolls a tier (capped at roll.maxTier) and a
--- species, and puts the new critter on the first free usable pad, or in Inventory if none.
--- Returns the new critter, or nil and a reason with nothing changed.
+--[[
+	Buys and hatches one egg. Accrues first, so the rescue check sees every Glow earned so far.
+	A paid egg costs eggPrice from banked Glow and rolls a tier capped at roll.maxTier; a rescue
+	egg is free, rolls Common only and is marked untradeable. Either way a species is rolled within
+	the tier and the critter goes on the first free usable pad, or in Inventory if none.
+	Returns the new critter, or nil and a reason with no Glow spent and no critter added (storage
+	may have been accrued, which changes no balance).
+]]
 function Economy.buyEgg(profile: PlayerProfile, now: number, roll: EggRoll): (Critter?, string?)
-	local cost = Economy.eggCost(profile)
+	Economy.accrue(profile, now)
+	local rescue = Economy.isRescueEgg(profile)
+	local cost = if rescue then 0 else Economy.eggPrice(profile.denLevel)
 	if profile.glow < cost then
 		return nil, "not enough Glow"
 	end
 	if profile.critters[roll.uid] ~= nil then
 		return nil, "uid already exists" -- never overwrite a critter
 	end
-	local species = Economy.rollSpecies(Economy.rollTierUpTo(roll.tierRoll, roll.maxTier), roll.speciesRoll)
+	local tier = if rescue then RESCUE_EGG_TIER else Economy.rollTierUpTo(roll.tierRoll, roll.maxTier)
+	local species = Economy.rollSpecies(tier, roll.speciesRoll)
 	if not species then
 		return nil, "no species for that tier"
 	end
 
-	Economy.accrue(profile, now)
 	profile.glow -= cost
 	local pad = Economy.firstFreePad(profile, roll.physicalPads)
 	local critter: Critter = {
@@ -320,6 +344,7 @@ function Economy.buyEgg(profile: PlayerProfile, now: number, roll: EggRoll): (Cr
 		padIndex = pad,
 		acquiredAt = now,
 		stolenLockUntil = nil,
+		untradeable = if rescue then true else nil,
 	}
 	profile.critters[critter.uid] = critter
 	return critter, nil

@@ -38,11 +38,30 @@ local function setState(new: any)
 	end
 end
 
+-- Cosmetic: no Steal prompt in my own den. The server re-enables prompts for raiders, so keep it
+-- off locally whenever it flips back. The server already refuses grabs on your own critters.
+local function hideIfMine(prompt: ProximityPrompt, denModel: Instance)
+	local function apply()
+		if denModel:GetAttribute("OwnerUserId") == Players.LocalPlayer.UserId and prompt.Enabled then
+			prompt.Enabled = false
+		end
+	end
+	apply()
+	if not prompt:GetAttribute("UiHooked") then
+		prompt:SetAttribute("UiHooked", true)
+		prompt:GetPropertyChangedSignal("Enabled"):Connect(apply)
+	end
+end
+
 local function refreshPrompts(denModel: Instance)
 	local mine = denModel:GetAttribute("OwnerUserId") == Players.LocalPlayer.UserId
 	for _, d in denModel:GetDescendants() do
-		if d:IsA("ProximityPrompt") and d:FindFirstAncestor("EconomyStation") then
-			d.Enabled = mine
+		if d:IsA("ProximityPrompt") then
+			if d:FindFirstAncestor("EconomyStation") then
+				d.Enabled = mine
+			elseif d.Name == "StealPrompt" then
+				hideIfMine(d, denModel)
+			end
 		end
 	end
 end

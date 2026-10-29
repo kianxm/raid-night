@@ -25,7 +25,8 @@
 	          again. No profile is ever written.
 	  Escape  The carrier is inside their OWN den -> EscrowService.transferLive on its own thread
 	          with server-tracked arguments (glowRequested 0, D-015). "InFlight" is retried with
-	          the identical arguments; then the lock clears and both dens are refreshed.
+	          the identical arguments after 2, 5 and 10 s (never past 20 s); then the lock clears
+	          and both dens are refreshed.
 	  End     Every carry ends with Net.Pushes.RaidEnded to the raider (decision D-020): raidId
 	          "" for a drop before the escape, escaped = (transferLive result == "Committed").
 
@@ -97,10 +98,15 @@ type Carry = {
 
 local LIVE_GLOW = 0 -- Phase 0 live steals take the critter only (decision D-015)
 local HOLD_GRACE = 0.25 -- the prompt asks for a little longer than the server needs
-local PROMPT_DISTANCE = 8 -- client-side prompt range; the server checks RaidRules.Live.grabRange
+local PROMPT_DISTANCE = 8 -- client-side prompt range; the server checks Config.LiveRaid.grabRange
 local CARRY_TICK = 0.1
 local PROMPT_TICK = 0.5
-local ESCAPE_RETRY_DELAYS = { 5, 20 } -- seconds between transferLive attempts on "InFlight"
+-- Seconds between transferLive attempts on "InFlight". EscrowService's sweep may void a Pending
+-- record with no debit once its first retry delay (30 s) passes, so every retry must start well
+-- inside that: none starts later than ESCAPE_RETRY_WINDOW after the first call. After that,
+-- recovery settles the raid.
+local ESCAPE_RETRY_DELAYS = { 2, 5, 10 }
+local ESCAPE_RETRY_WINDOW = 20
 local LIMIT_WINDOW_SECONDS = 10
 
 local RaidService = {}
@@ -449,14 +455,19 @@ local function escape(player: Player, carry: Carry)
 		if standInEscrowBlocked(defenderUserId) then
 			status, reason, attempts = "Refused", "test escape needs Memory persistence; transferLive not called", 0
 		end
+		local firstCallAt = os.clock()
 		for attempt = 1, attempts do
 			local ok, s, r =
 				pcall(EscrowService.transferLive, raidId, raiderUserId, defenderUserId, critterUid, LIVE_GLOW, false)
 			status, reason = if ok then s else "InFlight", if ok then r else tostring(s)
-			if status ~= "InFlight" or attempt > #ESCAPE_RETRY_DELAYS then
+			local delay = ESCAPE_RETRY_DELAYS[attempt]
+			if status ~= "InFlight" or not delay or os.clock() - firstCallAt + delay > ESCAPE_RETRY_WINDOW then
 				break
 			end
-			task.wait(ESCAPE_RETRY_DELAYS[attempt])
+			task.wait(delay)
+		end
+		if status == "InFlight" then
+			warn(`[RaidService] raid {raidId}: gave up retrying while InFlight; EscrowService recovery settles it`)
 		end
 		-- Committed: the critter is the raider's. Refused: nothing moved, it is back on its pad.
 		-- Still InFlight: EscrowService recovery finishes it; the profiles show the truth.

@@ -21,6 +21,28 @@ the why. Update it in the same commit as any contract change.
 | Escrow per raidId | `EscrowRecord` | EscrowService | Write-once create, then state moves forward only |
 | Open escrows per user | `EscrowOpenIndex` | EscrowService | Both raider and defender; added before the record, removed once terminal |
 
+Profile storage: ProfileStore store `PlayerProfiles`, key `Player_<userId>` (`DataService.luau`).
+
+Studio-only memory and test profiles (decision D-019, details in `DataService.luau`):
+
+- **Memory switch.** Setting the boolean attribute `StudioMemoryProfiles` on `ServerStorage` to
+  `true` before pressing Play runs every profile from ProfileStore's mock store, in memory, even
+  with Studio API access on. `DataService.persistence()` is then `"Memory"`, so escrow records
+  stay in memory too, and nothing is saved. It is read once at start and only when
+  `RunService:IsStudio()`; missing or `false` means normal saving. It is a developer setting on
+  a server-only service, not a replicated attribute: clients can neither see nor set it.
+- **Test profiles.** `DataService.loadTestProfile(userId, profile)` holds a fake in-memory
+  profile for RaidService's single-client test hook. It works only in Studio with memory
+  persistence, and only for reserved ids (`Profile.isTestUserId`: whole numbers <=
+  -1,000,000, clear of real accounts and of Studio Local Server players -1, -2, ...). It is
+  never saved, and `saveNow` on it confirms at once. `releaseTestProfile(userId)` works like a
+  leave (`onProfileReleasing` runs), and it refuses while an escrow for that id is still open.
+
+**Never change the store name or the key format.** ProfileStore would find no save under the
+new name and hand every player a fresh template. Everyone silently starts over: the old saves
+still exist, but nothing reads them. The same applies to `EscrowRecords` and its keys below,
+where a rename would strand every transfer in flight.
+
 Escrow storage: DataStore `EscrowRecords`.
 
 - `Escrow_<raidId>`: the `EscrowRecord`. raidId is at most `Config.Escrow.maxRaidIdLength` (43)
@@ -28,9 +50,11 @@ Escrow storage: DataStore `EscrowRecords`.
   inside every `UpdateAsync`.
 - `Open_<userId>`: that player's `EscrowOpenIndex` (`{ [raidId]: { role, createdAt } }`), for the
   raider and the defender alike. An entry with no record is removed only once it is older than
-  15 minutes (its create may still be in progress).
-- In Studio without API access (`DataService.persistence() == "Memory"`) both live in server
-  memory, like profiles do.
+  15 minutes (its create may still be in progress). Re-adding a listed raid (a retry) moves its
+  `createdAt` forward, never back (`Escrow.indexAdd`), so the retry is protected too.
+- When `DataService.persistence() == "Memory"` (Studio without API access, or the Studio memory
+  switch above) both live in server memory, like profiles do. Profiles and escrow always share
+  one mode: a saved profile never holds an escrow entry that only memory knew.
 
 ## Money model
 
@@ -54,13 +78,30 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 3. Repeating any step changes nothing after the first success.
 4. No defender loses more than `Config.Limits.maxLossesPerDay` critters per UTC day.
 
-Only the call that creates a record debits the defender (`Escrow.advance`). Every later path is
-`Escrow.recover`, which never debits afresh. It runs on either party's load, with the parties
-loaded in that server:
+Only the call that creates a record debits the defender (`Escrow.advance`). That call sets
+`EscrowRecord.createNonce` (a GUID; optional, missing on older records, no migration) so that a
+create which landed but whose response was lost is still recognised as its own on retry
+(`Escrow.decideCreate`) and driven forward instead of voided. The nonce never changes once
+written (`Escrow.canReplace`). Every later path is `Escrow.recover`, which never debits afresh.
+It runs on either party's load, with the parties loaded in that server:
 
-- `Pending`, defender loaded: their saved debit moves the record to `Debited`. No debit means
-  `Voided` (nothing moved).
+- `Pending`, defender loaded: their saved debit moves the record to `Debited`. No debit: first a
+  confirmed save by the session that still holds the defender's lock, without an entry for the
+  raid (`Store.saveProfileWithoutEntry`), then `Voided` (nothing moved). A server whose lock was
+  taken by another server cannot produce that save, so it never voids.
 - `Debited`, raider loaded: credit, then `Committed`.
+
+Retrying `EscrowService.transferLive` (P0.5): call again with IDENTICAL arguments (raidId,
+raider, defender, critterUid, glowRequested, isRevenge). Once a record is stored, the same raidId
+with any other argument returns `Refused` ("raidId already used by a different transfer"). While
+the server still waits on a retry of the raid (an earlier call returned `InFlight`), the retry
+reuses that call's `createNonce`. So a create that landed but lost its response is still the
+call's own, and the steal continues (`Escrow.advance`) instead of being voided.
+
+Phase 1 (P1.1, decision D-012): the void rule assumes only the creating call debits. A debit
+delivered by ProfileStore message, or applied to an offline profile, could land after a void and
+strand the loot, and `EscrowRecord` has no `kind` field to tell live from async. Both must be
+solved before any async transport ships.
 
 `appliedTransfers` entries are pruned after `Config.Escrow.appliedTransferRetentionSeconds`, but
 only by EscrowService after reading the player's `Open_` index, and never for a raidId still
@@ -98,10 +139,23 @@ Defaults turn on only the features that exist. Adding a flag is a contract chang
 3. Add a test that migrates an old-shape profile.
 4. Never remove or rename a persisted field without a migration.
 
+An optional field whose absence means the old behavior needs neither a migration nor a
+`SCHEMA_VERSION` bump, but it does need an old-save test (e.g. `untradeable`, D-005).
+
 ## Live raids
 
-Live stealing happens in an online owner's den (RaidService, decision D-003). Tuning lives in
-`Config.LiveRaid`:
+Live stealing happens in an online owner's den (RaidService, decision D-003).
+
+- Carrying or dropping a critter never changes any profile; only an escape committed through
+  Escrow (`EscrowService.transferLive`) moves ownership. A dropped critter goes back to its pad.
+- Phase 0 live steals take the critter only, no stored Glow (D-015).
+- `Net.Limits.GrabCritter` (5 per 10 s) also limits live grab starts from the steal prompt.
+- `Net.Pushes.BeingRaidedLive` (raiderUserId) goes to the den owner when a raider grabs.
+- `Net.Pushes.RaidEnded` goes to the raider whenever a live carry ends (decision D-020). In the
+  `RaidEnd` payload, `escaped` is true only when `transferLive` returned `Committed`. `raidId` is
+  the escrow raidId, or `""` for a drop before escape. `speciesId` is set, and `glow` is 0.
+
+Tuning lives in `Config.LiveRaid`:
 
 | Key | Launch value | Meaning |
 | --- | --- | --- |
@@ -109,6 +163,7 @@ Live stealing happens in an online owner's den (RaidService, decision D-003). Tu
 | `lockdownCooldownSeconds` | 120 | Wait after a Lockdown ENDS before the owner can start another |
 | `tagRange` | 6 | Studs: how close the owner must be to tag a raider |
 | `grabHoldSeconds` | 1 | How long a raider holds the grab to pick a critter up |
+| `grabRange` | 10 | Studs from the raider's root part to the pad centre: how close a raider must be to start a grab and to keep holding it (D-018) |
 
 `Net.Requests.Lockdown` is `() -> boolean` (true if a Lockdown started), limited by
 `Net.Limits.Lockdown` (3 per 10 s). Lockdown rules:
@@ -116,6 +171,7 @@ Live stealing happens in an online owner's den (RaidService, decision D-003). Tu
 - Only the den's owner can start one, and it applies to live raids only.
 - It blocks ENTRY only. Raiders already inside can leave, but a carried critter drops at the
   border.
+- Lockdown blocks every live raider, revenge included (D-013).
 - The cooldown counts from the END of a Lockdown (decision D-011). For a Lockdown started at
   server time `start`: `LockdownUntil = start + lockdownSeconds` (when it ends) and
   `LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds` (the earliest the owner can start
@@ -129,8 +185,8 @@ Attributes the server sets on Instances so clients can draw state without a remo
 server-written and display-only:
 
 - The server keeps the authoritative state in its own tables. It never reads `CarryingUid`,
-  `CarryingSpecies`, `LockdownUntil` or `LockdownReadyAt`, and no server decision ever comes
-  from an attribute.
+  `CarryingSpecies`, `LockdownUntil` or `LockdownReadyAt`, and no gameplay or data decision
+  ever comes from an attribute.
 - Clients must never be trusted for them. A client can change an attribute locally; the change
   does not replicate and must never matter.
 - Times are server time from `workspace:GetServerTimeNow()`, so every client reads one clock.
@@ -148,16 +204,17 @@ server-written and display-only:
 | Critter Model | `CritterUid`, `SpeciesId`, `Tier` | string | Which critter this model draws |
 | Critter Model | `PadIndex`, `OwnerUserId` | number | Where it sits and whose it is |
 
-One existing read: IncomeService reads `CritterUid` and `PadIndex` back from critter models it
-built itself, only to decide what to redraw. Clients cannot change those values on the server.
-
 ## Eggs
 
 `Config.Economy.eggMaxTier` (`"Uncommon"` at launch) is the highest tier a bought egg can hatch.
 Tiers up to it keep their `Config.EggOdds` ratios, renormalized to sum to 1
 (`Economy.rollTierUpTo`): Common 0.6875 and Uncommon 0.3125 today, tested in `Config.spec`.
-Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table and ignores
-`eggMaxTier` (decision D-004).
+Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table (from
+P0.4b) and ignores `eggMaxTier` (decision D-004).
+
+If Glow became purchasable with Robux, Glow eggs would become paid random items. CLAUDE.md rule
+6 forbids this at launch: Glow stays non-purchasable while it buys eggs, unless Kian changes the
+rule. If he does, show the odds and pass PolicyService before shipping.
 
 ## Tradeability
 
@@ -166,8 +223,9 @@ gifted, such as one from a rescue egg. Missing means tradeable, so this optional
 migration and no `SCHEMA_VERSION` bump; `Profile.spec` checks that an old save reads as
 tradeable.
 
-- `Profile.isTradeable(critter, now)` is the one check: false if `untradeable` is set, or while
-  `stolenLockUntil` is in the future.
+- `Profile.isTradeable(critter, now)` is the minimum check: false if `untradeable` is set, or
+  while `stolenLockUntil` is in the future. Trading adds its own rules when it is designed (e.g.
+  no trade back to the critter's previous owner, which would be ransom).
 - Any future trading or gifting code must refuse a critter for which `Profile.isTradeable` is
   false. The `reviewer` checks for this on every trading or gifting PR.
 - Raids are not trades: escrow moves an untradeable critter like any other, and the flag survives
