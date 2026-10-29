@@ -66,7 +66,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| C6 | data | — | In review | #123 | 1 | 365 tests. 7 optional fields, no migration; reviewer (xhigh) running. D-063. Was: Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
+| C6 | data | — | In review | #123 | 1 | Reviewer (xhigh) APPROVED. 365 tests. 7 optional fields, no migration. Ship together with P2.6 (else existing-build new players get onboarding later). D-063. Was: Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
 | P2.1 | assets | — | Blocked | #87 (open) | 1 | Generation paused: no credits (D-057); Gate 1 picks are Kian's. Prompts and 40 fronts done in #87 |
 | P2.2 | assets | — | Blocked | #122 (stacked on #87) | 1 | Briefs done: 19 pieces, kit manifest (ids empty), credit estimate ~263 (38 images + 25 meshes incl. retries). Generation + Asset Gates wait for credits (D-057) |
 | P2.3 | raid | — | In review | #125 | 1 | 365 tests. Kit seam (WorldKit template → asset id → greybox), pads via Economy.padCount 6→30, dens/pockets stream as units, 12 lights; full map 851 parts / 1,943 instances; manifest ids 1:1 (+10 seam-only ids). No contract change. Phone numbers: Kian. Was: Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
@@ -201,6 +201,8 @@ dropped based on real play.
 - seenOnline: one MemoryStore read per revenge row per GetRaidTargets (15 s cache); watch the budget (reviewer #94). Six more in #94.
 
 - Notifications (reviewer #118): the opt-in prompt hook saves promptedAt before the client confirms the prompt showed (check CanPromptOptInAsync client-side); `successfulRaids == 1` is the only chance (confirm the onboarding steal doesn't count); launchRaidId must go through the server revenge-token check; NotificationState_v1 needs right-to-erasure handling; confirm Open Cloud from HttpService with a Secret works live (small each).
+- Profile receipts (reviewer #123): recordReceipt should return a reason (recorded/duplicate/invalid) and drop the 100-char PurchaseId limit; evict by insertion order, not `at` (small).
+- Onboarding (reviewer #123): a template-only Phase 1 save stamped by `prepare` skips onboarding (set it there); countSuccessfulRaid isn't keyed by raid id (retried escape counts twice: analytics/opt-in only); guard test that Critter never carries an accessory; frozen real Phase 1 save fixture (small each).
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
