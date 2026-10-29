@@ -27,8 +27,8 @@ Current phase: 0 (at the Phase 0 gate) · Last updated: 2026-10-28
 | P0.10 | ui | P0.9 | Done | #51 | 1 | Odds chip + panel (D-028). Studio-checked. Fixes for #54 (phone layout) and #55 (per-species rounding) in P0.10b |
 | P0.11 | economy | — | Done | #53 | 1 | PurchaseService catalog header for D-029 |
 | P0.10b | ui | P0.10 | Done | #57 | 1 | Fixes #54 (compact column on short screens, fit tested 320-900 px) and #55 (true per-species odds). Studio-simulated; real phone check deferred |
-| C2 | data | — | In review | #59 | 1 | Config.Boosts + contracts.md Robux-linked multiplier rule (D-030). Reviewer running |
-| P0.12 | economy | C2 | Todo | | 0 | Pure Robux-linked Glow multiplier by policy flag + accrue factor + tests; PurchaseService header (D-030) |
+| C2 | data | — | Done | #59 | 1 | Reviewer APPROVED. Config.Boosts + contracts.md Robux-linked multipliers (D-030) |
+| P0.12 | economy | C2 | In progress | agent/economy/P0.12 | 1 | glowBoostFactor (fail closed, purchases kill switch), accrue factor, unboosted cap, tests by policy flag; PurchaseService header (D-032) |
 | P0.5g | data | — | In progress | agent/data/C3 | 1 | D-031 live loss rules: Config.LiveRaid (postLossSafetySeconds 60, maxStealsPerPairPerDay 2, protectionLossShare 0.5), optional liveLossBaseRate/liveLossRateToday, EscrowRecord.kind, value-based debit, pure rules + tests, contracts.md. Reviewer |
 | P0.5h | raid | P0.5g | Todo | | 0 | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
 | P0.5i | ui | P0.5h | Todo | | 0 | Show "Protected today" and the post-loss countdown from den LiveProtected / LiveGrabReadyAt (display only) |
@@ -59,7 +59,16 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 
 ## Blocked (needs Kian)
 
-- None right now.
+Not urgent: all three are needed before P2.8 ships products, nothing earlier.
+- Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
+  vault slot (Vault critters earn 50%), auto-collect, shield, timer skips (undefined; if any
+  skip covers income it grants Glow), event pass rewards, raid scout, and VIP's "non-Glow
+  perks" (undefined). D-030 only switches off the two multipliers. Should all of these be
+  Robux-linked too (off or reduced for restricted players), or classified one by one in the
+  P2.8 audit?
+- Does VIP's 1.5× apply to offline income (accrue covers both), or only while online?
+- Restricted buyers: should Lantern Night be hidden from players whose policy restricts paid
+  random items, and should the VIP description say the Glow bonus isn't available everywhere?
 
 ## Deferred to the end-of-phase session (Kian, 2026-10-28)
 

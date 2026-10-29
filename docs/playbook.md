@@ -370,7 +370,9 @@ route launch data to the revenge screen. _Done when:_ a test send lands and Join
 revenge screen.
 
 **P2.8 Monetization.** Implement passes and products from the design doc in PurchaseService
-with idempotent receipts. List every product with price for Kian to create in the Creator
+with idempotent receipts. Before any product that raises or protects Glow ships (VIP, Lantern
+Night, vault slot, auto-collect, shield, timer skips, event pass), run the reviewer policy audit
+and the PolicyService check (D-028, D-030). List every product with price for Kian to create in the Creator
 Dashboard (**stop** for that). No paid randomness. _Done when:_ test purchases grant exactly
 once, including after a forced shutdown mid-purchase.
 

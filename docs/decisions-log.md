@@ -3,6 +3,17 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-032 · 2026-10-28 · Robux-linked multiplier mechanics
+Context: reviewer on #59. Decisions: (1) the multiplier is pure (Economy.glowBoostFactor) and
+fails closed: unknown PolicyService result = restricted; (2) kill switch: Robux-linked
+multipliers apply only while Config.Flags.purchases is on; (3) earned = species rate × mutation
+× placement × rebirth × (1 + applicable Config.Boosts bonuses), applied through accrue's factor;
+(4) the storage cap uses the unboosted rate, so a boost ending never leaves stored Glow above the
+cap; (5) accrue at the old factor before the factor changes (boost start/end, VIP ownership or
+policy result arriving, joining/leaving a boosted server); (6) the restriction flag, VIP
+ownership and Lantern Night state come only from the server. Open product/policy questions for
+Kian are in docs/progress.md Blocked. Reversible: yes.
+
 ### D-031 · 2026-10-28 · Live loss rules: value-based daily protection (Kian)
 Decision (replaces the count-based cap for live steals): (1) after a live loss the den can't be
 grabbed from for 60 s (Config.LiveRaid.postLossSafetySeconds); (2) live same-pair limit 2 per day
@@ -33,7 +44,8 @@ Night +50% = 2.0×), values in Config.Boosts; pure multiplier logic tested per p
 
 ### D-029 · 2026-10-28 · Three more launch products, no randomness (Kian)
 Decision: add to the launch catalog (design-summary, PurchaseService): server boost "Lantern
-Night" (99-199 Robux, +50% Glow earned server-wide for 15 min, buyer announced), critter
+Night" (99-199 Robux, +50% Glow earned server-wide for 15 min, buyer announced; the open policy
+check below is answered by D-030), critter
 accessories (25-149, direct sale, cosmetic only), escape emotes (pass, 49-149). No randomness.
 Open policy check (orchestrator flag): Lantern Night sells extra Glow earning for Robux while
 Glow buys random eggs (D-028's reason for earn-only Glow); it ships only after a reviewer policy
