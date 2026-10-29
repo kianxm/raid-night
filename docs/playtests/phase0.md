@@ -33,9 +33,13 @@ What you will find:
     goes back on its pad. You also drop it if you die or leave, or move impossibly fast or high
     (teleport, speed hack, flying). Walking and jumping normally never drops it.
   - **Seeing the result:** while you carry, a "Carrying <critter>" label sits at the top of the
-    screen and a name floats over your head. When it disappears, either you got it home or you
-    dropped it. A "you stole it" message and an inventory screen are not in this build yet,
-    so ask Kian whether it counted.
+    screen and a name floats over your head. When the carry ends you get a message at the top:
+    "You stole <critter>! It's in your den." if you got it home, "Dropped <critter>!" if you
+    lost it, or "Steal not confirmed" (with "If it went through, it'll show up in your den.")
+    if the game could not confirm it.
+  - **Where it lands:** a stolen critter appears on a free pad in your den right away. If all 6
+    pads are full it waits in storage and moves onto a pad as soon as one frees up (for
+    example when you put a critter in the Vault). Critters in the Vault are never moved.
   - **What you get:** the critter only. No Glow moves, in either direction.
 - **Lockdown:** the den's owner presses Lockdown to lock their den for 45 seconds.
   - New raiders cannot walk in: the game pushes them back out.
@@ -55,8 +59,7 @@ No script. Do what sounds fun, and try some of these:
 2. Try to steal the rarest critter you see.
 3. Get a stolen critter all the way home without dropping it.
 4. Defend your den: tag someone who is carrying your critter, or try Lockdown.
-5. Steal back a critter that someone took from you (it only works if it is on a pad in
-   their den).
+5. Steal back a critter that someone took from you (it has to be on a pad in their den).
 
 ## 3. What we watch
 
@@ -101,11 +104,9 @@ Not for testers.
 - [ ] Kill switches: `Config.Flags.raids = true` (stealing is off without it). Leave
       `asyncRaids`, `purchases`, `trading` and `notifications` as they are (off in Phase 0).
 - [ ] You joined once yourself and saw your den, the starter egg and the three HUD buttons.
-- [ ] Known gaps in this build (found in the P0.8 Studio pass): a raider gets no "stolen" or
-      "dropped" message (issue #41), and a stolen critter goes to the thief's Inventory with no
-      screen to place it, so a steal is invisible in the den (issue #43). Decide whether to
-      wait for those fixes first; the pass question ("want to keep stealing") is hard to answer
-      without them. Until then, watch the Output or ask the tester what happened.
+- [ ] Known limits: repeat steals from the same player hit a per-day pair limit (D-022) and
+      are refused with no message, and a player can only lose so many critters a day. If a
+      tester says "it won't let me", look at the Output for `PairLimit` or the daily cap.
 - [ ] 4 or 5 friends invited, with at least one on a phone.
 
 **During**
