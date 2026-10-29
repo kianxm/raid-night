@@ -3,6 +3,22 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-026 · 2026-10-28 · Small escrow/data follow-ups go to P1.1
+Decision: the #38 reviewer suggestions (a source guard that raw memory/DataStore access only
+appears in read/update; pcall the storage() call in transferLive; "DataService not started"
+error text), recovery refreshing the raider's HUD when a late InFlight commits, and the rebirth
+lock check (applyRebirth must skip or refuse locked critters when rebirth is wired) are
+recorded as P1.1 TODOs, not more Phase 0 rounds. Why: none is reachable in Phase 0; simplest
+thing that passes the gate. Reversible: yes.
+
+### D-025 · 2026-10-28 · Carry anti-cheat: lag-tolerant budget
+Decision: keep the 1 s freeze rule (phone lag must not drop honest carriers) instead of capping
+the budget below the 12-stud den gap. Guarantee: over any window a carrier moves at most
+(v + 2) + refill·v·T studs (moveRefill lowered to 1.1); an escape needs an earlier sample on the
+street, and that flag resets whenever the carrier is back inside the defender's den; carriers
+above 16 studs drop; tags use X/Z distance; Lockdown push-backs shift the carry's last position
+by the server's push so nothing the client moved is forgiven. Reviewer-checked. Reversible: yes.
+
 ### D-024 · 2026-10-28 · P0.4c runs as a third agent briefly
 Decision: the ~20-line swap fix (reviewer B2 on #29) runs alongside the raid fix round and
 P0.5e, above Phase 0's parallelism of 2. Why: it gates the #29 merge and is tiny.
