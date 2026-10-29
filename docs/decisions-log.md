@@ -3,13 +3,31 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-031 · 2026-10-28 · Live loss rules: value-based daily protection (Kian)
+Decision (replaces the count-based cap for live steals): (1) after a live loss the den can't be
+grabbed from for 60 s (Config.LiveRaid.postLossSafetySeconds); (2) live same-pair limit 2 per day
+(maxStealsPerPairPerDay); (3) daily live protection is value-based: when today's live losses
+reach 50% (protectionLossShare) of the den's Glow per second, measured at its first live loss of
+the day, the den is protected for the rest of the UTC day; optional profile fields
+liveLossBaseRate and liveLossRateToday, reset daily, no migration; (4) live steals move critters
+through Escrow.luau on the two in-server profiles until P1.1. All values in Config, server-
+enforced, display-only attributes, reviewer pass. Scheduled as part of P0.5 (P0.5g data, P0.5h
+raid, P0.5i ui). Phase 3 tuning item P3.9 (churn after first loss, raid success rate, like
+ratio). Kit question added: "Did you chase the thief after being robbed?".
+Orchestrator details: applies to live steals only; async keeps maxLossesPerDay until Phase 1;
+loss value = the stolen critter's Glow/s (Economy.critterRate) at debit; enforced at grab (also
+refused while a carry from that den is in flight) and again at escrow debit (EscrowRecord gains
+optional kind, missing = Live); the 60 s timer is server memory (live steals are same-server).
+Reversible: yes.
+
 ### D-030 · 2026-10-28 · Robux-linked Glow multipliers are off for policy-restricted players (Kian)
 Decision: Lantern Night stays a Glow multiplier. All Robux-bought Glow multipliers (VIP 1.5×
 and Lantern Night) are Robux-linked. For a player whose PolicyService info restricts paid
 random items, they never apply: VIP keeps its non-Glow perks, and other players' Lantern Nights
 don't boost them, so their Glow stays earn-only and eggs stay purchasable. Egg odds are shown
 everywhere. Both products stay gated on the reviewer policy audit and the PolicyService check
-in P2.8. Amends D-028. Orchestrator detail: the bonuses stack additively (VIP +50% and Lantern
+in P2.8. Amends D-028. Orchestrator details: boosts multiply the rebirth-adjusted rate (earned =
+base × rebirth × (1 + applicable bonuses)); the bonuses stack additively (VIP +50% and Lantern
 Night +50% = 2.0×), values in Config.Boosts; pure multiplier logic tested per policy flag
 (C2, P0.12). Reversible: yes.
 

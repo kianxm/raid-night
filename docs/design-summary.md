@@ -31,7 +31,12 @@ raid back or raid others → upgrade den and traps → collect more critters.
 - **Den:** 8 dens per server. Pads 6 → 30. Vault: never stealable in async raids, earns 50%.
 - **Critters:** 7 tiers, 4 mutations (Shiny ×1.5, Moonlit ×2, Haunted ×3, Golden ×5).
 - **Income:** lazy accrual into `stored` (stealable); `collect` banks into `glow` (safe).
-- **Live stealing:** grab, carry, owner can tag to drop, 45 s lockdown with cooldown.
+- **Live stealing:** grab, carry, owner can tag to drop, 45 s lockdown with cooldown. Critter only
+  (no Glow) in Phase 0. Live loss rules (D-031): after a live loss the den can't be grabbed from
+  for 60 s (`postLossSafetySeconds`); 2 live steals per day between the same two players; daily
+  live protection is value-based: once today's live losses reach 50% of the den's Glow per second
+  (measured at its first live loss of the day), the den is protected from live steals for the
+  rest of the UTC day. Live steals move critters through Escrow on the two in-server profiles.
 - **Defenses:** traps on a grid, critters assigned as guards (earn nothing).
 - **Gear:** grapple, smoke bomb, decoy, speed coil, lockpick (live raids only).
 
@@ -46,7 +51,7 @@ inside the raider's own server (no teleport) → escape → escrow transfer → 
 | Loot per raid | 1 critter + 25% of stored Glow |
 | Vault | Never stealable in async raids |
 | Shield after a successful raid | 4 hours |
-| Critters lost per day | 3 maximum |
+| Critters lost per day | 3 maximum (async; live steals use the value-based rule above) |
 | New-player protection | 48 hours, or den level under 5 |
 | Same-pair limit | 2 raids per day |
 | Revenge bonus | Ignores shield once, +10% loot |
