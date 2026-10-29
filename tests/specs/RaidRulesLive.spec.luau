@@ -229,8 +229,8 @@ tests["the same-pair daily limit applies to live grabs, in-flight steals include
 end
 
 tests["grab range is checked on server distance, inclusive, and NaN is refused"] = function()
-	expect.truthy((RaidRules.canGrabLive(grab({ distance = RaidRules.Live.grabRange }))))
-	local _, far = RaidRules.canGrabLive(grab({ distance = RaidRules.Live.grabRange + 0.01 }))
+	expect.truthy((RaidRules.canGrabLive(grab({ distance = Live.grabRange }))))
+	local _, far = RaidRules.canGrabLive(grab({ distance = Live.grabRange + 0.01 }))
 	expect.eq(far, Reason.OutOfRange)
 	local _, nan = RaidRules.canGrabLive(grab({ distance = 0 / 0 }))
 	expect.eq(nan, Reason.OutOfRange)
@@ -247,7 +247,7 @@ tests["no pad is within grab range of a den edge, so nobody grabs from outside"]
 	for pad = 1, L.padsPerPlot do
 		local x, z = Plots.padLocal(pad)
 		local edge = math.min(half - math.abs(x), half - math.abs(z))
-		expect.truthy(edge > RaidRules.Live.grabRange, `pad {pad} is {edge} studs from an edge`)
+		expect.truthy(edge > Live.grabRange, `pad {pad} is {edge} studs from an edge`)
 	end
 end
 
