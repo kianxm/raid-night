@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-027 · 2026-10-28 · Phase 0: Inventory critters auto-fill free pads; fix steal feedback before the gate
+Context: the P0.8 Studio pass found stolen critters (and eggs bought with full pads) land in
+Inventory, which has no UI in Phase 0 (#43), and the raider sees no steal result (#41).
+Decision: Economy.autoPlace moves Inventory critters onto free usable pads (oldest first; never
+Vault, never locked, never displacing) on every den push; the HUD toasts RaidEnded. Both are
+fixed before the gate because the gate asks whether stealing is fun. Revisit auto-place when
+P2.5 adds an inventory UI. #42 (test-hook Lockdown state survives clear) is test-only and
+deferred. Reversible: yes.
+
 ### D-026 · 2026-10-28 · Small escrow/data follow-ups go to P1.1
 Decision: the #38 reviewer suggestions (a source guard that raw memory/DataStore access only
 appears in read/update; pcall the storage() call in transferLive; "DataService not started"
