@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: its glow cuts out, it taps its tail until it flickers back on",
     "stolen": "gotcha pose when stolen: a quick cheerful gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "flyer",
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -21,6 +22,7 @@
     "#121626"
   ],
   "personality": "cheerful",
+  "pose": "hovering in the air with its wings spread and its legs tucked, not standing",
   "status": "prompts-ready",
   "tier": "Common"
 }

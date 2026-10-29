@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 30,
+    "parts": 3,
+    "texture": 512,
+    "triangles": 300
+  },
+  "glow": {
+    "at": "a ring inset around the top edge",
+    "color": "warm amber lamp glow"
+  },
+  "group": "den",
+  "id": "pad",
+  "name": "Critter pad",
+  "notes3d": "Cheapest and most repeated piece: no undercut, no tiny detail. Glow ring on its own emissive material so the engine can recolor it per critter and dim it when empty. Pivot centre of the base.",
+  "purpose": "The round stand one critter sits on (6 to 30 per den); glows in the critter's color in-engine.",
+  "sizeStuds": {
+    "x": 8,
+    "y": 0.6,
+    "z": 8
+  }
+}

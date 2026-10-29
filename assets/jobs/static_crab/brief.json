@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: the screen flips channels and lands on a smiley face",
     "stolen": "gotcha pose when stolen: a quick suspicious gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "crawler",
   "budget": {
     "heightStuds": 2.5,
     "texture": 1024,
@@ -21,6 +22,7 @@
     "#1C1F26"
   ],
   "personality": "suspicious",
+  "pose": "scuttling on short crab legs, claws empty, the television worn on its back like a hermit crab shell with the screen facing forward above its eyes",
   "status": "prompts-ready",
   "tier": "Rare"
 }

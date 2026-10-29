@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: blinks slowly and a few stars fall from its wings",
     "stolen": "gotcha pose when stolen: a quick all-knowing gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "upright",
   "budget": {
     "heightStuds": 4,
     "texture": 1024,
@@ -12,7 +13,7 @@
   "eventOnly": false,
   "humanArtPass": true,
   "id": "nebula_owl",
-  "look": "large owl whose wings hold a swirling galaxy",
+  "look": "majestic owl with a crest of star-tipped feathers, wings spread wide to show a swirling galaxy inside them, a small star mark on its forehead and tiny planets orbiting its head",
   "name": "Nebula Owl",
   "notes": "",
   "palette": [
@@ -21,6 +22,7 @@
     "#090618"
   ],
   "personality": "all-knowing",
+  "pose": "standing upright on two short feet, wings opened wide",
   "status": "prompts-ready",
   "tier": "Mythic"
 }

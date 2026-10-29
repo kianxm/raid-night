@@ -13,6 +13,18 @@ local process = require("@lune/process")
 
 local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 	{
+		name = "AssetPrompts",
+		load = function()
+			return require("./specs/AssetPrompts.spec")
+		end,
+	},
+	{
+		name = "AssetKit",
+		load = function()
+			return require("./specs/AssetKit.spec")
+		end,
+	},
+	{
 		name = "Catalog",
 		load = function()
 			return require("./specs/Catalog.spec")

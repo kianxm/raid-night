@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 12,
+    "parts": 5,
+    "texture": 512,
+    "triangles": 900
+  },
+  "glow": {
+    "at": "the small trigger plate on the ground",
+    "color": "bright warning orange glow"
+  },
+  "group": "trap",
+  "id": "trap_net",
+  "name": "Net trap",
+  "notes3d": "Two states wanted: set (this mesh) and sprung, which the engine does by tweening the net down, so net and posts are separate meshes. Thick cords, no thin strands. Pivot centre of the base.",
+  "purpose": "Pocket-den trap (Net): a net that drops and holds a raider briefly.",
+  "sizeStuds": {
+    "x": 6,
+    "y": 4,
+    "z": 6
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 1,
+    "parts": 10,
+    "texture": 512,
+    "triangles": 4000
+  },
+  "glow": {
+    "at": "the pool of light under the centrepiece",
+    "color": "warm amber lamp glow"
+  },
+  "group": "world",
+  "id": "plaza",
+  "name": "Plaza",
+  "notes3d": "Diameter 48 matches Plots plazaRadius 24. One-off, so it gets the biggest budget in the kit. Fountain water on its own emissive material. Pivot at plaza centre, top at y=0.",
+  "purpose": "The round hub at the centre of the street where the 8 dens meet; first thing a player sees.",
+  "sizeStuds": {
+    "x": 48,
+    "y": 3,
+    "z": 48
+  }
+}

@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: tries to breathe fire and coughs out a smoke ring instead",
     "stolen": "gotcha pose when stolen: a quick cocky gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "flyer",
   "budget": {
     "heightStuds": 3,
     "texture": 1024,
@@ -21,6 +22,7 @@
     "#1A0F26"
   ],
   "personality": "cocky",
+  "pose": "hovering in the air with its wings spread and its legs tucked, not standing",
   "status": "prompts-ready",
   "tier": "Epic"
 }

@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 16,
+    "parts": 3,
+    "texture": 512,
+    "triangles": 450
+  },
+  "glow": {
+    "at": "the small lantern on top",
+    "color": "warm amber lamp glow"
+  },
+  "group": "prop",
+  "id": "crate_stack",
+  "name": "Crate stack",
+  "notes3d": "Lantern on its own emissive material.",
+  "purpose": "Street and den dressing: crate stack. Never blocks a pad.",
+  "sizeStuds": {
+    "x": 5,
+    "y": 5,
+    "z": 5
+  }
+}

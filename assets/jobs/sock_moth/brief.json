@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: headbutts the nearest lamp over and over",
     "stolen": "gotcha pose when stolen: a quick goofy gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "flyer",
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -21,6 +22,7 @@
     "#2B2440"
   ],
   "personality": "goofy",
+  "pose": "hovering in the air with its wings spread and its legs tucked, not standing",
   "status": "prompts-ready",
   "tier": "Common"
 }

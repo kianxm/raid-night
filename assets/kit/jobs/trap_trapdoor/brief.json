@@ -1,0 +1,22 @@
+{
+  "budget": {
+    "onScreenAtOnce": 12,
+    "parts": 3,
+    "texture": 512,
+    "triangles": 350
+  },
+  "glow": {
+    "at": "a thin seam around the hatch",
+    "color": "bright warning orange glow"
+  },
+  "group": "trap",
+  "id": "trap_trapdoor",
+  "name": "Trapdoor trap",
+  "notes3d": "Hatch is a separate mesh from the surrounding tile so it can swing open. No detail smaller than 0.3 studs. Pivot at the hinge edge for the hatch, centre for the tile.",
+  "purpose": "Pocket-den trap (Trapdoor): a floor hatch that drops a raider back toward the gate.",
+  "sizeStuds": {
+    "x": 6,
+    "y": 0.6,
+    "z": 6
+  }
+}
