@@ -3,6 +3,20 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-067 · 2026-10-29 · Phase 2 follow-ups land on preview/phase2
+Context: hand-offs now cross several stacked PR chains (C6, C6b, P2.8, P2.9, P2.7) that can't merge
+(D-058). Decision: the integration agent builds `preview/phase2` from every Phase 2 PR in order;
+follow-up tasks branch from preview/phase2 and open PRs into it (reviewed as usual); the
+integration agent folds approved ones in with a local merge and push. Kian lands the phase by
+merging preview/phase2 into integration in one PR (as Phase 1 did with #111), or PR by PR in the
+listed order. Why: one coherent tree to test, no cross-stack rebasing. Reversible: yes.
+
+### D-066 · 2026-10-29 · raided_offline is logged against the raider when the defender is offline
+Context: data on #128: Roblox analytics logs events against a player in the server. Decision: log
+`raided_offline` on the raider's server/player; counts are right, unique users for that event are
+raiders. No new saved field. Why: simplest; revisit if the closed test needs per-defender uniques.
+Reversible: yes.
+
 ### D-065 · 2026-10-29 · P2.8 open product questions: safe defaults, answers are Kian's
 Context: economy on #127. Decision: (1) restricted players aren't offered VIP (`vip.offerRestricted
 = false`) until its non-Glow perks are defined; (2) a restricted player who buys a Robux-linked
