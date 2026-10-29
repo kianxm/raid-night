@@ -19,7 +19,10 @@ What you will find:
 
 - **Your own den** with 6 pads for critters and an egg station. Walk up to the station for
   the Buy Egg, Collect Glow and Upgrade Den prompts.
-- **A free starter egg** to get you going.
+- **A free starter egg** to get you going. It is always a Common.
+- **Egg odds on screen:** every egg shows its odds before you buy it. The "Odds" chip above Buy
+  Egg gives the chance of each rarity, and tapping it opens the full list of critters with
+  their chances. In this build eggs hatch Common or Uncommon only.
 - **Glow**, the currency your critters earn over time. It fills a storage bar. Collect it to
   bank it. In this build a steal takes the **critter only**, never Glow (stealing stored Glow
   comes later, with offline raids).
@@ -55,7 +58,7 @@ What you will find:
 
 No script. Do what sounds fun, and try some of these:
 
-1. Hatch your free egg and put the critter on a pad. Then watch your Glow grow.
+1. Hatch your free egg (always a Common) and put the critter on a pad. Then watch your Glow grow.
 2. Try to steal the rarest critter you see.
 3. Get a stolen critter all the way home without dropping it.
 4. Defend your den: tag someone who is carrying your critter, or try Lockdown.
@@ -95,6 +98,8 @@ Not for testers.
 
 - [ ] Latest `integration` build is synced and published to the private test place (publish
       only the test place, never a live one). Join link and access method filled in above.
+- [ ] The real test save now holds extra Inventory critters (and less Glow) from the P0.8 odds
+      check. Wipe it if you want a clean start (see the next item).
 - [ ] Want a fresh start? Delete the test profiles (store `PlayerProfiles`) in Creator Hub's
       Data Stores manager for the test universe. Otherwise old progress carries over.
 - [ ] **`StudioMemoryProfiles` is NOT set** on the published test place: open
