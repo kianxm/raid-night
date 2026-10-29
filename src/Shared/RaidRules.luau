@@ -164,12 +164,19 @@ end
 	os.time() for profile reads).
 ]]
 
--- Live-raid world constants Config.LiveRaid does not hold. `grabRange` is proposed as
--- Config.LiveRaid.grabRange (a contract change for the data owner).
+-- Live-raid tuning Config.LiveRaid does not hold yet. These stay here for Phase 0 and move to
+-- Config in the next contract batch (decision D-021). grabRange moves to Config.LiveRaid in P0.5e
+-- (decision D-018); until that lands this copy is the one in use.
 RaidRules.Live = table.freeze({
 	grabRange = 10, -- studs, raider root part to pad centre, checked for the whole hold
-	moveTolerance = 2, -- a carrier may cover up to this many times their walk speed per sample...
-	moveSlack = 6, -- ...plus this many studs, to absorb replication jitter
+	-- Movement budget (see carryStep). It refills at moveRefill x the carry walk speed and holds
+	-- at most budgetSeconds of walking plus budgetSlack studs. A carry starts with the slack only,
+	-- so a speed hack fails within a second or two, while a lag freeze of up to budgetSeconds
+	-- (no samples, then one catch-up jump) still passes: the budget refills during the freeze.
+	moveRefill = 1.25,
+	budgetSeconds = 1,
+	budgetSlack = 2,
+	maxCarryHeight = 16, -- studs of root part above the den floor (a jump off the den station fits)
 })
 
 export type Lockdown = {
@@ -190,21 +197,29 @@ export type LiveGrab = {
 	padIndex: number,
 	carrying: boolean, -- the raider already carries a critter
 	isLocked: (uid: string) -> boolean, -- critter already carried or in escrow
+	-- Steals already under way (carried or in escrow) that would count against the owner's daily
+	-- loss cap, and against this raider-owner pair's daily limit, once they land.
+	inFlightForOwner: number,
+	inFlightForPair: number,
 	distance: number, -- raider root part to the pad, server positions
 	now: number, -- unix seconds, for the owner's daily loss counter
 }
 
-export type CarryOutcome = "Continue" | "TooFast" | "Escape" | "Tagged" | "DropAtBorder"
+export type CarryOutcome = "Continue" | "TooFast" | "TooHigh" | "SkippedStreet" | "Escape" | "Tagged" | "DropAtBorder"
 
 export type CarryStep = {
-	moved: number, -- horizontal studs since the last sample
+	moved: number, -- horizontal (X/Z) studs since the last sample
 	dt: number, -- seconds since the last sample
 	walkSpeed: number, -- the carry walk speed the server set
+	budget: number, -- movement budget left after the last sample (carryStartBudget at the grab)
+	height: number, -- carrier root part above the den floor, studs
 	insideOwnDen: boolean,
 	wasInsideDefenderDen: boolean,
 	insideDefenderDen: boolean,
+	crossedStreet: boolean, -- an earlier sample was outside both dens
 	lockdownActive: boolean, -- the defender's den is locked down right now
-	-- The critter's OWNER to the carrier (nobody else can tag); nil when the owner has no character.
+	-- The critter's OWNER to the carrier on X/Z only (height never dodges a tag; nobody else can
+	-- tag); nil when the owner has no character.
 	ownerDistance: number?,
 }
 
@@ -255,8 +270,13 @@ function RaidRules.canGrabLive(g: LiveGrab): (boolean, string?, Critter?)
 	if g.isLocked(critter.uid) then
 		return false, RaidRules.Reason.CritterBusy, nil
 	end
-	if RaidRules.lossesToday(profile, g.now) >= Config.Limits.maxLossesPerDay then
+	if RaidRules.lossesToday(profile, g.now) + g.inFlightForOwner >= Config.Limits.maxLossesPerDay then
 		return false, RaidRules.Reason.DefenderLossCap, nil
+	end
+	-- Same-pair daily limit (decision D-022), read from the owner's counters for this raider.
+	local pairRaids = RaidRules.pairCount(profile, g.raiderUserId, g.now) + g.inFlightForPair
+	if pairRaids >= Config.Limits.maxRaidsPerPairPerDay then
+		return false, RaidRules.Reason.PairLimit, nil
 	end
 	if not (g.distance <= RaidRules.Live.grabRange) then -- also refuses NaN
 		return false, RaidRules.Reason.OutOfRange, nil
@@ -273,28 +293,50 @@ function RaidRules.carryWalkSpeed(baseWalkSpeed: number, weight: Weight): number
 	return baseWalkSpeed * RaidRules.carrySpeedMultiplier(weight)
 end
 
--- Could a carrier walking at `walkSpeed` have covered `moved` studs in `dt` seconds?
-function RaidRules.carryMoveOk(moved: number, dt: number, walkSpeed: number): boolean
-	local limit = walkSpeed * math.max(dt, 0) * RaidRules.Live.moveTolerance + RaidRules.Live.moveSlack
-	return moved <= limit -- NaN fails
+-- The most movement budget a carrier at `walkSpeed` can bank.
+function RaidRules.carryBudgetCap(walkSpeed: number): number
+	return walkSpeed * RaidRules.Live.budgetSeconds + RaidRules.Live.budgetSlack
 end
 
--- One server sample of a carry. First match wins: a teleport never counts as an escape, and a
--- carrier who is home is safe.
-function RaidRules.carryStep(s: CarryStep): CarryOutcome
-	if not RaidRules.carryMoveOk(s.moved, s.dt, s.walkSpeed) then
-		return "TooFast"
+-- The budget a carry starts with: the slack only, nothing banked.
+function RaidRules.carryStartBudget(): number
+	return RaidRules.Live.budgetSlack
+end
+
+--[[
+	One server sample of a carry. Returns the outcome, the budget left, and whether the carrier
+	has now been seen on the street. First match wins:
+	  TooFast        the budget went negative: sustained speed, or a jump bigger than ~1 s of
+	                 walking. The budget refills at moveRefill x walkSpeed, capped, then pays for
+	                 the X/Z distance moved.
+	  TooHigh        root part more than maxCarryHeight above the den floor (flying)
+	  DropAtBorder   left the owner's den during a Lockdown (checked before an escape, so no jump
+	                 out of a locked den lands as one)
+	  SkippedStreet  reached your own den without ever being seen outside both dens: a hop across
+	                 the gap between neighbouring dens never escapes (the critter drops)
+	  Escape         inside your own den; home is safe even with the owner close behind
+	  Tagged         the owner within tagRange on X/Z
+]]
+function RaidRules.carryStep(s: CarryStep): (CarryOutcome, number, boolean)
+	local refill = RaidRules.Live.moveRefill * s.walkSpeed * math.max(s.dt, 0)
+	local budget = math.min(RaidRules.carryBudgetCap(s.walkSpeed), s.budget + refill) - s.moved
+	local crossedStreet = s.crossedStreet or (not s.insideDefenderDen and not s.insideOwnDen)
+	if not (budget >= 0) then -- NaN fails too
+		return "TooFast", budget, crossedStreet
 	end
-	if s.insideOwnDen then
-		return "Escape"
-	end
-	if s.ownerDistance and s.ownerDistance <= Config.LiveRaid.tagRange then
-		return "Tagged"
+	if not (s.height <= RaidRules.Live.maxCarryHeight) then
+		return "TooHigh", budget, crossedStreet
 	end
 	if s.lockdownActive and s.wasInsideDefenderDen and not s.insideDefenderDen then
-		return "DropAtBorder"
+		return "DropAtBorder", budget, crossedStreet
 	end
-	return "Continue"
+	if s.insideOwnDen then
+		return if crossedStreet then "Escape" else "SkippedStreet", budget, crossedStreet
+	end
+	if s.ownerDistance and s.ownerDistance <= Config.LiveRaid.tagRange then
+		return "Tagged", budget, crossedStreet
+	end
+	return "Continue", budget, crossedStreet
 end
 
 -- Lockdown (decisions D-003, D-011, D-013) ---------------------------------------------------------

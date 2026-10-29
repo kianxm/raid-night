@@ -17,13 +17,17 @@
 	          a placeholder over the raider's head. The critter is locked in IncomeService
 	          (setCritterLock) so it is not drawn on its pad and the owner cannot move it.
 	          Display-only Player attributes CarryingUid / CarryingSpecies ("" when not carrying).
-	  Tag     The owner within Config.LiveRaid.tagRange studs of the carrier (server positions,
-	          checked 10 times a second) makes them drop it. No remote: proximity is the trigger.
-	  Drop    Tagged, teleported (RaidRules.carryMoveOk), died, left, or the owner left: the lock
-	          clears and the critter is drawn on its pad again. No profile is ever written.
+	  Tag     The owner within Config.LiveRaid.tagRange studs (X/Z) of the carrier (server
+	          positions, checked 10 times a second) makes them drop it. No remote: proximity is
+	          the trigger.
+	  Drop    Tagged, out of movement budget (RaidRules.carryStep), too high, skipped the street,
+	          died, left, or the owner left: the lock clears and the critter is drawn on its pad
+	          again. No profile is ever written.
 	  Escape  The carrier is inside their OWN den -> EscrowService.transferLive on its own thread
 	          with server-tracked arguments (glowRequested 0, D-015). "InFlight" is retried with
 	          the identical arguments; then the lock clears and both dens are refreshed.
+	  End     Every carry ends with Net.Pushes.RaidEnded to the raider (decision D-020): raidId
+	          "" for a drop before the escape, escaped = (transferLive result == "Committed").
 
 	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
 	  Studio only: Raid/TestHook.luau seeds a stand-in den for single-client tests (D-010)
@@ -85,7 +89,10 @@ type Carry = {
 	walkSpeed: number,
 	lastPos: Vector3,
 	lastAt: number,
+	budget: number, -- RaidRules movement budget left
+	floorY: number, -- top of the den floor, for the carry height check
 	wasInsideDefenderDen: boolean,
+	crossedStreet: boolean,
 	prop: BasePart,
 }
 
@@ -101,11 +108,14 @@ local RaidService = {}
 
 local holds: { [Player]: Hold } = {}
 local carries: { [Player]: Carry } = {}
-local locked: { [string]: true } = {} -- "<ownerUserId>:<uid>" while carried or in escrow
+-- "<ownerUserId>:<uid>" -> who holds it, while carried or in escrow. Also counts steals in
+-- flight against the owner's loss cap and the pair limit.
+local locked: { [string]: { owner: number, raider: number } } = {}
 local prompts: { [BasePart]: ProximityPrompt } = {}
 local windows: { [Player]: { start: number, count: number } } = {}
 local standIns: { [number]: StandIn } = {} -- plot -> stand-in; stays empty outside Studio
 local beingRaided: RemoteEvent
+local raidEnded: RemoteEvent
 local started = false
 
 local function debugLog(message: string)
@@ -119,7 +129,21 @@ local function lockKey(userId: number, uid: string): string
 end
 
 local function isLocked(userId: number, uid: string): boolean
-	return locked[lockKey(userId, uid)] == true
+	return locked[lockKey(userId, uid)] ~= nil
+end
+
+-- Steals in flight against this owner, and between this raider and this owner.
+local function inFlight(ownerUserId: number, raiderUserId: number): (number, number)
+	local forOwner, forPair = 0, 0
+	for _, lock in locked do
+		if lock.owner == ownerUserId then
+			forOwner += 1
+			if lock.raider == raiderUserId then
+				forPair += 1
+			end
+		end
+	end
+	return forOwner, forPair
 end
 
 local function allowGrab(player: Player): boolean
@@ -188,6 +212,10 @@ local function checkGrab(player: Player, plot: number, padIndex: number): (boole
 	local ownerUserId, ownerProfile = ownerOf(plot)
 	local pad = DenWorldService.getPads(plot)[padIndex]
 	local root = rootOf(player)
+	local forOwner, forPair = 0, 0
+	if ownerUserId then
+		forOwner, forPair = inFlight(ownerUserId, player.UserId)
+	end
 	return RaidRules.canGrabLive({
 		flagsAllow = liveAllowed(),
 		raiderUserId = player.UserId,
@@ -200,6 +228,8 @@ local function checkGrab(player: Player, plot: number, padIndex: number): (boole
 		isLocked = function(uid: string): boolean
 			return ownerUserId ~= nil and isLocked(ownerUserId, uid)
 		end,
+		inFlightForOwner = forOwner,
+		inFlightForPair = forPair,
 		distance = if pad and root then (root.Position - pad.Position).Magnitude else math.huge,
 		now = os.time(),
 	})
@@ -262,17 +292,55 @@ local function buildProp(root: BasePart, species: Types.CritterSpecies): BasePar
 	return prop
 end
 
+local function sendEnded(player: Player, raidId: string, escaped: boolean, speciesId: string)
+	if player.Parent ~= nil then
+		local payload: Net.RaidEnd = { raidId = raidId, escaped = escaped, speciesId = speciesId, glow = LIVE_GLOW }
+		raidEnded:FireClient(player, payload)
+	end
+end
+
+-- Ends the carry on the raider's side: placeholder, speed and display attributes.
+local function clearCarrier(player: Player, carry: Carry)
+	carries[player] = nil
+	carry.prop:Destroy()
+	player:SetAttribute("CarryingUid", "")
+	player:SetAttribute("CarryingSpecies", "")
+	local humanoid = humanoidOf(player)
+	if humanoid then
+		humanoid.WalkSpeed = StarterPlayer.CharacterWalkSpeed
+	end
+end
+
+-- The critter goes back to its pad. Nothing was ever written to a profile, so this only clears
+-- the lock and redraws the owner's den. The lock is cleared first so nothing below can strand it.
+local function drop(player: Player, carry: Carry, why: string)
+	locked[lockKey(carry.defenderUserId, carry.critterUid)] = nil
+	carries[player] = nil
+	local ok, err = pcall(function()
+		clearCarrier(player, carry)
+		refreshUser(carry.defenderUserId)
+		sendEnded(player, "", false, carry.speciesId)
+	end)
+	if not ok then
+		warn(`[RaidService] cleanup after a drop failed: {err}`)
+	end
+	debugLog(`{player.Name} dropped {carry.speciesId} ({why}); back on den {carry.plot} pad {carry.padIndex}`)
+end
+
 local function startCarry(player: Player, plot: number, padIndex: number, critter: Critter)
 	local ownerUserId = ownerOf(plot)
 	local species = CritterCatalog.get(critter.speciesId)
 	local root = rootOf(player)
 	local humanoid = humanoidOf(player)
-	if not (ownerUserId and species and root and humanoid) then
+	local floor = DenWorldService.getModel(plot).PrimaryPart
+	if not (ownerUserId and species and root and humanoid and floor) then
 		return
 	end
+	-- Everything that can fail before the lock is taken happens first: a broken prop can never
+	-- leave a critter locked.
+	local prop = buildProp(root, species)
 	local walkSpeed = RaidRules.carryWalkSpeed(StarterPlayer.CharacterWalkSpeed, species.weight)
-	locked[lockKey(ownerUserId, critter.uid)] = true
-	carries[player] = {
+	local carry: Carry = {
 		defenderUserId = ownerUserId,
 		plot = plot,
 		padIndex = padIndex,
@@ -281,17 +349,29 @@ local function startCarry(player: Player, plot: number, padIndex: number, critte
 		walkSpeed = walkSpeed,
 		lastPos = root.Position,
 		lastAt = os.clock(),
+		budget = RaidRules.carryStartBudget(),
+		floorY = floor.Position.Y + floor.Size.Y / 2,
 		wasInsideDefenderDen = DenWorldService.isInsideDen(plot, root.Position),
-		prop = buildProp(root, species),
+		crossedStreet = false,
+		prop = prop,
 	}
-	humanoid.WalkSpeed = walkSpeed
-	player:SetAttribute("CarryingUid", critter.uid)
-	player:SetAttribute("CarryingSpecies", species.id)
-	hidePadModel(plot, padIndex)
-	refreshUser(ownerUserId)
-	local owner = Players:GetPlayerByUserId(ownerUserId)
-	if owner then
-		beingRaided:FireClient(owner, player.UserId)
+	locked[lockKey(ownerUserId, critter.uid)] = { owner = ownerUserId, raider = player.UserId }
+	carries[player] = carry
+	local ok, err = pcall(function()
+		humanoid.WalkSpeed = walkSpeed
+		player:SetAttribute("CarryingUid", critter.uid)
+		player:SetAttribute("CarryingSpecies", species.id)
+		hidePadModel(plot, padIndex)
+		refreshUser(ownerUserId)
+		local owner = Players:GetPlayerByUserId(ownerUserId)
+		if owner then
+			beingRaided:FireClient(owner, player.UserId)
+		end
+	end)
+	if not ok then
+		warn(`[RaidService] could not start a carry: {err}`)
+		drop(player, carry, "start failed")
+		return
 	end
 	debugLog(`{player.Name} grabbed {species.id} from den {plot} pad {padIndex}`)
 end
@@ -340,34 +420,18 @@ end
 
 -- Carry, drop, escape -----------------------------------------------------------------------------
 
--- Ends the carry on the raider's side: placeholder, speed and display attributes.
-local function clearCarrier(player: Player, carry: Carry)
-	carries[player] = nil
-	carry.prop:Destroy()
-	player:SetAttribute("CarryingUid", "")
-	player:SetAttribute("CarryingSpecies", "")
-	local humanoid = humanoidOf(player)
-	if humanoid then
-		humanoid.WalkSpeed = StarterPlayer.CharacterWalkSpeed
-	end
-end
-
--- The critter goes back to its pad. Nothing was ever written to a profile, so this only clears
--- the lock and redraws the owner's den.
-local function drop(player: Player, carry: Carry, why: string)
-	clearCarrier(player, carry)
-	locked[lockKey(carry.defenderUserId, carry.critterUid)] = nil
-	refreshUser(carry.defenderUserId)
-	debugLog(`{player.Name} dropped {carry.speciesId} ({why}); back on den {carry.plot} pad {carry.padIndex}`)
-end
-
 local function escape(player: Player, carry: Carry)
-	clearCarrier(player, carry)
+	carries[player] = nil
+	local cleared, clearError = pcall(clearCarrier, player, carry)
+	if not cleared then
+		warn(`[RaidService] carrier cleanup failed on escape: {clearError}`)
+	end
 	-- Fixed for every attempt: transferLive may only be retried with identical arguments.
 	local raidId = HttpService:GenerateGUID(false)
 	local raiderUserId = player.UserId
 	local defenderUserId = carry.defenderUserId
 	local critterUid = carry.critterUid
+	local speciesId = carry.speciesId
 	debugLog(`{player.Name} escaped with {carry.speciesId}; raid {raidId} handed to EscrowService`)
 	task.spawn(function()
 		local status, reason = "InFlight", nil
@@ -383,50 +447,76 @@ local function escape(player: Player, carry: Carry)
 		-- Committed: the critter is the raider's. Refused: nothing moved, it is back on its pad.
 		-- Still InFlight: EscrowService recovery finishes it; the profiles show the truth.
 		locked[lockKey(defenderUserId, critterUid)] = nil
-		refreshUser(raiderUserId)
-		refreshUser(defenderUserId)
+		local refreshed, refreshError = pcall(function()
+			refreshUser(raiderUserId)
+			refreshUser(defenderUserId)
+		end)
+		if not refreshed then
+			warn(`[RaidService] refresh after raid {raidId} failed: {refreshError}`)
+		end
 		local line = `raid {raidId}: transferLive {status}{if reason then ` ({reason})` else ""}`
 		if status == "Committed" then
 			debugLog(line)
+			local raiderProfile = DataService.getProfile(raiderUserId)
+			if raiderProfile and raiderProfile.critters[critterUid] == nil then
+				warn(`[RaidService] raid {raidId} committed but stole nothing: {critterUid} is not the raider's`)
+			end
 		else
 			warn(`[RaidService] {line}`)
 		end
+		pcall(sendEnded, player, raidId, status == "Committed", speciesId)
 	end)
 end
 
+local function stepCarry(player: Player, carry: Carry)
+	local root = rootOf(player)
+	if player.Parent == nil or not root then
+		drop(player, carry, "raider gone")
+		return
+	end
+	local ownerUserId, ownerProfile, ownerRoot = ownerOf(carry.plot)
+	local critter = if ownerProfile then ownerProfile.critters[carry.critterUid] else nil
+	if ownerUserId ~= carry.defenderUserId or not critter or critter.placement ~= "Pad" then
+		drop(player, carry, "owner gone")
+		return
+	end
+	local now = os.clock()
+	local pos = root.Position
+	local delta = pos - carry.lastPos
+	local myPlot = DenWorldService.getPlot(player)
+	local insideDefenderDen = DenWorldService.isInsideDen(carry.plot, pos)
+	local ownerGap = if ownerRoot then ownerRoot.Position - pos else nil
+	local outcome, budget, crossedStreet = RaidRules.carryStep({
+		moved = Vector3.new(delta.X, 0, delta.Z).Magnitude,
+		dt = now - carry.lastAt,
+		walkSpeed = carry.walkSpeed,
+		budget = carry.budget,
+		height = pos.Y - carry.floorY,
+		insideOwnDen = myPlot ~= nil and DenWorldService.isInsideDen(myPlot, pos),
+		wasInsideDefenderDen = carry.wasInsideDefenderDen,
+		insideDefenderDen = insideDefenderDen,
+		crossedStreet = carry.crossedStreet,
+		lockdownActive = lockdownActive(carry.plot),
+		ownerDistance = if ownerGap then Vector3.new(ownerGap.X, 0, ownerGap.Z).Magnitude else nil,
+	})
+	carry.lastPos, carry.lastAt, carry.wasInsideDefenderDen = pos, now, insideDefenderDen
+	carry.budget, carry.crossedStreet = budget, crossedStreet
+	if outcome == "Escape" then
+		escape(player, carry)
+	elseif outcome ~= "Continue" then
+		drop(player, carry, outcome)
+	end
+end
+
+-- Each carry runs on its own: one failing carry is dropped (its lock cleared) and the rest go on.
 local function stepCarries()
 	for player, carry in carries do
-		local root = rootOf(player)
-		if player.Parent == nil or not root then
-			drop(player, carry, "raider gone")
-			continue
-		end
-		local ownerUserId, ownerProfile, ownerRoot = ownerOf(carry.plot)
-		local critter = if ownerProfile then ownerProfile.critters[carry.critterUid] else nil
-		if ownerUserId ~= carry.defenderUserId or not critter or critter.placement ~= "Pad" then
-			drop(player, carry, "owner gone")
-			continue
-		end
-		local now = os.clock()
-		local pos = root.Position
-		local delta = pos - carry.lastPos
-		local myPlot = DenWorldService.getPlot(player)
-		local insideDefenderDen = DenWorldService.isInsideDen(carry.plot, pos)
-		local outcome = RaidRules.carryStep({
-			moved = Vector3.new(delta.X, 0, delta.Z).Magnitude,
-			dt = now - carry.lastAt,
-			walkSpeed = carry.walkSpeed,
-			insideOwnDen = myPlot ~= nil and DenWorldService.isInsideDen(myPlot, pos),
-			wasInsideDefenderDen = carry.wasInsideDefenderDen,
-			insideDefenderDen = insideDefenderDen,
-			lockdownActive = lockdownActive(carry.plot),
-			ownerDistance = if ownerRoot then (ownerRoot.Position - pos).Magnitude else nil,
-		})
-		carry.lastPos, carry.lastAt, carry.wasInsideDefenderDen = pos, now, insideDefenderDen
-		if outcome == "Escape" then
-			escape(player, carry)
-		elseif outcome ~= "Continue" then
-			drop(player, carry, outcome)
+		local ok, err = pcall(stepCarry, player, carry)
+		if not ok then
+			warn(`[RaidService] carry step failed for {player.Name}: {err}`)
+			if carries[player] == carry then
+				drop(player, carry, "error")
+			end
 		end
 	end
 end
@@ -549,14 +639,18 @@ function RaidService.start()
 		remotes.Name = "Remotes"
 		remotes.Parent = ReplicatedStorage
 	end
-	local existing = (remotes :: Folder):FindFirstChild(Net.Pushes.BeingRaidedLive)
-	if existing and existing:IsA("RemoteEvent") then
-		beingRaided = existing
-	else
-		beingRaided = Instance.new("RemoteEvent")
-		beingRaided.Name = Net.Pushes.BeingRaidedLive
-		beingRaided.Parent = remotes
+	local function pushEvent(name: string): RemoteEvent
+		local existing = (remotes :: Folder):FindFirstChild(name)
+		if existing and existing:IsA("RemoteEvent") then
+			return existing
+		end
+		local created = Instance.new("RemoteEvent")
+		created.Name = name
+		created.Parent = remotes
+		return created
 	end
+	beingRaided = pushEvent(Net.Pushes.BeingRaidedLive)
+	raidEnded = pushEvent(Net.Pushes.RaidEnded)
 
 	IncomeService.setCritterLock(isLocked)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)

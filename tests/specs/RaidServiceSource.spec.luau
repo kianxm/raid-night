@@ -4,7 +4,8 @@
 	would otherwise have to re-check by hand on every PR:
 	  - Config.Flags is read in exactly one place, as Escrow.canStartTransfer's argument (D-002).
 	  - No server decision reads an attribute (docs/contracts.md, Replicated attributes; D-014).
-	  - Raid code never writes a profile or saves one (golden rule 4).
+	  - Raid code never writes a profile or saves one (golden rule 4): no critter, placement, pad,
+	    Glow, stored or loss-counter assignment, no Economy.place, no escrow debit or credit.
 ]]
 
 local fs = require("@lune/fs")
@@ -73,6 +74,14 @@ tests["raid server code never writes or saves a profile"] = function()
 		if not BUILDS_FAKE_PROFILE[path] then
 			expect.falsy(string.find(code, "critters%[[^%]]+%]%s*=[^=]"), `{path} assigns into a critters table`)
 			expect.falsy(string.find(code, "%.placement%s*=[^=]"), `{path} changes a placement`)
+		end
+		expect.falsy(string.find(code, "%.padIndex%s*=[^=]"), `{path} moves a critter to a pad`)
+		expect.eq(count(code, "Economy.place"), 0, `{path} places a critter`)
+		expect.falsy(string.find(code, "debitDefender%s*%("), `{path} debits a defender`)
+		expect.falsy(string.find(code, "creditRaider%s*%("), `{path} credits a raider`)
+		for _, field in { "glow", "stored", "lossesToday" } do
+			local assigns = string.find(code, '[%.%["]' .. field .. '["%]]*%s*[%+%-%*/]?=[^=]')
+			expect.falsy(assigns, `{path} assigns {field}`)
 		end
 	end
 end
