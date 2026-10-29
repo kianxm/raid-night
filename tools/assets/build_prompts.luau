@@ -27,14 +27,19 @@ local AVOID = "Avoid photorealism, realistic fur strands, text, letters, logos, 
 	.. "characters, franchise mascots, human faces, weapons, gore, scary or sexualized features, sad, "
 	.. "crying, injured or frightened expressions or poses."
 
--- Rarity raises attitude: Commons and Uncommons stay simple and cheerful, Rare and above get more character.
-local SIMPLE_TIERS = { Common = true, Uncommon = true }
+-- Rarity raises attitude: Commons stay simple, Uncommons get a touch more, Rare and above get the most.
+local EXPRESSION_BY_TIER = {
+	Common = "kept simple and friendly so it reads as cute",
+	Uncommon = "with a touch of attitude that still reads as cute and friendly",
+}
+local EXPRESSION_RARE_AND_ABOVE = "with lots of character that still reads as cute and charming"
 
 -- The animation set every critter gets. The den idle is the critter's own `idle` line.
 local CARRIED_ANIMATION = "sneaky walk while carried: tiptoes in the air and glances side to side, in on the "
 	.. "heist, never struggling"
-local STOLEN_ANIMATION = "gotcha pose when stolen: a quick cheeky pose in its personality, in on the joke, "
-	.. "never sad or scared"
+local function stolenAnimation(species): string
+	return `gotcha pose when stolen: a quick cheeky {species.personality} pose, in on the joke, never sad or scared`
+end
 
 local BUDGETS = {
 	Common = { triangles = 1500, texture = 512, heightStuds = 2 },
@@ -49,10 +54,8 @@ local BUDGETS = {
 local OUT = "assets/jobs"
 
 local function expressionLine(species): string
-	if SIMPLE_TIERS[species.tier] then
-		return `Expression: a simple, cheerful {species.personality} face that reads as cute and friendly.`
-	end
-	return `Expression: a {species.personality} face with real attitude that still reads as cute and charming.`
+	local tone = EXPRESSION_BY_TIER[species.tier] or EXPRESSION_RARE_AND_ABOVE
+	return `Expression: {species.personality}, {tone}.`
 end
 
 local function viewPrompt(species, view: string): string
@@ -108,7 +111,7 @@ for _, species in critters do
 		animations = {
 			denIdle = `happy idle in the den: {species.idle}`,
 			carried = CARRIED_ANIMATION,
-			stolen = STOLEN_ANIMATION,
+			stolen = stolenAnimation(species),
 		},
 		palette = species.palette,
 		eventOnly = species.eventOnly,

@@ -40,19 +40,52 @@ CritterCatalog.TIER_GLOW_RANGE = table.freeze({
 }) :: { [string]: { number } }
 
 -- Personality rules from the style bible (D-038): variety, and never a distressed critter.
+-- The forbidden words are also checked against `idle`, which feeds the den idle animation.
 CritterCatalog.MAX_SHARED_PERSONALITY = 6
 CritterCatalog.FORBIDDEN_PERSONALITY_WORDS = table.freeze({
 	sad = true,
+	sadly = true,
+	gloomy = true,
 	crying = true,
+	cries = true,
+	crybaby = true,
+	sobbing = true,
+	weeping = true,
 	tearful = true,
+	teary = true,
 	injured = true,
 	hurt = true,
+	wounded = true,
 	frightened = true,
 	scared = true,
+	scaredy = true,
 	afraid = true,
+	fearful = true,
 	terrified = true,
+	spooked = true,
+	startled = true,
+	startles = true,
+	cowering = true,
+	cowers = true,
+	nervous = true,
+	anxious = true,
 	panicked = true,
+	panicky = true,
+	panics = true,
 }) :: { [string]: boolean }
+
+local function isPersonalityWord(word: string): boolean
+	return string.match(word, "^[a-z]+$") ~= nil or string.match(word, "^[a-z]+%-[a-z]+$") ~= nil
+end
+
+local function distressedWord(text: string): string?
+	for word in string.gmatch(string.lower(text), "[a-z]+") do
+		if CritterCatalog.FORBIDDEN_PERSONALITY_WORDS[word] then
+			return word
+		end
+	end
+	return nil
+end
 
 local byId: { [string]: CritterSpecies } = {}
 for _, species in critterList do
@@ -82,13 +115,15 @@ function CritterCatalog.tierRank(tier: Tier): number
 	return tierRank[tier] or 0
 end
 
--- Checks the catalog against the design rules. Returns a list of problems (empty = valid).
-function CritterCatalog.validate(): { string }
+-- Checks the catalog (or `list`, for tests) against the design rules. Returns a list of
+-- problems (empty = valid).
+function CritterCatalog.validate(list: { CritterSpecies }?): { string }
+	local speciesList = list or critterList
 	local problems: { string } = {}
 	local seen: { [string]: boolean } = {}
 	local personalityCount: { [string]: number } = {}
 
-	for index, species in critterList do
+	for index, species in speciesList do
 		local label = `#{index} {species.id}`
 		if seen[species.id] then
 			table.insert(problems, `{label}: duplicate id`)
@@ -124,17 +159,24 @@ function CritterCatalog.validate(): { string }
 		end
 
 		local personality = species.personality
-		local wellFormed = type(personality) == "string"
-			and (string.match(personality, "^[a-z%-]+$") or string.match(personality, "^[a-z%-]+ [a-z%-]+$"))
+		local words = if type(personality) == "string" then string.split(personality, " ") else {}
+		local wellFormed = #words >= 1 and #words <= 2
+		for _, word in words do
+			wellFormed = wellFormed and isPersonalityWord(word)
+		end
 		if not wellFormed then
 			table.insert(problems, `{label}: personality must be one or two lowercase words`)
 		else
 			personalityCount[personality] = (personalityCount[personality] or 0) + 1
-			for word in string.gmatch(personality, "[a-z]+") do
-				if CritterCatalog.FORBIDDEN_PERSONALITY_WORDS[word] then
-					table.insert(problems, `{label}: personality "{personality}" is distressed (style bible)`)
-				end
+			local word = distressedWord(personality)
+			if word then
+				table.insert(problems, `{label}: personality "{personality}" is distressed ("{word}", style bible)`)
 			end
+		end
+
+		local idleWord = distressedWord(species.idle)
+		if idleWord then
+			table.insert(problems, `{label}: idle shows distress ("{idleWord}", style bible)`)
 		end
 	end
 
@@ -150,7 +192,7 @@ function CritterCatalog.validate(): { string }
 	-- Every egg tier must have at least one species, or egg rolls could land on nothing.
 	for _, entry in Config.EggOdds do
 		local hasSpecies = false
-		for _, species in critterList do
+		for _, species in speciesList do
 			if species.tier == entry.tier and not species.eventOnly then
 				hasSpecies = true
 				break
