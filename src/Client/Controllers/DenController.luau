@@ -40,16 +40,26 @@ end
 
 -- Cosmetic: no Steal prompt in my own den. The server re-enables prompts for raiders, so keep it
 -- off locally whenever it flips back. The server already refuses grabs on your own critters.
+-- Also off while the den shows LiveProtected (D-031): the server would refuse the grab anyway.
+-- We remember when we turned it off so we can turn it back on when protection ends.
 local function hideIfMine(prompt: ProximityPrompt, denModel: Instance)
 	local function apply()
-		if denModel:GetAttribute("OwnerUserId") == Players.LocalPlayer.UserId and prompt.Enabled then
-			prompt.Enabled = false
+		local mine = denModel:GetAttribute("OwnerUserId") == Players.LocalPlayer.UserId
+		if mine or denModel:GetAttribute("LiveProtected") == true then
+			if prompt.Enabled then
+				prompt.Enabled = false
+				prompt:SetAttribute("UiHidByProtection", not mine)
+			end
+		elseif prompt:GetAttribute("UiHidByProtection") == true then
+			prompt:SetAttribute("UiHidByProtection", false)
+			prompt.Enabled = true
 		end
 	end
 	apply()
 	if not prompt:GetAttribute("UiHooked") then
 		prompt:SetAttribute("UiHooked", true)
 		prompt:GetPropertyChangedSignal("Enabled"):Connect(apply)
+		denModel:GetAttributeChangedSignal("LiveProtected"):Connect(apply)
 	end
 end
 
