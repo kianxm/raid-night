@@ -103,6 +103,57 @@ ProfileStore does, so a live write names exactly its parties.
   non-nil answer, and reads or writes nothing before that, so the shared mode holds whatever
   order services start in.
 
+### Phase 2 profile fields (C6, decision D-059)
+
+All optional on `PlayerProfile`: a missing field means its default, so saves from before Phase 2
+load unchanged, with no migration and no `SCHEMA_VERSION` bump (`Profile.spec` checks an old
+save). Read and write them only through the `Profile` helpers named below: readers turn a corrupt
+saved value into the default, writers refuse bad input (writing nothing) and return whether they
+wrote, and `now` is always the server's `os.time()`. Nothing yields. A service changes them on a
+profile loaded in its own server (`DataService.getProfile`), never on another server's player.
+
+| Field | Type | Missing means | Helpers | Task |
+| --- | --- | --- | --- | --- |
+| `settings` | `PlayerSettings?` (`musicVolume`, `sfxVolume`: 0-1 in 0.01 steps; `reducedMotion`) | `Profile.SETTINGS_DEFAULTS`: 1, 1, false | `settingsOf`, `applySettings(profile, request)` | P2.5 |
+| `onboarding` | `OnboardingState?` (`step` 0-5, `completedAt?`) | complete (an old save) | `isOnboardingComplete`, `onboardingStep`, `advanceOnboarding`, `completeOnboarding` | P2.6 |
+| `successfulRaids` | `number?` | 0 | `successfulRaids`, `countSuccessfulRaid` | P2.7, P2.9 |
+| `gear` | `{ [GearId]: number }?` | level 0 (not owned) | `GEAR_IDS`, `isGearId`, `gearLevel`, `setGearLevel` | P2.10 |
+| `receipts` | `{ [string]: PurchaseReceipt }?` (`productId`, `at`) | none granted | `hasReceipt`, `recordReceipt`, `MAX_RECEIPTS` (100) | P2.8 |
+| `eventPasses` | `{ [string]: number }?` (event id -> granted at) | none owned | `hasEventPass`, `grantEventPass` | P2.8 |
+| `accessories` | `{ [string]: number }?` (accessory id -> count) | none owned | `accessoryCount`, `grantAccessory` | P2.8 |
+
+- **Onboarding.** `Profile.new` (the ProfileStore template) is the only place that sets a Phase 2
+  field: `onboarding = { step = 0 }`, so a new save starts it. Steps are Appendix C's 1-5
+  (`Profile.ONBOARDING_LAST_STEP`); they only move forward, reaching 5 sets `completedAt`, and
+  `completeOnboarding` is a skip that keeps the step reached. DataService must never reconcile
+  the template into an existing save (ProfileStore's `Reconcile`; a source test checks): that would
+  send every existing player through onboarding.
+- **Settings.** `applySettings` takes the client's table as untrusted: only the three keys, the
+  right types and finite volumes (clamped to 0..1, rounded to 0.01), or the whole request is
+  refused. A key never set reads as its default; `settings.reducedMotion == nil` means the player
+  never chose.
+- **Successful raids.** The lifetime count of raids and live steals the player escaped from,
+  counted once per raid by the raider's own server (`countSuccessfulRaid` returns the new count;
+  1 is the first, the notification opt-in trigger). Old saves start at 0.
+- **Receipts.** The ProcessReceipt idempotency rule: grant only when `recordReceipt(profile,
+  PurchaseId, productId, now)` returns true, in the same step with no yield between, then confirm
+  the save (`DataService.saveNow`) before returning `PurchaseGranted`. false on an existing
+  PurchaseId is a redelivery: grant nothing, confirm the save, return `PurchaseGranted`. Roblox
+  redelivers an ungranted receipt later or when the player rejoins, with no documented time limit,
+  so the ledger keeps the newest 100 by count, never by age, and never drops the receipt it just
+  recorded.
+- **Reused, not added.** First join: `createdAt` (stamped by `Profile.prepare` at the first load;
+  days since join for `rebirth`). Purchased shield: `shieldUntil` (`RaidRules.applyPurchasedShield`).
+  Rebirth vault slots: `vaultSlots`; the vault slot game pass needs no field (ownership is a
+  MarketplaceService check). Raid log visits: `raidLogSeenAt`. Appendix C's 30-minute new-player shield is
+  derived from `createdAt` and needs no field (async raids are already blocked for 48 hours by
+  new-player protection).
+- **Not on the profile.** Notification state (daily send slot, pending Glow loss, opt-in prompt
+  time) lives in NotificationService's own `NotificationState_v1` DataStore (D-062): the daily cap
+  is written by the raider's server for an offline defender, and a profile field would need a
+  second cross-server write to the defender's key. The older `notificationPromptedAt` field stays
+  in the shape (no removal without a migration), but nothing writes it.
+
 ## Money model
 
 - `stored`: Glow in the den. Accrues lazily. Stealable (25% per raid, capped by what is there).

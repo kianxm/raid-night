@@ -102,6 +102,34 @@ export type AppliedTransfer = {
 	glow: number,
 }
 
+-- Phase 2 player state (decision D-059) -----------------------------------------------------------
+-- Optional on PlayerProfile: missing = the default, so a save from before Phase 2 loads unchanged
+-- with no migration and no SCHEMA_VERSION bump (D-005). Read and write them through the Profile
+-- helpers, which turn a corrupt stored value into its default and refuse bad input.
+
+-- [persisted, PlayerProfile.settings] Options the player chose (P2.5). A missing field means
+-- Profile.SETTINGS_DEFAULTS. Written only by Profile.applySettings.
+export type PlayerSettings = {
+	musicVolume: number?, -- 0 to 1, in steps of 0.01
+	sfxVolume: number?, -- 0 to 1, in steps of 0.01
+	reducedMotion: boolean?,
+}
+
+-- [persisted, PlayerProfile.onboarding] First-five-minutes progress (P2.6, playbook Appendix C).
+export type OnboardingState = {
+	step: number, -- the last Appendix C step completed: 0 (none) to Profile.ONBOARDING_LAST_STEP
+	completedAt: number?, -- unix seconds onboarding finished or was skipped; nil = still in it
+}
+
+-- Gear a raider upgrades with Glow (P2.10). Persisted as keys: never rename an id once shipped.
+export type GearId = "grapple" | "smoke" | "decoy" | "speedCoil" | "lockpick"
+
+-- [persisted, PlayerProfile.receipts] A developer-product purchase this profile granted (P2.8).
+export type PurchaseReceipt = {
+	productId: number,
+	at: number, -- unix seconds it was granted
+}
+
 -- Player profile --------------------------------------------------------------------------------
 
 -- [persisted] The whole saved state for one player. One DataStore key per user, session-locked
@@ -149,6 +177,21 @@ export type PlayerProfile = {
 	-- When the player last opened their raid log (unix seconds), set server-side on GetRaidLog.
 	-- Missing = never (old saves), so no migration (D-005).
 	raidLogSeenAt: number?,
+
+	-- Phase 2 (decision D-059). All optional, missing = the default, no migration (types above).
+	settings: PlayerSettings?, -- missing = Profile.SETTINGS_DEFAULTS
+	-- Missing = a save from before onboarding existed, which counts as complete, so an existing
+	-- player is never sent through it. New saves get { step = 0 } from Profile.new (the template).
+	onboarding: OnboardingState?,
+	-- Lifetime raids and live steals this player escaped from (successful raids), counted once per
+	-- raid by the raider's own server (Profile.countSuccessfulRaid). Missing = 0.
+	successfulRaids: number?,
+	gear: { [GearId]: number }?, -- level per gear id; a missing table or id = 0 (not owned)
+	-- Developer-product purchases granted, keyed by PurchaseId, so a redelivered receipt grants
+	-- nothing (Profile.recordReceipt). Keeps the newest Profile.MAX_RECEIPTS. Missing = none.
+	receipts: { [string]: PurchaseReceipt }?,
+	eventPasses: { [string]: number }?, -- event id -> unix seconds its event pass was granted
+	accessories: { [string]: number }?, -- critter accessory id -> how many owned (cosmetic only)
 }
 
 -- Snapshots and matchmaking ---------------------------------------------------------------------
