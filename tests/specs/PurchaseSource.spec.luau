@@ -83,8 +83,8 @@ local function pendingNow(): { [string]: number }
 			end
 		end
 	end
-	-- Snapshots of online players accrue inside Matchmaking.buildSnapshot at factor 1 until
-	-- SnapshotService accrues through the helper first (matchmaking's handoff).
+	-- Regression guard (landed in P2.8m): snapshots of online players must accrue through the
+	-- helper before Matchmaking.buildSnapshot's factor-1 accrue.
 	local snapshot = source.codeOnly(source.read(SNAPSHOT))
 	if
 		string.find(snapshot, "Matchmaking%.buildSnapshot%(") and not string.find(snapshot, "IncomeService%.accrue%(")
@@ -109,7 +109,6 @@ end
 tests["outside IncomeService, only the listed handoffs still accrue (and only that often)"] = function()
 	local now = pendingNow()
 	local expected = table.clone(PENDING)
-	expected[SNAPSHOT] = 1
 	for path, n in now do
 		expect.eq(expected[path], n, `{path}: unexpected accrue/collect outside the helper`)
 	end

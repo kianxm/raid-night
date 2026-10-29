@@ -83,8 +83,9 @@ end
 -- Builds the raidable snapshot of a den. Vault critters are excluded by design.
 -- Accrues the profile first, so it updates `stored` and `storedUpdatedAt` on the profile passed in.
 function Matchmaking.buildSnapshot(profile: PlayerProfile, now: number): DenSnapshot
-	-- P2.8: accrues at factor 1. The Glow-multiplier helper must pass the owner's boost factor here
-	-- before Config.Flags.purchases turns on (contracts.md, P2.8 gate).
+	-- Factor 1 (offline income is unboosted). SnapshotService accrues a loaded (online) profile
+	-- through IncomeService's Glow-factor helper first (P2.8, D-030/D-032), so for it this accrue
+	-- covers no time.
 	Economy.accrue(profile, now)
 	local critters: { Critter } = {}
 	local guards = 0
@@ -210,6 +211,22 @@ function Matchmaking.topTier(snapshot: DenSnapshot): Tier?
 		end
 	end
 	return best
+end
+
+-- The `raid_portal_opened` analytics fields (P2.9, Shared/Analytics) for the rows GetRaidTargets
+-- answers: how many targets, and whether any is a revenge target.
+function Matchmaking.portalOpenedFields(rows: { { revengeRaidId: string? } }): {
+	targetsOffered: number,
+	revengeAvailable: boolean,
+}
+	local revenge = false
+	for _, row in rows do
+		if row.revengeRaidId ~= nil then
+			revenge = true
+			break
+		end
+	end
+	return { targetsOffered = #rows, revengeAvailable = revenge }
 end
 
 -- Did the owner of `snapshot` block `userId`? Snapshots saved before block lists existed block nobody.

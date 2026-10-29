@@ -28,6 +28,8 @@
 	  GetRaidTargets (RemoteFunction) () -> { Net.RaidTarget }. Net.Limits.GetRaidTargets, one call
 	    at a time per player. {} unless Config.Flags.raids and asyncRaids (D-002). Revenge rows
 	    first. Blocked both ways: the raider's reported list and each target's snapshot list.
+	    Each answer (after the gates, even an empty one) tracks `raid_portal_opened`
+	    (Matchmaking.portalOpenedFields) through AnalyticsService, which also logs RaidFlow.Portal.
 	  ReportBlocked (RemoteEvent) ({ number }). Net.Limits.ReportBlocked; Matchmaking.cleanBlockList
 	    or ignored.
 	  JoinRevengeServer (RemoteFunction) (revengeRaidId) -> Net.RevengeJoinStatus. Live revenge,
@@ -84,6 +86,7 @@ local Types = require(Shared.Types)
 local DataService = require(script.Parent.DataService) :: any
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 local SnapshotService = require(script.Parent.SnapshotService)
+local AnalyticsService = require(script.Parent.AnalyticsService) -- requires no service: no cycle
 
 type DenSnapshot = Types.DenSnapshot
 type MatchEntry = Types.MatchEntry
@@ -460,6 +463,9 @@ local function onGetRaidTargets(player: Player): { RaidTarget }
 		warn(`[MatchmakingService] GetRaidTargets for {player.UserId} failed: {rows}`)
 		return {}
 	end
+	-- P2.9: one event per answered portal visit; it also opens a RaidFlow funnel session (Portal).
+	-- Never yields or throws.
+	AnalyticsService.track(player, "raid_portal_opened", Matchmaking.portalOpenedFields(rows))
 	return rows
 end
 
