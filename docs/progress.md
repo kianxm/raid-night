@@ -48,14 +48,14 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | P1.1 | data | — | In progress | agent/data/P1.1 | 1 | Carries D-008, D-012 #6, D-026 TODOs, C5 day-high check |
-| P1.2 | matchmaking | P1.1 | In progress | agent/matchmaking/P1.2 | 1 | Runs alongside P1.1 (D-042) |
+| P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
 | P1.3 | raid | P1.1, P1.2 | Todo | | | |
 | P1.4 | raid | P1.3 | Todo | | | |
-| P1.5 | ui | — | In progress | agent/ui/P1.5 | 1 | Mock data behind Net |
+| P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
 | P1.6 | ui | P1.3, P1.5 | Todo | | | |
 | P1.7 | economy | — | In progress | agent/economy/P1.7 | 1 | Tuning approved by orchestrator within design-doc ranges (D-041) |
 | P1.8 | economy | P1.7 | Todo | | | |
-| P1.9 | matchmaking | P1.2 | Todo | | | Live check needs two servers or a private publish (Kian) |
+| P1.9 | matchmaking | P1.2 | In progress | agent/matchmaking/P1.9 | 1 | Live check needs two servers or a private publish (Kian) |
 | P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
 
 ## Setup notes
@@ -82,6 +82,10 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
+
+- PR #92 (P1.5b, fixes #90 blank Raid Portal): reviewed, CI green, src/Client only, but the
+  permission check refused `gh pr merge 92` twice ("Merge Without Review"). Merge it yourself, or
+  allow the integration agent to merge reviewed PRs. Not worked around.
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
@@ -124,6 +128,7 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
   leaving mid-window leaves the den clean for the next owner; a real owner moving earners via
   PlaceCritter mid-carry keeps the grab-time base; the owner sees nothing during the 1 s hold;
   a UTC day roll clears LiveProtected within 0.5 s; no raid-log entry for a real empty steal.
+- Phone emulator: Raid Portal, in-raid HUD, raid log and outcome card at 667x375 and 844x390 (P1.5, #89/#92); Studio viewport could not be resized.
 - Phone emulator: den status chip and markers (P0.5i, #70); the 200 px chip (#80) may overlap the
   top-centre toast below ~700 px wide (667x375 landscape): check, or move/narrow it.
 - Live protection (D-036/D-037): an owner buying an egg after a protecting loss (auto-place lifts
@@ -135,7 +140,12 @@ Exploit and fairness edge cases that lose nothing and fail safe. One line each: 
 came from, rough size. Not fixed before the phase's human playtest; then kept, scheduled or
 dropped based on real play.
 
-- (empty)
+- Pool withdraw uses the band from load-time power; an offline raid that moved the den two bands leaves a stale entry while online (reviewer #91, MatchmakingService:594; small).
+- Leave-publish race on a server hop plus up to 60 s of pool cache can relist an online player (reviewer #91; P1.3 refuses async raids on fresh presence; small).
+- A raider can block their victim after a raid to hide from revenge (reviewer #91; decide after playtest).
+- Raider's own block list is session-only until their first ReportBlocked; fall back to the last snapshot (reviewer #91; small).
+- Studio hook `targets` also skips the `raids` gate; doc says asyncRaids only (reviewer #91; Studio only, doc fix).
+- Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and

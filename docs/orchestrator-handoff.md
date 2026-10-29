@@ -1,29 +1,33 @@
 # Orchestrator handoff
 
-Updated 2026-10-28. Read this first on startup, then docs/progress.md. Follow the playbook's
+Updated 2026-10-29. Read this first on startup, then docs/progress.md. Follow the playbook's
 "Context discipline" (section 2).
 
 ## Phase
-Phase 0 complete: gate APPROVED (Kian), all post-gate follow-ups done and merged, integration
-promoted to main. STOP state: do not start Phase 1 until Kian says so. Don't ask Kian for
-multi-player testing (deferred list in progress.md).
+Phase 1 running, unattended overnight (D-041): decide technical calls, log them, skip anything
+needing a human or live environment into "Needs Kian", stop at the Phase 1 gate with the report.
 
 ## In flight
-Nothing. C5 (#79) and P0.5j (#80) merged; integration promoted to main again after this ledger
-PR. No open feature PRs.
+- P1.1 data (xhigh): agent/data/P1.1. Escrow.Store, messages/offline debits, recovery, alarm,
+  D-008/D-012#6/D-026 TODOs. Reviewer at xhigh + own Studio run after merge.
+- P1.7 economy: agent/economy/P1.7. Sim + proposal; orchestrator approves if in design ranges.
+- P1.9 matchmaking: agent/matchmaking/P1.9. Live revenge server side; UI button is P1.6.
+- #92 (P1.5b fix for #90): open, merge refused by permission check twice. Needs Kian.
 
-## Next (only when Kian says "Run Phase 1")
-- Phase 1 tasks P1.1-P1.10 in docs/playbook.md; P1.1 (data) carries D-008 and D-012 TODOs
-  (escrow GDPR ids, record cleanup, void tombstone before async debits).
-- P2.8 hard gate: factor-1 accrue in EscrowService/Matchmaking fixed before `purchases` on.
+## Next
+- P1.3 (raid) when P1.1 merges. Prompt must include: StartRaid re-checks blocks both ways and
+  flags; refuse async raid if presence fresh; take/release lock on every end; pass the
+  snapshot's power to noteRaided; strip DenSnapshot.blockedUserIds from client payloads;
+  RaidStart carries gatePosition + endsAt (UI asks); server-written RaidLogSeenAt (UI asks).
+- P1.4 after P1.3; P1.6 after P1.3 (branch from integration, not #92); P1.8 after P1.7.
+- P1.10: single-client soak in Studio only; multi-client part deferred.
 
-## Ask Kian (not blocking)
-- P2.8 product questions (Robux-linked products, VIP offline, restricted buyers).
+## Ask Kian
+- Merge #92 / allow integration agent merges of reviewed PRs.
+- P2.8 product questions (not urgent).
 
 ## Remember
-- Ledger edits go through a worktree + PR, one per merge wave, `gh pr merge --auto` (D-039).
-- D-039 process: reviewer severity bar, pre-playtest scope (hardening backlog in progress.md),
-  xhigh only for Escrow/Profile/DataService/EscrowService/purchases, Studio once per wave.
+- Auto-merge is disabled on the repo: merge ledger PRs by hand after CI (`gh pr checks --watch`).
+- Ledger worktree: $CLAUDE_JOB_DIR/tmp/wt-ledger (job 26a0a7a7).
 - Never switch branches in Kian's main checkout (Rojo); fast-forward only.
-- D-035: grab refusal copy exists but no channel shows it; testers decide.
-- Integration at 973d261 (256 tests). D-036/D-037 close self-protection.
+- Integration at b075020 (271 tests) + #89 merged (9575905).

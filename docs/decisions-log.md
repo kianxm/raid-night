@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-043 · 2026-10-29 · Only offline dens are async raid targets
+Context: matchmaking on #91. Decision: GetRaidTargets lists a den as an async target only while
+its owner is offline (presence absent); online owners are raided live in their own server. A
+Studio-only hook may skip the asyncRaids flag for playtests (IsStudio + Memory persistence +
+test ids); live remotes always respect Config.Flags. Why: one den is never raided live and async
+at once; the hook can't reach a live game. Reviewer approved. Reversible: yes.
+
 ### D-042 · 2026-10-29 · P1.2 runs alongside P1.1; tools/sim goes to economy
 Context: P1.2 lists P1.1 as a dependency, but snapshots, pools, locks and presence live in
 matchmaking's own files and only read DataService as it is. Decision: start P1.2 in parallel
