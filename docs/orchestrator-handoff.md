@@ -4,35 +4,25 @@ Updated 2026-10-28. Read this first on startup, then docs/progress.md. Follow th
 "Context discipline" (section 2).
 
 ## Phase
-Phase 0 gate APPROVED (Kian). Finishing the post-gate follow-ups, then promote integration →
-main and STOP. Do not start Phase 1 until Kian says so. Don't ask Kian for multi-player testing.
+Phase 0 complete: gate APPROVED (Kian), all post-gate follow-ups done and merged, integration
+promoted to main. STOP state: do not start Phase 1 until Kian says so. Don't ask Kian for
+multi-player testing (deferred list in progress.md).
 
 ## In flight
-- C4 (data), branch `agent/data/C4` (maybe stacked `agent/data/C4-b`): D-033 empty live
-  commits grant nothing; liveProtected NaN test; D-034 `EscrowRecord.liveBaseRate` + trailing
-  `transferLive(..., liveBaseRate)` param; contracts.md mirror of #62's money-model rules. The
-  agent was dispatched by the previous session; if no PR is open from that branch, re-dispatch
-  C4 (spec: progress.md row + D-033/D-034).
-- P0.5h (raid), PR #71: open, CI green, unmerged. Merge AFTER C4. It already passes
-  `liveBaseRate` as transferLive's 7th argument.
+Nothing. No open feature PRs.
 
-## Next, in order
-1. When C4's PR is open: `reviewer` pass on C4 (contract, escrow) and #71 together.
-   Blocking findings go back to the owning agent.
-2. Integration agent: checks (pass/fail) on C4 then #71; merge C4 first, then #71.
-3. Integration agent: single-client Studio recheck of P0.5h/i (test-hook plan in #71, P0.5i
-   plan in #70). Fast-forward Kian's main checkout first (`git pull --ff-only`, it is on
-   `integration`); never switch branches there (Rojo serves it).
-4. Ledger: C4 / P0.5h Done; any new deferred multi-client items from #71's description.
-5. Promote integration → main: PR `integration` → `main`, CI `check` green, merge commit
-   (ruleset: PR-only, no force-push). Then stop and report.
+## Next (only when Kian says "Run Phase 1")
+- Phase 1 tasks P1.1-P1.10 in docs/playbook.md; P1.1 (data) carries D-008 and D-012 TODOs
+  (escrow GDPR ids, record cleanup, void tombstone before async debits).
+- Before going public: Kian's answer on planned self-protection (Blocked), then data + raid.
+- P2.8 hard gate: factor-1 accrue in EscrowService/Matchmaking fixed before `purchases` on.
 
-## Done this session
-#69 (D-034 ledger), #70 (P0.5i, merged), this PR (D-035, context discipline).
-
-## Ask Kian
-None blocking. Not-urgent P2.8 product questions stay in progress.md Blocked.
+## Ask Kian (not blocking)
+- Planned self-protection via a cheap live loss (options a/b/c; reviewer recommends b).
+- P2.8 product questions (Robux-linked products, VIP offline, restricted buyers).
 
 ## Remember
 - Ledger edits go through a worktree + PR; ledger PRs merge on green CI.
-- P0.5i cosmetic edge (noted in its row); D-035 keeps refusal reasons unshown for now.
+- Never switch branches in Kian's main checkout (Rojo); fast-forward only.
+- D-035: grab refusal copy exists but no channel shows it; testers decide.
+- Integration at f50ab1c (242 tests) before this ledger PR.
