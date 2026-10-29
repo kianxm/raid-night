@@ -17,6 +17,9 @@ type Critter = Types.Critter
 type Weight = Types.Weight
 type RevengeToken = Types.RevengeToken
 type RaidLogEntry = Types.RaidLogEntry
+type Trap = Types.Trap
+type TrapKind = Types.TrapKind
+type Mutation = Types.Mutation
 
 local DAY = 86400
 
@@ -47,6 +50,15 @@ RaidRules.Reason = table.freeze({
 	-- Live loss rules (decision D-031)
 	LiveProtected = "LiveProtected", -- the den lost enough Glow/s to live steals today
 	PostLossSafety = "PostLossSafety", -- a live loss just landed (or a carry from the den is under way)
+	-- Async raids (P1.3)
+	BadRequest = "BadRequest", -- malformed client arguments
+	AlreadyRaiding = "AlreadyRaiding", -- the raider is in a raid, starting one, or carrying live
+	NoSnapshot = "NoSnapshot", -- no snapshot saved, or it could not be read
+	Blocked = "Blocked", -- one of the two blocked the other
+	DefenderOnline = "DefenderOnline", -- the owner is online: raided live, never async (D-043)
+	Locked = "Locked", -- another raider holds the defender's raid lock
+	NoPocket = "NoPocket", -- no free pocket den in this server
+	TimeUp = "TimeUp", -- the raid timer has run out
 })
 
 function RaidRules.dayIndex(now: number): number
@@ -586,6 +598,352 @@ end
 function RaidRules.applyPurchasedShield(profile: PlayerProfile, now: number)
 	local base = math.max(profile.shieldUntil, now)
 	profile.shieldUntil = math.min(base + Config.Shield.purchasedSeconds, now + Config.Shield.maxStackSeconds)
+end
+
+-- Async raids in pocket dens (P1.3) ------------------------------------------------------------
+--[[
+	Pure rules for raiding an offline den rebuilt from its snapshot. Positions are pocket-local
+	studs on the ground plane (x, z): the pocket's centre is (0, 0), the escape gate is at +z and
+	the pads run from the back wall (-z) toward it. AsyncRaid turns them into world positions and
+	feeds back server-seen positions; nothing here comes from a client.
+	Pocket tuning stays here until the next Config contract batch, like RaidRules.Live (D-021).
+]]
+RaidRules.Pocket = table.freeze({
+	size = 72, -- square floor, studs
+	padColumns = 6,
+	padSpacing = 10,
+	padBackZ = -28, -- local z of the first pad row (pads 1-6); later rows step toward the gate
+	maxPads = 30,
+	gateZ = 32, -- local z of the escape gate (entrance and exit)
+	spawnZ = 20, -- where the raider lands
+	gateRadius = 5,
+	trapGrid = 8, -- Trap.gridX / gridY are cells 0..trapGrid-1 across the floor (clamped)
+	trapRadius = 3,
+	trapRearmSeconds = 6,
+	maxTraps = 12,
+	maxGuards = 4,
+	guardPatrolSpeed = 8,
+	guardChaseSpeed = 13, -- faster than a Medium carry (16 x 0.75), slower than walking (16)
+	guardSightRange = 12, -- the nearest patrol line is 14 studs from the spawn
+	guardLoseRange = 24,
+	guardTagRange = 4,
+	alertSeconds = 6, -- AlarmMoth: every guard chases this long, plus its level
+	maxHeight = 16, -- root part above the floor
+	boundsMargin = 6, -- this far past the walls = left the pocket
+	-- Presence written this recently means the owner is online somewhere (D-043): 2 refreshes.
+	presenceFreshSeconds = 2 * Config.Matchmaking.presenceRefreshSeconds,
+})
+
+local P = RaidRules.Pocket
+
+export type Point = { x: number, z: number }
+export type PocketTrap = { kind: TrapKind, level: number, x: number, z: number }
+export type PocketLayout = {
+	pads: { [number]: Point }, -- padIndex -> position, for the snapshot's laid-out Pad critters
+	uids: { [string]: number }, -- uid -> padIndex of those critters: the only grabbable ones
+	traps: { PocketTrap },
+	guardRoutes: { { Point } }, -- one patrol line per guard critter (at most maxGuards)
+	gate: Point,
+	spawn: Point,
+}
+-- What the raider's client may see of a pocket critter: never Glow, never the block list.
+export type PocketCritterView = { uid: string, speciesId: string, mutation: Mutation, padIndex: number }
+export type GuardState = { x: number, z: number, chasing: boolean, leg: number }
+export type TrapEffect = { slow: number, seconds: number, alertSeconds: number, sendBack: boolean }
+export type PocketOutcome = "Continue" | "TooFast" | "TooHigh" | "OutOfBounds" | "AtGate"
+export type PocketStep = {
+	x: number, -- raider root part, pocket-local
+	z: number,
+	height: number, -- root part above the floor
+	moved: number, -- X/Z studs since the last sample
+	dt: number,
+	walkSpeed: number, -- what the server set
+	budget: number, -- movement budget left (carryStartBudget at the grab)
+	carrying: boolean,
+}
+
+export type AsyncStart = {
+	flagsAllow: boolean, -- Escrow.canStartTransfer(Config.Flags, "Async", isRevenge)
+	raider: PlayerProfile?,
+	hasDen: boolean, -- the raider has a den to return to
+	busy: boolean, -- already raiding, starting a raid, or carrying live
+	targetUserId: number,
+	snapshot: DenSnapshot?, -- nil = none saved or unreadable
+	raiderBlocked: { number }?, -- the raider's reported Roblox block list
+	defenderOnline: boolean, -- a player in this server, or fresh presence anywhere
+	defenderLossesToday: number, -- from the live profile when this server has it, else 0
+	revengeRaidId: string?,
+	now: number,
+}
+
+local function isWhole(value: any, low: number, high: number): boolean
+	return type(value) == "number" and value == value and value % 1 == 0 and value >= low and value <= high
+end
+
+local function dist(ax: number, az: number, bx: number, bz: number): number
+	return math.sqrt((ax - bx) ^ 2 + (az - bz) ^ 2)
+end
+
+function RaidRules.presenceFresh(presenceAt: number?, now: number): boolean
+	return presenceAt ~= nil and now - presenceAt < P.presenceFreshSeconds
+end
+
+-- Pocket-local position of a pad: padColumns per row, the first row at the back wall.
+function RaidRules.pocketPad(padIndex: number): Point?
+	if not isWhole(padIndex, 1, P.maxPads) then
+		return nil
+	end
+	local col = (padIndex - 1) % P.padColumns
+	local row = (padIndex - 1) // P.padColumns
+	return { x = (col - (P.padColumns - 1) / 2) * P.padSpacing, z = P.padBackZ + row * P.padSpacing }
+end
+
+-- The snapshot's stealable critters as the raider's client may see them, by pad. A Pad critter
+-- whose pad cannot be laid out (or a second one on the same pad) is left out, and so cannot be
+-- grabbed either. Guards and Vault critters never appear.
+function RaidRules.pocketView(snapshot: DenSnapshot): { PocketCritterView }
+	local seen: { [number]: boolean } = {}
+	local list: { PocketCritterView } = {}
+	for _, critter in snapshot.critters do
+		local pad = critter.padIndex
+		if critter.placement == "Pad" and pad and RaidRules.pocketPad(pad) and not seen[pad] then
+			seen[pad] = true
+			table.insert(
+				list,
+				{ uid = critter.uid, speciesId = critter.speciesId, mutation = critter.mutation, padIndex = pad }
+			)
+		end
+	end
+	table.sort(list, function(a: PocketCritterView, b: PocketCritterView): boolean
+		return a.padIndex < b.padIndex
+	end)
+	return list
+end
+
+--[[
+	May this raider start an async raid on targetUserId? On success also returns the revenge token
+	the raid uses (nil for a normal raid). Taking the raid lock is the caller's next step. A revenge
+	id must name a token in the raider's OWN profile against this target (canRaid checks expiry).
+]]
+function RaidRules.canStartAsync(a: AsyncStart): (boolean, string?, RevengeToken?)
+	if not a.flagsAllow then
+		return false, RaidRules.Reason.SwitchedOff, nil
+	end
+	local raider = a.raider
+	if raider == nil or not a.hasDen then
+		return false, RaidRules.Reason.RaiderNotReady, nil
+	end
+	if a.busy then
+		return false, RaidRules.Reason.AlreadyRaiding, nil
+	end
+	if a.targetUserId == raider.userId then
+		return false, RaidRules.Reason.Self, nil
+	end
+	local snapshot = a.snapshot
+	if snapshot == nil or snapshot.userId ~= a.targetUserId then
+		return false, RaidRules.Reason.NoSnapshot, nil
+	end
+	local theyBlock = snapshot.blockedUserIds ~= nil and table.find(snapshot.blockedUserIds, raider.userId) ~= nil
+	local iBlock = a.raiderBlocked ~= nil and table.find(a.raiderBlocked, a.targetUserId) ~= nil
+	if theyBlock or iBlock then
+		return false, RaidRules.Reason.Blocked, nil
+	end
+	if a.defenderOnline then
+		return false, RaidRules.Reason.DefenderOnline, nil
+	end
+	local token: RevengeToken? = nil
+	if a.revengeRaidId ~= nil then
+		token = raider.revengeTokens[a.revengeRaidId]
+		if token == nil or token.targetUserId ~= a.targetUserId then
+			return false, RaidRules.Reason.RevengeExpired, nil
+		end
+	end
+	local ok, reason = RaidRules.canRaid(raider, snapshot, a.defenderLossesToday, a.now, token)
+	if not ok then
+		return false, reason, nil
+	end
+	if #RaidRules.pocketView(snapshot) == 0 then
+		return false, RaidRules.Reason.NothingOnPad, nil
+	end
+	return true, nil, token
+end
+
+-- Builds the pocket from a snapshot: pads, traps (grid cells clamped onto the floor and short of
+-- the spawn, at most maxTraps), one patrol line per guard (at most maxGuards, in snapshot order),
+-- gate and spawn.
+function RaidRules.pocketLayout(snapshot: DenSnapshot): PocketLayout
+	local pads: { [number]: Point } = {}
+	local uids: { [string]: number } = {}
+	for _, view in RaidRules.pocketView(snapshot) do
+		pads[view.padIndex] = RaidRules.pocketPad(view.padIndex) :: Point
+		uids[view.uid] = view.padIndex
+	end
+	local cell = P.size / P.trapGrid
+	local function cellCentre(index: any): number
+		local i = if type(index) == "number" and index == index then index else 0
+		return (math.clamp(math.floor(i), 0, P.trapGrid - 1) + 0.5) * cell - P.size / 2
+	end
+	local traps: { PocketTrap } = {}
+	for _, trap in snapshot.traps do
+		if #traps < P.maxTraps then
+			local level = if isWhole(trap.level, 1, math.huge) then math.min(trap.level, 10) else 1
+			table.insert(traps, {
+				kind = trap.kind,
+				level = level,
+				x = cellCentre(trap.gridX),
+				z = math.min(cellCentre(trap.gridY), P.spawnZ - 8),
+			})
+		end
+	end
+	local routes: { { Point } } = {}
+	local half = P.size / 2 - 6
+	for _, critter in snapshot.critters do
+		if critter.placement == "Guard" and #routes < P.maxGuards then
+			local z = P.spawnZ - 14 - #routes * 10 -- between the spawn and the pads
+			local flip = if #routes % 2 == 0 then 1 else -1
+			table.insert(routes, { { x = -half * flip, z = z }, { x = half * flip, z = z } })
+		end
+	end
+	return {
+		pads = pads,
+		uids = uids,
+		traps = traps,
+		guardRoutes = routes,
+		gate = { x = 0, z = P.gateZ },
+		spawn = { x = 0, z = P.spawnZ },
+	}
+end
+
+function RaidRules.newGuard(route: { Point }): GuardState
+	return { x = route[1].x, z = route[1].z, chasing = false, leg = 2 }
+end
+
+--[[
+	One server tick of a guard (mutates `g`). It patrols its line, chases a raider it sees (or
+	while an AlarmMoth alert is on), gives up past guardLoseRange, and tags within guardTagRange.
+	`rx`/`rz` nil = no raider to see. Returns true when the raider is tagged.
+]]
+function RaidRules.guardStep(
+	g: GuardState,
+	route: { Point },
+	rx: number?,
+	rz: number?,
+	dt: number,
+	alerted: boolean
+): boolean
+	local d = if rx and rz then dist(g.x, g.z, rx, rz) else math.huge
+	if d <= P.guardTagRange then
+		return true
+	end
+	g.chasing = alerted or d <= (if g.chasing then P.guardLoseRange else P.guardSightRange)
+	local tx, tz, speed
+	if g.chasing and rx and rz then
+		tx, tz, speed = rx, rz, P.guardChaseSpeed
+	else
+		local point = route[g.leg] or route[1]
+		if dist(g.x, g.z, point.x, point.z) < 0.5 then
+			g.leg = g.leg % #route + 1
+			point = route[g.leg]
+		end
+		tx, tz, speed = point.x, point.z, P.guardPatrolSpeed
+	end
+	local gap = dist(g.x, g.z, tx, tz)
+	local step = math.min(gap, speed * math.max(dt, 0))
+	if gap > 0 then
+		g.x += (tx - g.x) / gap * step
+		g.z += (tz - g.z) / gap * step
+	end
+	return rx ~= nil and rz ~= nil and dist(g.x, g.z, rx, rz) <= P.guardTagRange
+end
+
+-- What a trap does to the raider who steps in it: `slow` multiplies walk speed for `seconds`.
+function RaidRules.trapEffect(kind: TrapKind, level: number): TrapEffect
+	if kind == "SlowPuddle" then
+		return { slow = 0.5, seconds = 2 + 0.5 * level, alertSeconds = 0, sendBack = false }
+	elseif kind == "Net" then
+		return { slow = 0, seconds = 1 + 0.25 * level, alertSeconds = 0, sendBack = false }
+	elseif kind == "Sprinkler" then
+		return { slow = 0.7, seconds = 3, alertSeconds = 0, sendBack = false }
+	elseif kind == "AlarmMoth" then
+		return { slow = 1, seconds = 0, alertSeconds = P.alertSeconds + level, sendBack = false }
+	end
+	-- Trapdoor: back to the spawn; a carried critter goes back to its pad.
+	return { slow = 1, seconds = 0, alertSeconds = 0, sendBack = true }
+end
+
+function RaidRules.trapHit(trap: PocketTrap, x: number, z: number): boolean
+	return dist(trap.x, trap.z, x, z) <= P.trapRadius
+end
+
+--[[
+	One server sample of the raider in the pocket: the outcome and the budget left. First match
+	wins: TooFast (carrying only; RaidRules.Live's movement budget, so a teleport to the gate never
+	escapes), TooHigh, OutOfBounds (left the pocket), AtGate, Continue.
+]]
+function RaidRules.pocketStep(s: PocketStep): (PocketOutcome, number)
+	local budget = s.budget
+	if s.carrying then
+		local refill = RaidRules.Live.moveRefill * s.walkSpeed * math.max(s.dt, 0)
+		budget = math.min(RaidRules.carryBudgetCap(s.walkSpeed), budget + refill) - s.moved
+		if not (budget >= 0) then -- NaN fails too
+			return "TooFast", budget
+		end
+	end
+	if not (s.height <= P.maxHeight) then
+		return "TooHigh", budget
+	end
+	local edge = P.size / 2 + P.boundsMargin
+	if not (math.abs(s.x) <= edge and math.abs(s.z) <= edge) then
+		return "OutOfBounds", budget
+	end
+	if dist(s.x, s.z, 0, P.gateZ) <= P.gateRadius then
+		return "AtGate", budget
+	end
+	return "Continue", budget
+end
+
+-- May the raider grab this critter now? `snapshot` and `layout` are the raid's own, kept in
+-- server memory from the start; `distance` is root part to the pad, server positions.
+function RaidRules.canGrabAsync(
+	snapshot: DenSnapshot,
+	layout: PocketLayout,
+	critterUid: any,
+	carrying: boolean,
+	distance: number,
+	now: number,
+	endsAt: number
+): (boolean, string?, Critter?)
+	if not (now < endsAt) then
+		return false, RaidRules.Reason.TimeUp, nil
+	end
+	if type(critterUid) ~= "string" then
+		return false, RaidRules.Reason.BadRequest, nil
+	end
+	if carrying then
+		return false, RaidRules.Reason.AlreadyCarrying, nil
+	end
+	local ok, reason = RaidRules.validateGrab(snapshot, critterUid)
+	if not ok then
+		return false, reason, nil
+	end
+	if layout.uids[critterUid] == nil then
+		return false, RaidRules.Reason.NotStealable, nil -- a Pad critter the pocket could not lay out
+	end
+	if not (distance <= Config.LiveRaid.grabRange) then -- also refuses NaN
+		return false, RaidRules.Reason.OutOfRange, nil
+	end
+	for _, critter in snapshot.critters do
+		if critter.uid == critterUid then
+			return true, nil, critter
+		end
+	end
+	return false, RaidRules.Reason.NotInSnapshot, nil
+end
+
+-- When the player last opened their raid log (unix seconds); 0 = never or an old save (D-005).
+function RaidRules.raidLogSeenAt(profile: PlayerProfile): number
+	local at = profile.raidLogSeenAt
+	return if type(at) == "number" and at == at then at else 0
 end
 
 return RaidRules

@@ -31,10 +31,23 @@ export type RaidTarget = {
 	topTier: Types.Tier?, -- loot hint: highest tier on the den's pads (nil = none known); never exact Glow
 }
 
+-- One stealable critter in an async raid's pocket den, for display. Pad critters only: never a
+-- Vault critter, never Glow, never the owner's block list.
+export type PocketCritter = {
+	uid: string, -- pass to GrabCritter
+	speciesId: string,
+	mutation: Types.Mutation,
+	padIndex: number,
+	position: any, -- Vector3: world position of its pad in the pocket den
+}
+
 export type RaidStart = {
 	raidId: string,
 	targetUserId: number,
-	endsAt: number,
+	endsAt: number, -- server time (workspace:GetServerTimeNow()) when the raid times out
+	gatePosition: any, -- Vector3: world position of the pocket den's escape gate
+	critters: { PocketCritter }, -- the pocket den's stealable critters, by padIndex
+	isRevenge: boolean,
 }
 
 export type RaidEnd = {
@@ -42,6 +55,9 @@ export type RaidEnd = {
 	escaped: boolean,
 	speciesId: string?,
 	glow: number,
+	-- Async raids only: "Escaped" (reached the gate carrying; `escaped` is true only once the loot
+	-- has moved), "Timeout", "Tagged", "Retreat" (gate with nothing), "Left", "Error". nil = live.
+	reason: string?,
 }
 
 local Net = {}
@@ -57,9 +73,11 @@ Net.Requests = table.freeze({
 	-- RemoteEvent: ({ number }) the local player's Roblox block list, sent on join and on every
 	-- change. Distinct positive userIds, at most Config.Matchmaking.maxBlockedUserIds, else ignored.
 	ReportBlocked = "ReportBlocked",
-	StartRaid = "StartRaid", -- (targetUserId, revengeRaidId?) -> RaidStart?
-	GrabCritter = "GrabCritter", -- RemoteEvent: (raidId, critterUid)
-	GetRaidLog = "GetRaidLog", -- () -> { RaidLogEntry }
+	-- (targetUserId, revengeRaidId?) -> RaidStart? (nil = refused). Async raids; one at a time.
+	StartRaid = "StartRaid",
+	-- RemoteEvent: (raidId, critterUid). Async raids: grab a pocket critter (pad prompts do the same).
+	GrabCritter = "GrabCritter",
+	GetRaidLog = "GetRaidLog", -- () -> { RaidLogEntry }; also marks the log seen (raidLogSeenAt)
 	GetReplay = "GetReplay", -- (raidId) -> compressed replay frames
 	-- () -> boolean (true if started). Den owner only, live raids only. Blocks entry only: raiders
 	-- inside can leave, but a carried critter drops at the border. Server enforces Config.LiveRaid.
@@ -90,7 +108,8 @@ Net.Limits = table.freeze({
 	docs/contracts.md, "Replicated attributes"). The server keeps the truth in its own tables and
 	never makes a gameplay or data decision from an attribute; clients must never be trusted for
 	them.
-	  Player:    Plot, CarryingUid ("" = not carrying), CarryingSpecies (species id, "" = none)
+	  Player:    Plot, CarryingUid ("" = not carrying), CarryingSpecies (species id, "" = none),
+	             RaidLogSeenAt (unix seconds the log was last opened before this session; 0 = never)
 	  Den Model: Plot, OwnerUserId, LockdownUntil, LockdownReadyAt (workspace:GetServerTimeNow())
 	  Pad:       PadIndex
 	  Critter:   CritterUid, SpeciesId, Tier, PadIndex, OwnerUserId

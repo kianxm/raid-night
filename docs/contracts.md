@@ -24,6 +24,9 @@ sections for what you touch. Update this page in the same commit as any contract
 
 Profile storage: ProfileStore store `PlayerProfiles`, key `Player_<userId>` (`DataService.luau`).
 
+Optional `PlayerProfile.raidLogSeenAt` (unix seconds): when the player last opened their raid
+log, written by DataService when `GetRaidLog` is answered. Missing = never; no migration.
+
 Studio-only memory and test profiles (decision D-019, details in `DataService.luau`):
 
 - **Memory switch.** Setting the boolean attribute `StudioMemoryProfiles` on `ServerStorage` to
@@ -294,6 +297,36 @@ The last three are Kian's launch values, tuned in Phase 3 from live data (P3.9).
 - Duration and cooldown are enforced server-side from the server's own state. The client only
   asks; `LockdownUntil` and `LockdownReadyAt` below are for display.
 
+## Async raids
+
+Raids on an offline den, rebuilt from its snapshot in a pocket den far off-map in the raider's
+own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async raids").
+
+- `Net.Requests.StartRaid` `(targetUserId, revengeRaidId?) -> RaidStart?` (nil = refused),
+  `Net.Limits.StartRaid` per 10 s and one call at a time. The server re-checks everything the
+  target list did, from the snapshot: `Escrow.canStartTransfer(Config.Flags, "Async", isRevenge)`,
+  blocks both ways, the owner not online (a player here, or presence younger than
+  `RaidRules.Pocket.presenceFreshSeconds`: raided live instead), `RaidRules.canRaid`, at least one
+  Pad critter. A revenge id must be a token in the raider's own profile against that target.
+  Then it takes the defender's raid lock, released on every end.
+- `RaidStart`: `raidId`, `targetUserId`, `endsAt` (server time, `workspace:GetServerTimeNow()`,
+  start + `Config.Raid.durationSeconds`), `gatePosition` (Vector3), `critters`
+  (`{ PocketCritter }`: uid, speciesId, mutation, padIndex, position; Pad critters only),
+  `isRevenge`. Nothing in it carries Glow or the owner's block list.
+- `Net.Requests.GrabCritter` (RemoteEvent `(raidId, critterUid)`, `Net.Limits.GrabCritter`), or the
+  pocket pad's prompt. The server checks the timer, one carry at a time, that the uid is a Pad
+  critter of the raid's own snapshot copy that the pocket laid out, and range from the server
+  root part to the server pad (`Config.LiveRaid.grabRange`). Vault critters are never in a
+  snapshot, so never stealable.
+- Carry speed is `RaidRules.carryWalkSpeed`, times any trap slow. Too fast (movement budget) or
+  too high while carrying, or a Trapdoor, puts the critter back on its pad; the raid goes on.
+- `Net.Pushes.RaidEnded` ends every async raid, with `reason`: `"Escaped"` (gate while carrying;
+  `escaped` is true only once the loot has moved), `"Timeout"`, `"Tagged"` (a guard),
+  `"Retreat"` (gate with nothing), `"Left"`, `"Error"`. The raider is sent back to their den.
+- `Net.Requests.GetRaidLog` `() -> { RaidLogEntry }`: the player's own log, newest first.
+- Raid code never writes a profile. An escape goes to `RaidService.onAsyncEscape`, which hands it
+  to EscrowService (P1.3b; until then nothing moves).
+
 ## Live loss rules
 
 Live steals only (D-031, amended by D-034, D-036, D-037). They replace the daily count cap for
@@ -383,6 +416,7 @@ server-written and display-only:
 | Player | `Plot` | number | Plot index of the player's den; absent when they have none |
 | Player | `CarryingUid` | string | uid of the critter being carried; `""` (or absent) when not carrying |
 | Player | `CarryingSpecies` | string | Species id of that critter; `""` (or absent) when not carrying |
+| Player | `RaidLogSeenAt` | number | Unix seconds the player last opened their raid log, as of this session's profile load; 0 = never |
 | Den Model `Den<plot>` | `Plot` | number | The den's plot index |
 | Den Model | `OwnerUserId` | number | Owner's userId; 0 when unowned |
 | Den Model | `LockdownUntil` | number | When the current Lockdown ends; absent or past = none active |
