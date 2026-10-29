@@ -69,7 +69,8 @@
 	                          The credit also records the raid on the raider (P1.3d, in the same
 	                          save as the credit, once per raidId; only when something moved):
 	                          their Outgoing raid-log entry, the pair count canRaid's limit reads
-	                          and, for revenge, the named token's shield bypass used.
+	                          and, for revenge, the named token removed (D-054: one revenge
+	                          raid per token; a failed or empty one keeps it).
 	                          revengeRaidId: the raider's revenge token the raid started with (its
 	                          key in their revengeTokens), from server state; only with isRevenge.
 	                          nil = none named (no token is spent). Anything else that is not a
@@ -820,7 +821,7 @@ local function startAsync(
 		return "Refused", revengeWhy -- before any write; Escrow.create would assert on it
 	end
 	local now = os.time()
-	-- The raider's revenge token (P1.3d) rides on the record; its credit marks it used.
+	-- The raider's revenge token (P1.3d) rides on the record; its credit removes it (D-054).
 	local record = Escrow.create(
 		raidId,
 		raiderUserId,

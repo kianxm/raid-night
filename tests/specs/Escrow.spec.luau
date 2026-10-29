@@ -6,6 +6,7 @@ local Config = require("../../src/Shared/Config")
 local RaidRules = require("../../src/Shared/RaidRules")
 local Types = require("../../src/Shared/Types")
 local Economy = require("../../src/Shared/Economy")
+local Matchmaking = require("../../src/Shared/Matchmaking")
 
 local NOW = 1_800_000_000
 
@@ -790,7 +791,7 @@ tests["an async credit that moved nothing records nothing on the raider (as D-03
 	expect.eq(raider.appliedTransfers["raid-1"].role, "Credit", "the idempotency entry is written")
 	expect.eq(#raider.raidLog, 0, "no Outgoing entry")
 	expect.eq(RaidRules.pairCount(raider, defender.userId, NOW), 0, "the pair slot is not used up (D-053)")
-	expect.truthy(same(raider.revengeTokens["old-raid"], before), "the token's bypass is not used")
+	expect.truthy(same(raider.revengeTokens["old-raid"], before), "a failed revenge keeps its token (D-054)")
 	expect.eq(defender.raidLog[1].raidId, "raid-1", "the defender's side still records it (P1.1)")
 end
 
@@ -802,44 +803,48 @@ tests["a live credit records nothing on the raider, revenge or not (D-052)"] = f
 	expect.truthy(raider.critters["fox"], "the loot moved")
 	expect.eq(#raider.raidLog, 0)
 	expect.eq(RaidRules.pairCount(raider, defender.userId, NOW), 0)
-	expect.eq(raider.revengeTokens["old-raid"].shieldBypassUsed, false)
+	expect.truthy(raider.revengeTokens["old-raid"], "live revenge spends no token (D-052)")
 end
 
-tests["an async revenge credit uses the named token's shield bypass and keeps the token"] = function()
+tests["an async revenge credit removes the named token: one revenge raid per token (D-054)"] = function()
 	local raider, defender, record = revengeSetup("old-raid")
 	raider.revengeTokens["old-raid"] = token("old-raid", defender.userId)
 	raider.revengeTokens["other"] = token("other", defender.userId)
 	raider.revengeTokens["third"] = token("third", 3)
+	local other, third = table.clone(raider.revengeTokens["other"]), table.clone(raider.revengeTokens["third"])
 	runAll(raider, defender, record)
 	expect.eq(raider.glow, 275, "the revenge share (+10%)")
-	local used = raider.revengeTokens["old-raid"]
-	expect.truthy(used, "the token stays until it expires")
-	expect.eq(used.shieldBypassUsed, true, "its shield bypass is used up")
-	expect.eq(used.expiresAt, NOW + Config.Revenge.windowSeconds, "its expiry is unchanged")
-	expect.eq(raider.revengeTokens["other"].shieldBypassUsed, false, "another token on the same target is left")
-	expect.eq(raider.revengeTokens["third"].shieldBypassUsed, false, "a token on someone else is left")
+	expect.eq(raider.revengeTokens["old-raid"], nil, "the token is spent")
+	expect.truthy(same(raider.revengeTokens["other"], other), "another token on the same target is left")
+	expect.truthy(same(raider.revengeTokens["third"], third), "a token on someone else is left")
 	expect.eq(raider.raidLog[1].isRevenge, true)
 	expect.eq(RaidRules.pairCount(raider, defender.userId, NOW), 1, "revenge counts toward the pair limit")
+	-- Gone, the token no longer offers a raid: StartRaid refuses it, and the portal lists the other.
+	local targets = Matchmaking.revengeTargets(raider, {}, NOW)
+	expect.eq(#targets, 2, "one row per target from the tokens left")
+	for _, row in targets do
+		expect.truthy(row.raidId ~= "old-raid", "the spent token is never offered")
+	end
 end
 
 tests["a revenge credit leaves tokens alone when the named one is gone, targets someone else, or none is named"] = function()
-	-- Gone: expired and pruned on load before the credit landed.
+	-- Gone: expired and pruned on load, or spent by another revenge, before the credit landed.
 	local raider, defender, record = revengeSetup("gone")
 	raider.revengeTokens["kept"] = token("kept", defender.userId)
 	runAll(raider, defender, record)
 	expect.eq(raider.revengeTokens["gone"], nil, "nothing is created")
-	expect.eq(raider.revengeTokens["kept"].shieldBypassUsed, false)
+	expect.truthy(raider.revengeTokens["kept"], "another token is left")
 	expect.eq(raider.raidLog[1].raidId, "raid-1", "the raid is still logged")
 	-- Another target: never spent through this raid.
 	raider, defender, record = revengeSetup("wrong")
 	raider.revengeTokens["wrong"] = token("wrong", 3)
 	runAll(raider, defender, record)
-	expect.eq(raider.revengeTokens["wrong"].shieldBypassUsed, false)
+	expect.truthy(raider.revengeTokens["wrong"], "a token on another target is left")
 	-- None named (a record from before the raid passed it).
 	raider, defender, record = revengeSetup(nil)
 	raider.revengeTokens["old-raid"] = token("old-raid", defender.userId)
 	runAll(raider, defender, record)
-	expect.eq(raider.revengeTokens["old-raid"].shieldBypassUsed, false)
+	expect.truthy(raider.revengeTokens["old-raid"], "no token named, none spent")
 	expect.eq(raider.raidLog[1].isRevenge, true)
 end
 

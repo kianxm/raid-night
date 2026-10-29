@@ -227,7 +227,7 @@ export type EscrowRecord = {
 	liveBaseRate: number?,
 	-- Async revenge only (P1.3d): the raider's revenge token this raid uses (its key in the
 	-- raider's revengeTokens: the raidId of the raid on them that granted it), from the raid's
-	-- start. The credit marks that token's shield bypass used. Set by Escrow.create (checked by
+	-- start. A credit that moved something removes that token (D-054). Set by Escrow.create (checked by
 	-- Escrow.checkRevengeRaidId) and never changed; part of the transfer's identity
 	-- (Escrow.sameTransfer). Missing = no token named (records written before it existed,
 	-- non-revenge, Live): the credit spends none. No migration.

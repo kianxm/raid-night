@@ -35,8 +35,9 @@
 	  6. The raider's side (P1.3d): an Async credit that moved something (a critter or Glow)
 	     records, in the same write as its idempotency entry, the raider's Outgoing raid-log
 	     entry, one pair count against the defender, and for a revenge record naming a token
-	     (revengeRaidId) that token's shield bypass used. An empty Async credit and every Live
-	     credit record none of them (D-033, D-052), and a repeat changes nothing.
+	     (revengeRaidId) that token removed (D-054). An empty Async credit and every Live credit
+	     record none of them (D-033, D-052), so a failed revenge keeps its token, and a repeat
+	     changes nothing.
 
 	Transport (server layer, not this module), by the record's kind:
 	  - Live: same-server steals. EscrowService.transferLive runs `advance` with both profiles
@@ -310,8 +311,8 @@ end
 	The raider-side consequences of an Async credit (P1.3d), from the record and the credit only:
 	the Outgoing raid-log entry and the pair count against the defender (RaidRules.recordOutgoing,
 	the count canRaid's pair limit reads), and, for a revenge record that names a token
-	(revengeRaidId), that token's shield bypass used, if the token is still there and targets this
-	defender. Only creditRaider calls it, for a fresh credit that moved something, so it lands in
+	(revengeRaidId), that token removed (D-054: one revenge raid per token), if it is still there
+	and targets this defender. Only creditRaider calls it, for a fresh credit that moved something, so it lands in
 	the same write as the credit's appliedTransfers entry: once per raidId, never on a repeat.
 ]]
 local function recordRaiderSide(raider: PlayerProfile, record: EscrowRecord, given: Critter?, now: number)
@@ -327,8 +328,8 @@ local function recordRaiderSide(raider: PlayerProfile, record: EscrowRecord, giv
 	)
 	local tokenId = record.revengeRaidId
 	local token = if record.isRevenge and tokenId then raider.revengeTokens[tokenId] else nil
-	if token and token.targetUserId == record.defenderUserId then
-		token.shieldBypassUsed = true -- the token stays until it expires (Matchmaking still lists it)
+	if tokenId and token and token.targetUserId == record.defenderUserId then
+		raider.revengeTokens[tokenId] = nil -- one revenge raid per token (D-054)
 	end
 end
 

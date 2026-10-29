@@ -157,12 +157,14 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
    - the raider's Outgoing raid-log entry and one `pairRaidsToday` count against the defender
      (`RaidRules.recordOutgoing`, with `escaped = true`, the species and Glow credited, and
      `isRevenge`), so `canRaid`'s pair limit counts async raids;
-   - for a revenge record with a `revengeRaidId`, that token's `shieldBypassUsed = true` in the
-     raider's `revengeTokens`, if the token is still there and targets this defender. The token
-     itself stays until it expires.
+   - for a revenge record with a `revengeRaidId`, that token removed from the raider's
+     `revengeTokens`, if it is still there and targets this defender: one revenge raid per token
+     (D-054). Matchmaking's revenge targets, `StartRaid` (`RevengeExpired`) and live revenge
+     (P1.9, `NoToken`) then simply stop offering it.
 
    An empty Async credit (nothing moved) records none of them (the D-033 pattern; a raid that
-   took nothing never counts toward the pair limit, D-053). A Live credit records none of them
+   took nothing never counts toward the pair limit, D-053), so a failed or empty revenge raid
+   keeps its token. A Live credit records none of them
    either: live raids are unchanged (live token spend is backlog, D-052). A repeat, a late or
    recovered credit, or a retry changes nothing, since a credit runs once per raidId.
 
@@ -193,7 +195,7 @@ floor of the protection line (D-037; Live loss rules, below).
 
 `EscrowRecord.revengeRaidId: string?` (P1.3d, additive) names the raider's revenge token that an
 Async revenge raid uses: its key in the raider's `revengeTokens`, which is the raidId of the raid
-on them that granted it. The credit marks that token used (invariant 6).
+on them that granted it. A credit that moved something removes that token (invariant 6, D-054).
 
 - **Set once.** `EscrowService.transferAsync` takes it as an optional 7th argument, from the
   raid's server state (the token StartRaid accepted), and `Escrow.create` as an optional 10th.
@@ -401,7 +403,7 @@ own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async ra
   `EscrowService.transferAsync` (Async kind). The escrow debit writes the defender's shield,
   revenge token, pair count and Incoming log entry (`RaidRules.recordIncoming`). The escrow
   credit writes the raider's Outgoing log entry and pair count (`RaidRules.recordOutgoing`) and,
-  on a revenge raid, uses up the named token's shield bypass (Escrow invariant 6, P1.3d), but
+  on a revenge raid, removes the named revenge token (Escrow invariant 6, P1.3d, D-054), but
   only when something moved. A revenge escape passes the raid's `revengeRaidId` as
   `transferAsync`'s 7th argument.
 - StartRaid fails closed when the owner's presence cannot be read (`PresenceUnknown`), and also

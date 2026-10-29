@@ -54,10 +54,11 @@
 	The raider's side of a credit (P1.3d), checked on every save of any profile: a new Async
 	credit that moved something adds exactly one Outgoing raid-log entry (from the record and the
 	credit: the defender, the species and Glow credited, isRevenge), one pair count against the
-	defender, and, for a revenge record naming a token against that defender, marks the token's
-	shield bypass used. Nothing else does: not an empty Async credit, not a Live credit, not a
-	repeat (redelivery, recovery, a crash before the commit), and no save outside a credit. A
-	token is only ever added by a debit, flagged by such a credit, or pruned once expired.
+	defender, and, for a revenge record naming a token against that defender, removes the token
+	(D-054: one revenge raid per token). Nothing else does: not an empty Async credit (a failed
+	revenge keeps its token), not a Live credit, not a repeat (redelivery, recovery, a crash
+	before the commit), and no save outside a credit. A token is only ever added by a debit,
+	never changed, and removed only by such a credit or once expired.
 
 	Storage behaves like DataStore: every load returns a copy, and nothing persists until saved,
 	so a crash loses unsaved work exactly as a real server would. The record store enforces the
@@ -176,6 +177,21 @@ local function countKeys(t: { [string]: any }): number
 	return n
 end
 
+-- The same fields with the same values (flat tables, such as revenge tokens).
+local function same(a: { [string]: any }, b: { [string]: any }): boolean
+	for k, v in a do
+		if b[k] ~= v then
+			return false
+		end
+	end
+	for k in b do
+		if a[k] == nil then
+			return false
+		end
+	end
+	return true
+end
+
 -- The same raid-log entries, in the same order.
 local function sameLog(a: { Types.RaidLogEntry }, b: { Types.RaidLogEntry }): boolean
 	if #a ~= #b then
@@ -275,14 +291,14 @@ local function newWorld(seed: number)
 			-- P1.3d, the raider's side: Async credits that logged the raid, empty Async credits and
 			-- Live credits that recorded nothing, credits saved again while their record was still
 			-- Debited (a repeat must change nothing), revenge raids, their credits that used a token's
-			-- shield bypass, met one already used, found it gone (expired), or named none.
+			-- token (D-054: removed it), found it gone (spent by another revenge, or expired), or
+			-- named none.
 			outgoingLogged = 0,
 			emptyAsyncCredits = 0,
 			liveCredits = 0,
 			creditRepeats = 0,
 			revengeRaids = 0,
 			revengeSpent = 0,
-			revengeAlreadyUsed = 0,
 			revengeTokenGone = 0,
 			revengeNoId = 0,
 		},
@@ -518,8 +534,9 @@ local function newWorld(seed: number)
 			stats.outgoingLogged += 1
 		end
 
-		-- Revenge tokens: added only by a debit, flagged only by a revenge credit against their
-		-- target (a flag never clears), removed only once expired (pruning on load).
+		-- Revenge tokens: added only by a debit and never changed; removed by a revenge credit
+		-- against their target (D-054: one revenge raid per token), which must remove it, or once
+		-- expired (pruning on load), and by nothing else.
 		for id, token in after.revengeTokens do
 			local was = before.revengeTokens[id]
 			if was == nil then
@@ -530,23 +547,19 @@ local function newWorld(seed: number)
 				)
 				continue
 			end
-			expect.eq(token.targetUserId, was.targetUserId, `{id}: a token's target never changes`)
-			expect.eq(token.expiresAt, was.expiresAt, `{id}: nor its expiry`)
-			local spend = spends[id] == was.targetUserId
-			expect.eq(
-				token.shieldBypassUsed,
-				was.shieldBypassUsed or spend,
-				`{id}: the shield bypass is used only by a revenge credit against its target`
-			)
-			if spend and was.shieldBypassUsed then
-				stats.revengeAlreadyUsed += 1
-			elseif spend then
-				stats.revengeSpent += 1
-			end
+			expect.truthy(same(token, was), `{id}: a kept token never changes`)
+			expect.falsy(spends[id] == was.targetUserId, `{id}: a revenge credit against its target removes it`)
 		end
 		for id, was in before.revengeTokens do
 			if after.revengeTokens[id] == nil then
-				expect.truthy(now >= was.expiresAt, `{after.userId}: token {id} removed only once expired`)
+				local spend = spends[id] == was.targetUserId
+				expect.truthy(
+					spend or now >= was.expiresAt,
+					`{after.userId}: token {id} removed only by its revenge or expiry`
+				)
+				if spend then
+					stats.revengeSpent += 1
+				end
 			end
 		end
 		for id in spends do
@@ -1182,7 +1195,7 @@ local function runSimulation(seed: number)
 		local asyncRaider = if arng.chance(OFFLINE_RAID_CHANCE) then pickOnline() else nil
 		local target = arng.int(1, PLAYERS)
 		-- A raider holding an unexpired revenge token sometimes raids its target back instead
-		-- (P1.3d), the token's shield bypass used or not; the record names the token, or does not.
+		-- (P1.3d); the record names the token, or does not.
 		local rrng = world.rrng
 		local revenge: { id: string? }? = nil
 		if asyncRaider and rrng.chance(REVENGE_CHANCE) then
@@ -1224,8 +1237,9 @@ local function runSimulation(seed: number)
 					true,
 					revenge
 				)
-				-- The same token again (the next UTC day, say): its shield bypass is used by then, or
-				-- the first raid's credit is still in flight and lands after this one's.
+				-- The same token again, started while the first raid's credit was still in flight
+				-- (StartRaid still saw the token): whichever credit lands first removes it, and the
+				-- other finds it gone.
 				if revenge and revenge.id and online(asyncRaider) and rrng.chance(REVENGE_AGAIN_CHANCE) then
 					world.stats.revengeRaids += 1
 					local grab = pads[rrng.int(1, #pads)]
@@ -1327,11 +1341,11 @@ tests["1,000 raids with crashes, duplicates, races and long absences never dupli
 	expect.truthy(stats.emptyAsyncCredits > 0, "an async credit that moved nothing recorded nothing")
 	expect.truthy(stats.liveCredits > 0, "live credits recorded nothing on the raider")
 	expect.truthy(stats.creditRepeats > 0, "a credit saved again before its commit changed nothing")
-	-- ...and revenge raids in the async half: the token's shield bypass used once, a used one left
-	-- as it is, a record without the token's raidId spending nothing.
-	expect.truthy(stats.revengeRaids > 0 and stats.revengeSpent > 0, "revenge credits used their token's bypass")
-	expect.truthy(stats.revengeAlreadyUsed > 0, "a revenge credit on a used token changed nothing more")
-	expect.truthy(stats.revengeTokenGone > 0, "a revenge credit whose token had expired and gone still landed")
+	-- ...and revenge raids in the async half (D-054): a credit removes its token once, a credit
+	-- whose token is already gone (spent or expired) still lands, and a record without the token's
+	-- raidId spends nothing.
+	expect.truthy(stats.revengeRaids > 0 and stats.revengeSpent > 0, "revenge credits removed their token")
+	expect.truthy(stats.revengeTokenGone > 0, "a revenge credit whose token was already gone still landed")
 	expect.truthy(stats.revengeNoId > 0, "a revenge record without a revengeRaidId spent no token")
 end
 
@@ -1341,7 +1355,7 @@ tests["the same holds across 5 more random seeds"] = function()
 		local _, _, _, _, _, stats = runSimulation(seed * 7919)
 		expect.truthy(stats.refillReopened > 0, `seed {seed * 7919}: a refill reopened a protected den`)
 		expect.truthy(stats.outgoingLogged > 0, `seed {seed * 7919}: async credits logged the raid on the raider`)
-		expect.truthy(stats.revengeSpent > 0, `seed {seed * 7919}: a revenge credit used its token's bypass`)
+		expect.truthy(stats.revengeSpent > 0, `seed {seed * 7919}: a revenge credit removed its token`)
 		-- Every seed checks that a debit after a mid-carry shrink still takes the critter (mustTake);
 		-- the case where only the grab's rate decides it is rarer, so it is counted over the seeds.
 		defeated += stats.carryShrinkDefeated
