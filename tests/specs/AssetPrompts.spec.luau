@@ -29,13 +29,25 @@ tests["prompts never contain hex codes, and always name the body and a single gl
 	end
 end
 
-tests["rarity raises the wow: Commons get no tier line, every tier from Rare up gets its own"] = function()
+tests["rarity raises the wow: Commons get no wow line, every tier from Rare up gets its own"] = function()
 	for _, species in CritterCatalog.all() do
 		local prompt = Prompts.view(species, "Front")
+		local wow = Prompts.TIER_WOW[species.tier]
 		if species.tier == "Common" or species.tier == "Uncommon" then
-			expect.falsy(string.find(prompt, " tier: ", 1, true), `{species.id} has a tier line`)
+			expect.falsy(wow, `{species.tier} has a wow line`)
 		else
-			expect.truthy(string.find(prompt, `{species.tier} tier: `, 1, true), `{species.id} lacks its tier line`)
+			expect.truthy(wow and string.find(prompt, wow, 1, true), `{species.id} lacks its wow line`)
+		end
+	end
+end
+
+tests["prompts never name the critter or its tier, which models print as captions"] = function()
+	for _, species in CritterCatalog.all() do
+		for _, prompt in { Prompts.view(species, "Front"), Prompts.icon(species) } do
+			expect.falsy(string.find(prompt, species.name, 1, true), `{species.id} prompt names {species.name}`)
+			for _, tier in { "Rare", "Epic", "Legendary", "Mythic", "Secret" } do
+				expect.falsy(string.find(prompt, tier, 1, true), `{species.id} prompt says {tier}`)
+			end
 		end
 	end
 end

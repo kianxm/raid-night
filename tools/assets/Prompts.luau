@@ -10,6 +10,8 @@
 	  - the single glow is ignored half the time, so prompts say "no other glowing parts"
 	  - night scenes drift to plush, so the finish is "smooth matte vinyl toy surface, no fuzz"
 	  - the style references show an upright mouse, so every prompt names the body plan and pose
+	Later lessons: names and "Legendary tier:"-style labels get printed as captions, so prompts
+	never include the critter's name or a tier word.
 ]]
 
 local Prompts = {}
@@ -20,7 +22,8 @@ Prompts.STYLE = "Stylized 3D game character for a cozy nighttime game. Chunky to
 	.. "Clean simple shapes and textures, no fine detail. Readable silhouette at small size."
 
 Prompts.AVOID = "Avoid photorealism, realistic fur strands, text, letters, numbers, labels, logos, watermarks, "
-	.. "frames, borders, strings, ropes, hooks or hangers, existing cartoon characters, franchise mascots, human faces, weapons, gore, scary "
+	.. "frames, borders, titles, captions, name tags, writing on clothing, strings, ropes, hooks or "
+	.. "hangers, existing cartoon characters, franchise mascots, human faces, weapons, gore, scary "
 	.. "or sexualized features, sad, crying, injured or frightened expressions or poses."
 
 -- Body plans are shared so rigs and animations are reused (style bible, "Body plan follows the
@@ -29,9 +32,10 @@ Prompts.BODY_PLANS = {
 	upright = "standing upright on two short legs, arms relaxed",
 	quadruped = "standing on all four short legs like an animal, not upright like a person",
 	crawler = "low to the ground in its natural animal posture, not standing upright like a person",
-	floater = "floating in the air a little above the ground with no legs, nothing touching the ground",
+	floater = "floating in the air a little above the ground, its body tapering away instead of legs, nothing "
+		.. "touching the ground",
 	flyer = "hovering in the air with its wings spread and its legs tucked, not standing",
-	serpent = "long serpentine body coiled in a loose ring, not standing upright",
+	serpent = "a long snake-like body with no legs and no arms, coiled in a loose ring on the ground",
 }
 
 -- Every critter's plan and its one glowing feature (named, or the model puts the glow anywhere).
@@ -135,23 +139,24 @@ Prompts.ART = {
 		bodyPlan = "floater",
 		glow = "its lightning-bolt ears",
 		pose = "sitting on its small thundercloud, which floats above the ground",
-		look = "sleek silver-and-white hare in a daring surfer stance on a small crackling thundercloud, tall lightning-bolt ears, a streaming silver mane, tiny arcs of electricity dancing around the cloud; its body is silver, never yellow, with yellow only on the small electric arcs",
+		look = "sleek silver-and-white hare crouched daringly on a small crackling thundercloud, tall lightning-bolt ears, a streaming silver mane, tiny arcs of electricity dancing around the cloud; its body is silver, never yellow, with yellow only on the small electric arcs",
 	},
 	lunar_kitsune = {
 		bodyPlan = "quadruped",
 		glow = "its three moon-phase tails",
+		pose = "standing on all four legs like a fox, not upright like a person",
 		look = "elegant spirit fox with exactly three long flowing tails, each tipped with a glowing moon phase (crescent, half and full), a small crescent mark on its forehead and wisps of pale spirit flame at its paws",
 	},
 	abyss_angler = {
 		bodyPlan = "floater",
 		glow = "its full-moon lure",
-		pose = "floating as if swimming, lure held up in front of its face",
+		pose = "a round fish body with fins and a tail, no legs and no arms, floating as if swimming, the lure dangling in front of its face",
 		look = "round deep-sea anglerfish with a sly grin of tiny rounded teeth, flowing ribbon-like fins and a tiny full-moon lure on a curling stalk",
 	},
 	king_bandit = {
 		bodyPlan = "upright",
 		glow = "its trash can lid crown",
-		look = "regal raccoon wearing a crown made from a trash can lid and a tattered velvet cape, with a royal sash made from a candy wrapper",
+		look = "regal raccoon wearing a crown made from a trash can lid and a tattered velvet cape, and a bottle-cap medal pinned to its chest",
 	},
 	nebula_owl = {
 		bodyPlan = "upright",
@@ -181,17 +186,17 @@ local EXPRESSION_RARE_AND_ABOVE = "with lots of character that still reads as cu
 -- The wow ladder (Kian, 2026-10-29): the rarer the critter, the more spectacular it looks.
 -- Commons and Uncommons stay simple; each tier above adds spectacle.
 Prompts.TIER_WOW = {
-	Rare = "Rare tier: one signature flourish that makes it stand out from common critters.",
-	Epic = "Epic tier: a more elaborate, eye-catching silhouette with one standout flourish and a "
-		.. "slightly stronger glow.",
-	Legendary = "Legendary tier: majestic and unforgettable at a glance, a hero of the collection. A unique "
+	Rare = "It has one signature flourish that makes it stand out from ordinary critters.",
+	Epic = "It has a more elaborate, eye-catching silhouette with one standout flourish and a slightly "
+		.. "stronger glow.",
+	Legendary = "It is majestic and unforgettable at a glance, a prized find. A unique "
 		.. "silhouette and a face and head designed for this species, not a generic toy face. Its glowing "
 		.. "feature glows strongly, with a soft aura and a few floating light motes in the same color.",
-	Mythic = "Mythic tier: awe-inspiring and celestial, rarer than legendary. Layered, intricate details "
+	Mythic = "It is awe-inspiring and celestial. Layered, intricate details "
 		.. "that still read as one clear silhouette, a face and head designed for this species, and a "
 		.. "radiant aura with orbiting light motes in the glow color.",
-	Secret = "Secret tier: otherworldly and mysterious, unlike any ordinary animal, the single most "
-		.. "spectacular critter in the game. A one-of-a-kind silhouette, a dramatic aura and drifting light "
+	Secret = "It is otherworldly and mysterious, unlike any ordinary animal, the single most spectacular "
+		.. "creature imaginable. A one-of-a-kind silhouette, a dramatic aura and drifting light "
 		.. "effects in the glow color.",
 }
 
@@ -339,15 +344,13 @@ function Prompts.pose(species): string
 end
 
 function Prompts.view(species, view: string): string
-	return `{Prompts.STYLE} Character: {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}.{Prompts.wowLine(
-		species
-	)} ` .. `{Prompts.expressionLine(species)} {view} view, full body, centered and filling most of the frame, ` .. `orthographic camera, evenly lit, plain mid-grey background. {colorLine(
-		species
-	)} {Prompts.AVOID}`
+	return `{Prompts.STYLE} Character: {Prompts.look(species)}. Body: {Prompts.pose(species)}.{Prompts.wowLine(species)} `
+		.. `{Prompts.expressionLine(species)} {view} view, full body, centered and filling most of the frame, `
+		.. `orthographic camera, evenly lit, plain mid-grey background. {colorLine(species)} {Prompts.AVOID}`
 end
 
 function Prompts.icon(species): string
-	return `{Prompts.STYLE} Character portrait of {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}.{Prompts.wowLine(
+	return `{Prompts.STYLE} Character portrait: {Prompts.look(species)}. Body: {Prompts.pose(species)}.{Prompts.wowLine(
 		species
 	)} ` .. `{Prompts.expressionLine(species)} Three-quarter view, head and body centered and filling the frame, ` .. `soft rim light, plain flat light-grey background. {colorLine(
 		species
