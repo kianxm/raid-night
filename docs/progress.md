@@ -32,7 +32,7 @@ Current phase: 0 → 1 (Phase 0 gate approved, follow-ups done, main promoted; P
 | P0.5g | data | — | Done | #64, #65 | 1 | Reviewer APPROVED both. Value-based live protection, postLossSafetySeconds, live pair limit, EscrowRecord.kind, simulation reaches protection 53-65x per seed. 225 tests on integration. Follow-ups: D-033 (data), base-measurement question (Kian) |
 | C4 | data | P0.5g | Done | #73, #74 | 1 | Reviewer APPROVED. D-033, D-034 (`EscrowRecord.liveBaseRate`, transferLive 7th arg), NaN test, contracts.md mirror of #62. P2.8 gate: the factor-1 accrue in EscrowService/Matchmaking must be fixed before `purchases` turns on. Studio-verified (D-033 empty commit, D-034 shrink mid-carry) |
 | P0.5h | raid | P0.5g, C4 | Done | #71 | 1 | Reviewer APPROVED. Base measured at grab-hold accept; source guard pins it; loss time keeps fractional seconds; server hides prompts on closed dens. Studio-verified (single client). 242 tests on integration (f50ab1c) |
-| C5 | data | C4 | Done | #79 | 1 | Reviewer APPROVED. D-036 (protection vs max(base, current rate)) and D-037 (debit also counts the grab-time rate). Note: the simulation's day-total loss invariant is now implied by the per-debit check; consider a day-high check in P1.1 |
+| C5 | data | C4 | Done | #79 | 1 | Reviewer APPROVED. D-036 (protection vs max(base, current rate)) and D-037 (debit also counts the grab-time rate). Note: the simulation's day-total loss invariant is now implied by the per-debit check; consider a day-high check in P1.1. Studio-verified single client (plan step 4 hits PairLimit as written; rerun on a fresh seed: fix the plan text or add a test-hook pair reset). 256 tests on integration (973d261) |
 | P0.5j | ui | — | Done | #80 | 1 | Reviewer APPROVED. Copy "Protected" / "Protected from steals"; chip 200 px. Log-only "live-protected today" text in RaidService left (raid, cosmetic) |
 | P0.5i | ui | — | Done | #70 | 1 | Den marker "Protected today" / "Safe for m:ss", own-den chip, steal prompt hidden while protected. Refusal copy built but no channel to show it (D-035). Cosmetic edge: a prompt the server disabled while protection hid it comes back on when protection ends (server still refuses) |
 
@@ -113,6 +113,8 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
   a UTC day roll clears LiveProtected within 0.5 s; no raid-log entry for a real empty steal.
 - Phone emulator: den status chip and markers (P0.5i, #70); the 200 px chip (#80) may overlap the
   top-centre toast below ~700 px wide (667x375 landscape): check, or move/narrow it.
+- Live protection (D-036/D-037): an owner buying an egg after a protecting loss (auto-place lifts
+  protection); an owner vaulting during a carry from a refilled den (the steal still lands).
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
