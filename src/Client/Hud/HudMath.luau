@@ -38,4 +38,50 @@ function HudMath.clock(seconds: number): string
 	return string.format("%d:%02d", m, s % 60)
 end
 
+-- The rescue-egg rule, in one place so the "Free" label and the odds line cannot disagree.
+-- Mirrors Economy.isRescueEgg from DenState: no critters and Glow (incl. predicted stored)
+-- below the egg price. Display only; the server decides the real egg.
+function HudMath.isRescue(critterCount: number, glow: number, stored: number, price: number): boolean
+	return critterCount == 0 and math.floor(glow + stored) < price
+end
+
+-- Chances (0..1, summing to 1) -> percent strings that visibly sum to 100%.
+-- Rounding: work in hundredths of a percent, floor each, then give the leftover hundredths
+-- to the largest remainders (ties to the earlier entry). Trailing zeros are trimmed, so
+-- 0.6875 -> "68.75%", 0.5 -> "50%", 1 -> "100%". Pure; inputs are the Economy odds helpers.
+function HudMath.percentLabels(chances: { number }): { string }
+	local units: { number } = {}
+	local remainders: { number } = {}
+	local used = 0
+	for i, c in chances do
+		local exact = c * 10000
+		local floored = math.floor(exact + 1e-9)
+		units[i] = floored
+		remainders[i] = exact - floored
+		used += floored
+	end
+	local leftover = 10000 - used
+	while leftover > 0 and #chances > 0 do
+		local best = 1
+		for i = 2, #chances do
+			if remainders[i] > remainders[best] then
+				best = i
+			end
+		end
+		units[best] += 1
+		remainders[best] = -1
+		leftover -= 1
+	end
+	local labels: { string } = {}
+	for i, u in units do
+		local text = string.format("%.2f", u / 100)
+		if string.find(text, ".", 1, true) then
+			text = string.gsub(text, "0+$", "")
+			text = string.gsub(text, "%.$", "")
+		end
+		labels[i] = text .. "%"
+	end
+	return labels
+end
+
 return HudMath
