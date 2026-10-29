@@ -19,7 +19,8 @@
 
 	Placeholder critters: Contents/Critters/Critter models, one per pad critter, with attributes
 	CritterUid, SpeciesId, Tier, PadIndex, OwnerUserId. PrimaryPart "Body" (colored by tier size),
-	child "Glow" (Neon, the species' first palette color).
+	child "Glow" (Neon, the species' first palette color). The attributes are display-only: which
+	model draws which critter is kept in a server table (`drawn`), never read back from them.
 
 	Server API:
 	  refresh(player)               re-push DenState and rebuild visuals after another service
@@ -34,14 +35,14 @@ local HttpService = game:GetService("HttpService")
 
 local Shared = ReplicatedStorage.Shared
 local Economy = require(Shared.Economy) :: any
+local Config = require(Shared.Config) :: any
+local Types = require(Shared.Types)
 local CritterCatalog = require(Shared.CritterCatalog) :: any
 local Net = require(Shared.Net) :: any
 local Plots = require(Shared.Plots) :: any
 local DataService = require(script.Parent.DataService) :: any
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 
--- Phase 0 eggs hatch Commons and Uncommons only. Proposed as Config.Economy.eggMaxTier.
-local EGG_MAX_TIER = "Uncommon"
 local LIMIT_WINDOW_SECONDS = 10
 local MAX_UID_LENGTH = 64
 
@@ -60,6 +61,10 @@ local remotes: Folder
 local denChanged: RemoteEvent
 local critterLock: ((number, string) -> boolean)? = nil
 local stations: { [number]: { buy: ProximityPrompt, upgrade: ProximityPrompt } } = {}
+-- The critter models this service built for each player's den: uid -> model and the pad it was
+-- drawn on. Cleared on plot release and player leave.
+type Drawn = { model: Model, padIndex: number }
+local drawn: { [Player]: { plot: number, models: { [string]: Drawn } } } = {}
 local windows: { [Player]: { [string]: { start: number, count: number } } } = {}
 
 local IncomeService = {}
@@ -173,33 +178,52 @@ local function crittersFolder(plot: number): Folder
 end
 
 -- Brings the pad models in line with the profile. Unchanged models are kept so other services
--- can hold references to them; locked (carried) critters are left to their carrier.
+-- can hold references to them; locked (carried) critters are left to their carrier. Decisions
+-- come from the `drawn` table, never from the models' attributes.
 local function renderDen(player: Player, profile: any)
 	local plot = DenWorldService.getPlot(player)
 	if not plot then
+		drawn[player] = nil
 		return
 	end
 	local pads = DenWorldService.getPads(plot)
 	local folder = crittersFolder(plot)
+	local state = drawn[player]
+	if not state or state.plot ~= plot then
+		state = { plot = plot, models = {} }
+		drawn[player] = state
+	end
 	local wanted: { [string]: any } = {}
 	for uid, critter in profile.critters do
 		if critter.placement == "Pad" and pads[critter.padIndex] and not isLocked(player.UserId, uid) then
 			wanted[uid] = critter
 		end
 	end
-	for _, model in folder:GetChildren() do
-		local uid = model:GetAttribute("CritterUid")
-		local critter = if type(uid) == "string" then wanted[uid] else nil
-		if critter and model:GetAttribute("PadIndex") == critter.padIndex then
-			wanted[uid :: string] = nil -- already drawn in the right place
-		elseif not (type(uid) == "string" and isLocked(player.UserId, uid)) then
-			model:Destroy()
+	local tracked: { [Instance]: boolean } = {}
+	for uid, entry in state.models do
+		local critter = wanted[uid]
+		if isLocked(player.UserId, uid) then
+			tracked[entry.model] = true -- its carrier owns the model for now
+		elseif critter and entry.model.Parent == folder and entry.padIndex == critter.padIndex then
+			tracked[entry.model] = true
+			wanted[uid] = nil -- already drawn in the right place
+		else
+			if entry.model.Parent == folder then
+				entry.model:Destroy()
+			end
+			state.models[uid] = nil
 		end
 	end
-	for _, critter in wanted do
+	for _, child in folder:GetChildren() do
+		if not tracked[child] then
+			child:Destroy() -- not one of ours
+		end
+	end
+	for uid, critter in wanted do
 		local model = buildCritter(critter, pads[critter.padIndex], player.UserId)
 		if model then
 			model.Parent = folder
+			state.models[uid] = { model = model, padIndex = critter.padIndex }
 		end
 	end
 end
@@ -254,7 +278,7 @@ local function buyEgg(player: Player, profile: any): any
 		tierRoll = random:NextNumber(),
 		speciesRoll = random:NextNumber(),
 		uid = HttpService:GenerateGUID(false),
-		maxTier = EGG_MAX_TIER,
+		maxTier = Config.Economy.eggMaxTier :: Types.Tier,
 		physicalPads = physicalPads(player),
 	})
 	if critter then
@@ -408,14 +432,19 @@ function IncomeService.start()
 		buildStation(player, plot)
 		push(player)
 	end)
-	DenWorldService.onPlotReleased(function(_player: Player, plot: number)
+	DenWorldService.onPlotReleased(function(player: Player, plot: number)
 		stations[plot] = nil -- DenWorldService empties Contents right after this
+		local state = drawn[player]
+		if state and state.plot == plot then
+			drawn[player] = nil
+		end
 	end)
 	DataService.onProfileLoaded(function(player: Player)
 		push(player)
 	end)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		windows[player] = nil
+		drawn[player] = nil
 	end)
 end
 

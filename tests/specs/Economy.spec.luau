@@ -302,6 +302,83 @@ tests["eggs go to Inventory once every usable pad is taken"] = function()
 	expect.eq(Economy.firstFreePad(p, 6), nil)
 end
 
+-- P0.4b: rescue-egg guards (decisions D-004, D-005) ----------------------------------------------
+
+local Profile = require("../../src/Shared/Profile")
+
+local function eggUpTo(uid: string, maxTier: Types.Tier, tierRoll: number, speciesRoll: number): Economy.EggRoll
+	local roll = egg(uid, tierRoll, speciesRoll)
+	roll.maxTier = maxTier
+	return roll
+end
+
+tests["a rescue egg hatches Common only, whatever eggMaxTier allows"] = function()
+	for i = 0, 19 do
+		local p = fixtures.veteran(1, NOW)
+		p.denLevel = 1
+		local roll = (i + 0.5) / 20
+		local critter = Economy.buyEgg(p, NOW, eggUpTo(`r{i}`, "Mythic", 0.9999, roll)) :: Types.Critter
+		expect.eq(tierOf(critter.speciesId), "Common", `rescue egg with species roll {roll}`)
+	end
+end
+
+tests["a paid egg still rolls up to eggMaxTier"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 1))
+	p.glow = Economy.eggPrice(1) * 2
+	local mythic = Economy.buyEgg(p, NOW, eggUpTo("m", "Mythic", 0.9999, 0)) :: Types.Critter
+	expect.eq(tierOf(mythic.speciesId), "Mythic", "uncapped top roll")
+	local capped = Economy.buyEgg(p, NOW, eggUpTo("u", "Uncommon", 0.9999, 0)) :: Types.Critter
+	expect.eq(tierOf(capped.speciesId), "Uncommon", "capped top roll")
+end
+
+tests["a rescue critter is untradeable and a paid one is not flagged"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	local rescued = Economy.buyEgg(p, NOW, egg("rescued")) :: Types.Critter
+	expect.eq(rescued.untradeable, true, "rescue flag")
+	expect.falsy(Profile.isTradeable(rescued, NOW + 10 * 86400), "never tradeable")
+
+	p.glow = Economy.eggPrice(1)
+	local paid = Economy.buyEgg(p, NOW, egg("paid")) :: Types.Critter
+	expect.eq(paid.untradeable, nil, "paid eggs carry no flag")
+	expect.truthy(Profile.isTradeable(paid, NOW), "paid critter is tradeable")
+end
+
+tests["stored Glow counts as affordable, so it never buys a free egg"] = function()
+	local price = Economy.eggPrice(1)
+
+	-- Glow already in storage, nothing banked: the player must collect, not get a free egg.
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	p.stored = price
+	expect.falsy(Economy.isRescueEgg(p))
+	expect.eq(Economy.eggCost(p), price)
+	expect.eq(Economy.denState(p).stored, price, "DenState shows the Glow the cost is judged against")
+	local critter, reason = Economy.buyEgg(p, NOW + 5, egg("x"))
+	expect.eq(critter, nil, "no free egg")
+	expect.eq(reason, "not enough Glow")
+	expect.eq(next(p.critters), nil, "nothing hatched")
+	expect.eq(p.stored, price, "nothing spent")
+	Economy.collect(p, NOW + 5)
+	expect.truthy(Economy.buyEgg(p, NOW + 5, egg("x")), "buys once collected")
+	expect.eq(p.glow, 0, "paid full price")
+
+	-- Stale accrual timestamp: buyEgg accrues first and still judges banked + stored.
+	local stale = fixtures.veteran(2, NOW)
+	stale.denLevel = 1
+	stale.stored = price - 1
+	stale.glow = 1
+	stale.storedUpdatedAt = NOW - 86400
+	expect.falsy(Economy.buyEgg(stale, NOW, egg("y")), "banked + stored reaches the price")
+	expect.eq(stale.storedUpdatedAt, NOW, "accrued before judging")
+	expect.eq(stale.glow, 1, "nothing spent")
+	stale.glow = 0
+	expect.truthy(Economy.buyEgg(stale, NOW, egg("y")), "one Glow short is a rescue")
+	expect.eq(stale.stored, price - 1, "a rescue egg leaves stored Glow alone")
+end
+
 tests["DenState reflects the profile with a stable, copied critter list"] = function()
 	local p = fixtures.veteran(1, NOW)
 	p.denLevel = 2
