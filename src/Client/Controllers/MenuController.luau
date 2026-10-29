@@ -28,11 +28,24 @@ local gui: ScreenGui
 local strip: Frame
 local screens: { [string]: { frame: Frame, refresh: () -> () } } = {}
 local current: string? = nil
+local listeners: { (boolean) -> () } = {}
+
+local function setCurrent(id: string?)
+	current = id
+	for _, fn in listeners do
+		fn(id ~= nil)
+	end
+end
+
+-- Called with true when a screen opens and false when none is open.
+function MenuController.onChanged(fn: (boolean) -> ())
+	table.insert(listeners, fn)
+end
 
 function MenuController.close()
 	if current then
 		screens[current].frame.Visible = false
-		current = nil
+		setCurrent(nil)
 	end
 end
 
@@ -44,7 +57,7 @@ function MenuController.show(id: string)
 		entry.frame.Visible = true
 		Ui.pop(entry.frame)
 		Audio.play("uiClick")
-		current = id
+		setCurrent(id)
 	end
 end
 

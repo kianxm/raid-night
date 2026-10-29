@@ -4,8 +4,9 @@
 	Owned gear only, from GetGear; tapping a slot asks UseGear and the server decides. The bar
 	sits bottom-right, left of the action column and clear of the thumbstick, and shows nothing
 	until the player owns gear. Cooldown and charges are read from the server's answers (server
-	time), never invented here. A "Gear" button opens the list with a disabled Upgrade (the
-	purchase remote, UpgradeGear, is not served yet). GearUsed pushes draw placeholder effects.
+	time), never invented here. The "Gear" button opens the Shop, the one place gear is upgraded
+	(UpgradeGear); the bar hides while any menu screen is open, and the Shop calls refresh() after
+	an upgrade. GearUsed pushes draw placeholder effects.
 ]]
 
 local Players = game:GetService("Players")
@@ -22,6 +23,7 @@ local Raid = Client:WaitForChild("Raid")
 local Strings = require(Hud:WaitForChild("Strings"))
 local GearMath = require(Hud:WaitForChild("GearMath"))
 local Request = require(Client:WaitForChild("Request"))
+local MenuController = require(script.Parent:WaitForChild("MenuController")) :: any
 local Ui = require(Raid:WaitForChild("Ui"))
 local Toast = require(Raid:WaitForChild("Toast"))
 local GearFx = require(Raid:WaitForChild("GearFx"))
@@ -59,7 +61,7 @@ local slots: { GearMath.Slot } = {}
 local buttons: { [string]: { button: TextButton, shade: Frame, secs: TextLabel, badge: TextLabel } } = {}
 local lastFetch = -math.huge
 local pickEndsAt = 0
-local refreshPanel: () -> () = function() end
+local menuOpen = false
 
 local function nameOf(id: string): string
 	return (Strings :: any)[NAME_KEYS[id] or ""] or id
@@ -77,7 +79,7 @@ local function relayout()
 		entry.button:Destroy()
 	end
 	table.clear(buttons)
-	bar.Visible = #shown > 0
+	bar.Visible = #shown > 0 and not menuOpen
 	for i, slot in shown do
 		local b = Ui.button(bar, slot.id, nameOf(slot.id), ACCENT[slot.id] or COLOR.go, UDim2.fromOffset(size, size))
 		b.LayoutOrder = i
@@ -125,7 +127,6 @@ local function fetch(force: boolean)
 		if ok and type(result) == "table" then
 			slots = result
 			relayout()
-			refreshPanel()
 		end
 	end)
 end
@@ -204,62 +205,17 @@ local function onGearUsed(event: any)
 	end
 end
 
-local function buildPanel()
-	local frame, body, closeButton = Ui.modal(gui, "GearPanel", Strings.gearTitle, COLOR.glow)
-	Ui.setButton(closeButton, Strings.close, COLOR.glow, true)
-	closeButton.Activated:Connect(function()
-		frame.Visible = false
-	end)
+local function buildInfo()
 	local info = Ui.button(bar, "Info", Strings.gearButton, COLOR.panel, UDim2.fromOffset(48, 48))
 	info.Visible = false
 	info.Activated:Connect(function()
-		fetch(true)
-		refreshPanel()
-		frame.Visible = true
-		Ui.pop(frame)
+		MenuController.show("Shop")
 	end)
-	refreshPanel = function()
-		for _, child in body:GetChildren() do
-			if child:IsA("Frame") then
-				child:Destroy()
-			end
-		end
-		local shown = GearMath.visible(slots)
-		for i, slot in shown do
-			local card = Ui.card(body, slot.id, i, 84)
-			local name = Ui.label(card, Ui.DISPLAY, 22, ACCENT[slot.id])
-			name.Text = `{nameOf(slot.id)}  {Strings.format(Strings.gearLevel, { n = tostring(slot.level) })}`
-			name.Size = UDim2.new(0.55, 0, 0, 28)
-			name.Position = UDim2.fromOffset(8, 6)
-			name.TextXAlignment = Enum.TextXAlignment.Left
-			name.ZIndex = 10
-			local cd = Ui.label(card, Ui.BODY, 15, COLOR.dim)
-			local seconds = GearRules.cooldownSeconds(slot.id, slot.level)
-			cd.Text = Strings.format(Strings.gearCooldownInfo, { s = tostring(math.ceil(seconds)) })
-			cd.Size = UDim2.new(0.55, 0, 0, 22)
-			cd.Position = UDim2.fromOffset(8, 44)
-			cd.TextXAlignment = Enum.TextXAlignment.Left
-			cd.ZIndex = 10
-			-- Disabled until economy serves UpgradeGear (P2.8c). No price to show yet.
-			local upgrade = Ui.button(card, "Upgrade", Strings.gearUpgrade, COLOR.disabled, UDim2.new(0.38, 0, 0, 52))
-			upgrade.AnchorPoint = Vector2.new(1, 0.5)
-			upgrade.Position = UDim2.new(1, -8, 0.5, -6)
-			upgrade.Active = false
-			upgrade.ZIndex = 10
-			local soon = Ui.label(card, Ui.BODY, 12, COLOR.dim)
-			soon.Text = Strings.gearComingSoon
-			soon.Size = UDim2.new(0.38, 0, 0, 14)
-			soon.AnchorPoint = Vector2.new(1, 1)
-			soon.Position = UDim2.new(1, -8, 1, -4)
-			soon.ZIndex = 10
-		end
-		if #shown == 0 then
-			local card = Ui.card(body, "None", 1, 56)
-			local none = Ui.label(card, Ui.DISPLAY, 20, COLOR.dim)
-			none.Text = Strings.gearNone
-			none.ZIndex = 10
-		end
-	end
+end
+
+-- Re-read owned gear (after a Shop upgrade).
+function GearController.refresh()
+	fetch(true)
 end
 
 function GearController.start()
@@ -299,7 +255,11 @@ function GearController.start()
 	pickChip.Size = UDim2.fromOffset(220, 30)
 	pickChip.Visible = false
 
-	buildPanel()
+	buildInfo()
+	MenuController.onChanged(function(open)
+		menuOpen = open
+		relayout()
+	end)
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(relayout)
 
 	-- Cooldown shade, seconds and charges follow the server clock; ~10 updates a second.

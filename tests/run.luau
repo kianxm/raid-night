@@ -181,6 +181,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "OnboardingEgg",
+		load = function()
+			return require("./specs/OnboardingEgg.spec")
+		end,
+	},
+	{
 		name = "TutorialGrant",
 		load = function()
 			return require("./specs/TutorialGrant.spec")

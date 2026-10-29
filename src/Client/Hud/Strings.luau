@@ -135,7 +135,6 @@ local Strings = {
 	shopGearDone = "Gear upgraded!",
 	shopGearFailed = "Couldn't upgrade now",
 	lanternBoosted = "{name} lit a Lantern Night! +50% Glow",
-	lanternPlain = "{name} lit a Lantern Night",
 	offerNames = {
 		vip = "VIP",
 		vaultSlot = "Vault slot",
@@ -189,18 +188,12 @@ local Strings = {
 	settingsPercent = "{pct}%",
 
 	-- Gear (raid items)
-	gearTitle = "Your gear",
 	gearButton = "Gear",
 	gearGrapple = "Grapple",
 	gearSmoke = "Smoke",
 	gearDecoy = "Decoy",
 	gearSpeedCoil = "Coil",
 	gearLockpick = "Pick",
-	gearLevel = "Lv {n}",
-	gearCooldownInfo = "Cooldown {s}s",
-	gearUpgrade = "Upgrade",
-	gearComingSoon = "Coming soon",
-	gearNone = "No gear yet",
 	gearCooldown = "Not ready yet",
 	gearNoCharges = "No uses left this raid",
 	gearCarrying = "Hands are full",

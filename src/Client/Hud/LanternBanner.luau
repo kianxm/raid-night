@@ -1,8 +1,8 @@
 --!strict
 --[[
-	LanternBanner (owner: ui agent): a short banner for the Lantern Night announcement. It claims
-	"+50% Glow" only when the server says `boosted` is true; otherwise it just names the buyer.
-	Never a buy button. Display only.
+	LanternBanner (owner: ui agent): a short banner for the Lantern Night announcement. Shown only
+	when the server says `boosted` is true; otherwise (restricted players, D-061) nothing at all
+	appears, not even the buyer's name. Never a buy button. Display only.
 ]]
 
 local Players = game:GetService("Players")
@@ -36,11 +36,10 @@ function LanternBanner.start()
 			return
 		end
 		local info = ShopMath.lantern(payload)
-		if not info then
+		if not info or not info.boosted then
 			return
 		end
-		label.Text =
-			Strings.format(if info.boosted then Strings.lanternBoosted else Strings.lanternPlain, { name = info.name })
+		label.Text = Strings.format(Strings.lanternBoosted, { name = info.name })
 		frame.Visible = true
 		Ui.pop(frame)
 		token += 1

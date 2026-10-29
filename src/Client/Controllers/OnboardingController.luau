@@ -69,6 +69,11 @@ local function setStatus(next: any)
 	render()
 end
 
+-- The last OnboardingStatus (nil before the first answer), for price labels.
+function OnboardingController.getStatus(): any
+	return status
+end
+
 local function tutorialDenPosition(): Vector3?
 	local pos = localPlayer:GetAttribute("TutorialDenPosition")
 	return if typeof(pos) == "Vector3" then pos else nil

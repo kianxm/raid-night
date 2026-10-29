@@ -71,7 +71,8 @@
 	DataService.advanceOnboarding (forward only, so a step already behind the player is a no-op):
 	  hatch     the free (untradeable) egg hatched; also "place" if that critter is on a pad, since
 	            buyEgg and auto-place put it there without a PlaceCritter call
-	  buyEgg    a paid egg hatched
+	  buyEgg    a paid egg hatched; reported at once, before analytics and the push, since it
+	            ends the onboarding egg price (D-070, Economy.paidEggPrice)
 	  place     PlaceCritter onto a Pad
 	  collect   a collect banked more than 0
 
@@ -270,7 +271,7 @@ local function updateStation(plot: number, profile: any)
 	if not station then
 		return
 	end
-	local eggCost = Economy.eggCost(profile)
+	local eggCost = Economy.eggCost(profile, Profile.onboardingStatus(profile)) -- D-070's onboarding price
 	station.buy.ObjectText = if eggCost == 0 then "Free starter egg" else `{eggCost} Glow`
 	local upgradeCost = Economy.upgradeCost(profile.denLevel)
 	station.upgrade.ObjectText = if upgradeCost
@@ -500,15 +501,18 @@ local function collect(player: Player, profile: any, now: number, auto: boolean?
 			AnalyticsService.track(player, "glow_collected", { amount = banked, storageFill = fill })
 		end
 	end
-	push(player)
 	if banked > 0 then
-		onboard(player, "collect")
+		onboard(player, "collect") -- before the push, so the station shows the onboarding egg price
 	end
+	push(player)
 	return banked
 end
 
 local function buyEgg(player: Player, profile: any, now: number): any
-	local price = Economy.eggCost(profile) -- what this egg costs (0 = rescue); guarded accrued
+	-- D-070: the onboarding egg price while the next step is "buyEgg". Completing that step right
+	-- after the purchase, before anything else runs, is what makes the discount one egg per player.
+	local onboarding = Profile.onboardingStatus(profile)
+	local price = Economy.eggCost(profile, onboarding) -- what this egg costs (0 = rescue); guarded accrued
 	local denLevel = profile.denLevel
 	local critter = Economy.buyEgg(profile, now, {
 		tierRoll = random:NextNumber(),
@@ -516,8 +520,11 @@ local function buyEgg(player: Player, profile: any, now: number): any
 		uid = HttpService:GenerateGUID(false),
 		maxTier = Config.Economy.eggMaxTier :: Types.Tier,
 		physicalPads = physicalPads(player),
-	})
+	}, onboarding)
 	if critter then
+		if not critter.untradeable then
+			onboard(player, "buyEgg")
+		end
 		AnalyticsService.track(player, "egg_bought", {
 			tier = tierOf(critter.speciesId),
 			price = price,
@@ -533,8 +540,6 @@ local function buyEgg(player: Player, profile: any, now: number): any
 			if hatched and hatched.placement == "Pad" then
 				onboard(player, "place")
 			end
-		else
-			onboard(player, "buyEgg")
 		end
 		return table.clone(critter)
 	end
