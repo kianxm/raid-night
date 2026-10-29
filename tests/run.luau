@@ -37,6 +37,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "RaidRulesLive",
+		load = function()
+			return require("./specs/RaidRulesLive.spec")
+		end,
+	},
+	{
 		name = "Plots",
 		load = function()
 			return require("./specs/Plots.spec")
