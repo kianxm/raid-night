@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 1 (at the gate: code done and reviewed, waiting for Kian to merge, Studio-check and playtest) · Last updated: 2026-10-29
+Current phase: 1 → 2 (Phase 1 gate approved; Phase 2 not started, waiting for Kian) · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -54,7 +54,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
 | P1.6 | ui | P1.3, P1.5 | In review | #102, #108 | 1 | Stacked on #100, contains #92 and #94 (D-044). #108 (stacked on #102): "On its way!" and Glow-only outcome cards for #106. Real remotes, revenge + join-server flow, block list via GetCore (D-051). 290 tests, CI green. UI: no review. Studio plan and the two-account loop wait (Kian) |
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
-| P1.8 | economy | P1.7 | Blocked | #96 (stacked on #95) | 1 | Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
+| P1.8 | economy | P1.7 | Done | #96 (via preview/phase1) | 1 | Approved by Kian at the gate. Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
 | P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); reviewer APPROVED (no Glow bonus on live revenge, retries keep identical args). Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit), preview/phase1 | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Dry run: all 17 PRs merge in order into `preview/phase1` (a6ad68f, no PR), 5 conflicts resolved, 340 tests + EscrowSimulation green, lint/format/types clean. P1.10c: preview scripts hand-synced into the open edit place (27 scripts), A + B1 passed, then Studio MCP play control wedged after the first forced stop; Studio restored, nothing saved (D-055). Retry after Studio recovered: P1.1 forced-shutdown recovery PASS (p11-sd-1 committed once, glow 474 on record and both appliedTransfers); A, B1, B5, D (matchmaking), E (live revenge), F core (#106 escape/shield/revenge token/loss/pair, Shielded refusal, revenge raid ~27.5% Glow, #109 Outgoing log + token spent), G (replays #99/#107) passed; no game bugs. Not run: B2-B4, C, #101 exploit/guard/trap/timeout steps, H (UI), parts of F/G/I, and the soak (DataStore mode only accepts a real loaded raider; test raiders refused) | Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
 
@@ -219,8 +219,9 @@ Full log with reasons: `docs/decisions-log.md`.
 
 ## Gate history
 
-- Phase 1 gate: report posted 2026-10-29 (orchestrator). Exit checks not yet passable: merges,
-  Studio runs and the soak need Kian (D-044). Not crossed.
+- Phase 1 gate: APPROVED 2026-10-29 (Kian, in chat), including the P1.8 tuning (#96). Landed by
+  merging `preview/phase1` (all Phase 1 PRs + #96 + this ledger) into integration. Still open: the
+  soak and the multi-person checks (deferred list), run with testers like Phase 0.
 
 - Promotion: integration → main after the post-gate follow-ups (C4, P0.5h, P0.5i), 2026-10-28.
 - Phase 0 exit checks: passed 2026-10-28 (176 tests, CI green on 860c3f4, single-client Studio

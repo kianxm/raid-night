@@ -4,7 +4,8 @@ Updated 2026-10-29. Read this first on startup, then docs/progress.md. Follow th
 "Context discipline" (section 2).
 
 ## Phase
-Phase 1 at its human gate. All tasks coded, checked and reviewed, but nothing past #91 is merged:
+Phase 1 gate APPROVED by Kian (2026-10-29), tuning #96 included; landed via preview/phase1.
+Do not start Phase 2 until Kian says so. Previously: Phase 1 at its human gate. All tasks coded, checked and reviewed, but nothing past #91 is merged:
 the permission check refuses `gh pr merge` (D-044). Gate report posted (see Gate history).
 
 ## In flight
