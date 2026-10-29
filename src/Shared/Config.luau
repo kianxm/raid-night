@@ -83,8 +83,9 @@ local Config = {
 		postLossSafetySeconds = 60,
 		-- Live steals between the same two players per UTC day (the shared pairRaidsToday count).
 		maxStealsPerPairPerDay = 2,
-		-- Once today's live losses reach this share of the den's Glow/s, measured just before its
-		-- first live loss of the day, the den is protected from live steals until the UTC day ends.
+		-- While today's live losses reach this share of the larger of the day's base (the den's
+		-- Glow/s at its first live loss today) and the den's Glow/s now, the den is protected from
+		-- live steals (D-036); the escrow debit also counts the grab's rate (D-037).
 		protectionLossShare = 0.5,
 	},
 

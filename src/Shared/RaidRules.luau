@@ -267,19 +267,25 @@ end
 	    den refilled after a real loss. A real loss keeps protecting, since the den's rate drops
 	    with the stolen critter. The debit that crosses the line lands; nothing after it does
 	    while the line holds (canGrabLive refuses, and Escrow.debitDefender takes nothing).
+	  - At the escrow debit the line also counts the record's grab-time rate (decision D-037,
+	    liveProtectedAtDebit), so an owner alerted by the grab cannot shrink the den during the
+	    carry to make the debit refuse it. canGrabLive needs nothing more: there, the den's rate
+	    now is the grab-time rate.
 	  - After any live loss nobody can grab from the den for postLossSafetySeconds.
 	Both fields live on the profile, belong to lossDay and reset with it, so stealing a few cheap
 	critters from a rich den never protects it, and losing the den's best critter does.
 ]]
 
---[[
-	Read-only: is this den protected from live steals right now (decision D-036)? True while
-	today's live losses reach protectionLossShare x max(liveLossBaseRate, Economy.denRate(profile)),
-	so it can turn off and on again during the day as the owner refills or shrinks the den.
-	A profile without the fields (no live loss today, or a save from before D-031) is not
-	protected. A NaN in either field, or in the den's rate, counts as protected.
-]]
-function RaidRules.liveProtected(profile: PlayerProfile, now: number): boolean
+-- A grab-time rate (EscrowRecord.liveBaseRate) a check may use: a finite number >= 0, else none.
+local function measuredRate(rate: number?): number?
+	if type(rate) == "number" and rate >= 0 and rate < math.huge then
+		return rate
+	end
+	return nil
+end
+
+-- Shared by liveProtected and liveProtectedAtDebit: `grabRate` (already checked) raises the line.
+local function protectedAgainst(profile: PlayerProfile, now: number, grabRate: number?): boolean
 	local base, lost = profile.liveLossBaseRate, profile.liveLossRateToday
 	if profile.lossDay ~= RaidRules.dayIndex(now) or base == nil or lost == nil then
 		return false
@@ -288,7 +294,33 @@ function RaidRules.liveProtected(profile: PlayerProfile, now: number): boolean
 	if base ~= base or lost ~= lost or rate ~= rate then
 		return true -- math.max would drop a NaN depending on argument order, so decide it here
 	end
-	return lost >= Config.LiveRaid.protectionLossShare * math.max(base, rate)
+	return lost >= Config.LiveRaid.protectionLossShare * math.max(base, rate, grabRate or 0)
+end
+
+--[[
+	Read-only: is this den protected from live steals right now (decision D-036)? True while
+	today's live losses reach protectionLossShare x max(liveLossBaseRate, Economy.denRate(profile)),
+	so it can turn off and on again during the day as the owner refills or shrinks the den.
+	A profile without the fields (no live loss today, or a save from before D-031) is not
+	protected. A NaN in either field, or in the den's rate, counts as protected.
+	canGrabLive, RaidService's den attribute and its steal prompts read this.
+]]
+function RaidRules.liveProtected(profile: PlayerProfile, now: number): boolean
+	return protectedAgainst(profile, now, nil)
+end
+
+--[[
+	Read-only: the same check at a live escrow debit (decision D-037), which also counts the
+	record's grab-time rate (`grabRate`, EscrowRecord.liveBaseRate): the line is
+	protectionLossShare x max(liveLossBaseRate, Economy.denRate(profile), grabRate). The grab was
+	accepted only while the den was not protected against the den as it was then, so an owner
+	alerted by the grab who shrinks the den during the carry cannot make the debit refuse the
+	steal. The grab-time rate only ever raises the line. nil, or anything but a finite number >= 0,
+	means none (Escrow.create refuses those anyway): the check is then liveProtected's. Only
+	Escrow.debitDefender calls it.
+]]
+function RaidRules.liveProtectedAtDebit(profile: PlayerProfile, now: number, grabRate: number?): boolean
+	return protectedAgainst(profile, now, measuredRate(grabRate))
 end
 
 --[[
@@ -303,8 +335,7 @@ function RaidRules.recordLiveLoss(defender: PlayerProfile, critter: Critter, now
 	assert(defender.critters[critter.uid] ~= nil, "recordLiveLoss: call before the critter leaves the profile")
 	RaidRules.resetDailyIfNeeded(defender, now)
 	if defender.liveLossBaseRate == nil then
-		local measured = type(grabBaseRate) == "number" and grabBaseRate >= 0 and grabBaseRate < math.huge
-		defender.liveLossBaseRate = if measured then grabBaseRate else Economy.denRate(defender)
+		defender.liveLossBaseRate = measuredRate(grabBaseRate) or Economy.denRate(defender)
 	end
 	defender.liveLossRateToday = (defender.liveLossRateToday or 0) + Economy.critterRate(critter, defender.rebirths)
 end

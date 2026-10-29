@@ -71,7 +71,8 @@
 
 	Live loss rules (decision D-031): transferLive creates "Live" records, whose debit takes no
 	critter from a den that is live-protected at the debit (Escrow.debitDefender; measured
-	against the larger of the day's base and the den's Glow/s then, D-036), measures the day's
+	against the largest of the day's base, the den's Glow/s then (D-036) and the record's
+	liveBaseRate (D-037), so a shrink during the carry cannot refuse it), measures the day's
 	first live loss against the record's liveBaseRate when it has one (D-034), and grants the
 	defender nothing when it takes nothing (D-033). Live steals use this same-server path, on the
 	two profiles loaded here, until P1.1 adds the cross-server one.

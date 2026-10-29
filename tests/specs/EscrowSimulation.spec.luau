@@ -17,6 +17,9 @@
 	    the grab, so the grab-time base itself is tiny and one cheap loss reaches the line, and
 	    refill it once the carries are over, which must lift the protection again; half the time
 	    a raider comes for the refilled den straight after
+	  - mid-carry shrinks of a refilled den (decision D-037): when that comeback grab is accepted,
+	    the owner often shrinks the den to just the carried critter before the escape lands; the
+	    debit counts the record's grab-time rate, so it must still take the critter
 	  - Live records that request no Glow (Phase 0 live steals, D-015), so live debits that take
 	    nothing at all happen (D-033)
 	  - players leaving after a crashed transfer and staying away 5 to 12 days, so open escrows
@@ -97,20 +100,23 @@ local NO_GLOW_CHANCE = 0.5 -- per Live record: no Glow requested (Phase 0 live s
 local SHRINK_CHANCE = 0.15 -- per raid round: the owner moves their best pad earner off during the carry
 local PLANNED_SHRINK_CHANCE = 0.1 -- per raid round: the owner empties the den but one earner before the grab (D-036)
 local REFILL_RAID_CHANCE = 0.5 -- per planned shrink: a raider comes for the refilled den straight after
+local CARRY_SHRINK_CHANCE = 0.5 -- per accepted comeback grab: the alerted owner shrinks the den mid-carry (D-037)
 
--- The test's own statement of live protection (decision D-036), kept apart from RaidRules so the
--- simulation checks the rule rather than the implementation against itself: today's live losses
--- reach protectionLossShare of the larger of the day's base and the den's Glow/s right now.
-local function liveLine(p: PlayerProfile): number
-	return Config.LiveRaid.protectionLossShare * math.max(p.liveLossBaseRate :: number, Economy.denRate(p))
+-- The test's own statement of live protection (decisions D-036, D-037), kept apart from RaidRules
+-- so the simulation checks the rule rather than the implementation against itself: today's live
+-- losses reach protectionLossShare of the larger of the day's base and the den's Glow/s right now
+-- and, at a debit, the record's grab-time rate when it is a finite number >= 0.
+local function liveLine(p: PlayerProfile, grabRate: number?): number
+	local grab = if type(grabRate) == "number" and grabRate >= 0 and grabRate < math.huge then grabRate else 0
+	return Config.LiveRaid.protectionLossShare * math.max(p.liveLossBaseRate :: number, Economy.denRate(p), grab)
 end
 
-local function protectedByRule(p: PlayerProfile, now: number): boolean
+local function protectedByRule(p: PlayerProfile, now: number, grabRate: number?): boolean
 	local base, lost = p.liveLossBaseRate, p.liveLossRateToday
 	if p.lossDay ~= RaidRules.dayIndex(now) or base == nil or lost == nil then
 		return false
 	end
-	return lost >= liveLine(p)
+	return lost >= liveLine(p, grabRate)
 end
 
 local function deepCopy<T>(value: T): T
@@ -184,6 +190,9 @@ local function newWorld(seed: number)
 		lastLiveLoss = {} :: { [number]: number }, -- Glow/s of each den's latest live loss
 		-- The protection line (D-036) at each den's latest live loss, measured just before its debit.
 		lastLiveLine = {} :: { [number]: number },
+		-- Raids whose grab RaidService would accept (the den not protected then), carrying their grab
+		-- rate, whose owner may shrink the den mid-carry: the debit must take the critter (D-037).
+		mustTake = {} :: { [string]: true },
 		-- How often each daily loss rule was met, so a run proves it exercised them.
 		stats = {
 			liveTaken = 0,
@@ -202,6 +211,11 @@ local function newWorld(seed: number)
 			-- alone (D-034) would have kept the den protected.
 			plannedShrinks = 0,
 			refillReopened = 0,
+			-- D-037: owners who shrank a refilled den during the carry, and live steals that landed
+			-- only because the debit counted the grab's rate: the den as it was at the debit was
+			-- protected.
+			carryShrinks = 0,
+			carryShrinkDefeated = 0,
 			-- D-033: debits that took nothing at all.
 			emptyLive = 0,
 			emptyAsync = 0,
@@ -223,13 +237,20 @@ local function newWorld(seed: number)
 		local stats = world.stats
 		local live = Escrow.kindOf(r) == "Live"
 		if live then
-			-- D-036, both ways: protected by the rule <=> the debit leaves the critter on its pad. And
-			-- RaidRules.liveProtected (what canGrabLive and the den attribute read) agrees with it.
-			local wasProtected = protectedByRule(before, applied.at)
+			-- D-036 and D-037, both ways: protected by the rule at the debit (the record's grab-time
+			-- rate counted) <=> the debit leaves the critter on its pad. RaidRules.liveProtected (what
+			-- canGrabLive and the den attribute read, without the record) agrees with the rule too.
+			local wasProtected = protectedByRule(before, applied.at, r.liveBaseRate)
+			local denProtected = protectedByRule(before, applied.at, nil)
 			expect.eq(
 				RaidRules.liveProtected(before, applied.at),
-				wasProtected,
+				denProtected,
 				`{raidId}: liveProtected disagrees with the rule`
+			)
+			expect.eq(
+				RaidRules.liveProtectedAtDebit(before, applied.at, r.liveBaseRate),
+				wasProtected,
+				`{raidId}: liveProtectedAtDebit disagrees with the rule`
 			)
 			if onPad then
 				expect.eq(
@@ -238,8 +259,14 @@ local function newWorld(seed: number)
 					`{raidId}: a live debit on an open den takes the critter`
 				)
 			end
+			if world.mustTake[raidId] and onPad then
+				expect.truthy(applied.critter, `{raidId}: a grab accepted before a mid-carry shrink still lands`)
+			end
 			if applied.critter then
 				assert(not wasProtected, `{raidId}: a live debit took a critter from a protected den`)
+				if denProtected then
+					stats.carryShrinkDefeated += 1 -- the grab's rate let it land (D-037)
+				end
 				local today = before.lossDay == RaidRules.dayIndex(applied.at)
 				local lostBefore = if today then before.liveLossRateToday or 0 else 0
 				local value = Economy.critterRate(applied.critter, before.rebirths)
@@ -249,7 +276,7 @@ local function newWorld(seed: number)
 				-- is the record's or the debit's own on the day's first loss.
 				local judged = table.clone(before)
 				judged.liveLossBaseRate = after.liveLossBaseRate
-				world.lastLiveLine[after.userId] = liveLine(judged)
+				world.lastLiveLine[after.userId] = liveLine(judged, r.liveBaseRate)
 				local baseBefore = if today then before.liveLossBaseRate else nil
 				if baseBefore and lostBefore >= Config.LiveRaid.protectionLossShare * baseBefore then
 					stats.refillReopened += 1 -- the day's base alone would have refused it (D-034)
@@ -568,20 +595,23 @@ local function runSimulation(seed: number)
 	-- One live or async steal by `thisRaider` for `grabbed` (from `snapshot`), created and driven
 	-- as EscrowService does, with injected retries, duplicates, stale servers and departures.
 	-- `measured` is the den's Glow/s when the grab was accepted (the record may carry it, D-034).
+	-- `raidService`: a live steal exactly as RaidService makes it, a "Live" record that always
+	-- carries `measured`.
 	local function transfer(
 		raidId: string,
 		thisRaider: number,
 		defenderId: number,
 		grabbed: string?,
 		snapshot: Types.DenSnapshot,
-		measured: number
+		measured: number,
+		raidService: boolean?
 	)
-		local kind: Types.TransferKind = if rng.chance(ASYNC_CHANCE) then "Async" else "Live"
+		local kind: Types.TransferKind = if rng.chance(ASYNC_CHANCE) and not raidService then "Async" else "Live"
 		local loot = RaidRules.lootGlow(snapshot, false)
 		local base: number? = nil
 		if kind == "Live" then
 			loot = if rng.chance(NO_GLOW_CHANCE) then 0 else loot
-			base = if rng.chance(GRAB_BASE_CHANCE) then measured else nil
+			base = if rng.chance(GRAB_BASE_CHANCE) or raidService then measured else nil
 		end
 		local record = Escrow.create(raidId, thisRaider, defenderId, grabbed, loot, false, world.now, kind, base)
 		record.createNonce = `call-{raidId}`
@@ -738,7 +768,9 @@ local function runSimulation(seed: number)
 					local raidId = if n == 1 then `raid-{i}` else `raid-{i}-{n}`
 					-- The first raider grabbed before the owner reacted; the crowd grabs as it arrives.
 					local measured = if n == 1 then grabRate else Economy.denRate(world.profiles[defenderId])
-					transfer(raidId, raid.raider, defenderId, raid.grabbed, snapshot, measured)
+					-- A planned shrink's cheap loss is a live steal (an alt's, or a carry the owner let
+					-- land), made as RaidService makes it.
+					transfer(raidId, raid.raider, defenderId, raid.grabbed, snapshot, measured, planned and n == 1)
 				end
 			end
 
@@ -767,8 +799,57 @@ local function runSimulation(seed: number)
 						end
 					end
 					if #fresh > 0 then
+						local raidId = `raid-{i}-refill`
+						local measured = Economy.denRate(refilled)
+						-- RaidService refuses the grab while the den is protected (no record then). An
+						-- accepted grab's record carries the rate it measured, and the owner, alerted,
+						-- may shrink the den to just the carried critter before the escape lands
+						-- (D-037): that must not refuse the steal.
+						local accepted = not protectedByRule(refilled, world.now, nil)
+						local carryShrink = accepted and rng.chance(CARRY_SHRINK_CHANCE)
 						local target = fresh[rng.int(1, #fresh)]
-						transfer(`raid-{i}-refill`, comer, defenderId, target, seen, Economy.denRate(refilled))
+						if carryShrink or rng.chance(0.5) then
+							-- The cheapest pad critter (ties by uid): shrinking the den to a critter that
+							-- earns at most twice the day's loss is what would protect it again.
+							local cheapest = math.huge
+							for _, uid in fresh do
+								local rate = Economy.critterRate(refilled.critters[uid], refilled.rebirths)
+								if rate < cheapest or (rate == cheapest and uid < target) then
+									target, cheapest = uid, rate
+								end
+							end
+						end
+						local hidden: { [string]: { placement: Types.Placement, padIndex: number? } } = {}
+						if carryShrink then
+							local live = world.store.loadProfile(defenderId)
+							for uid, c in live.critters do
+								if uid ~= target and (c.placement == "Pad" or c.placement == "Vault") then
+									hidden[uid] = { placement = c.placement, padIndex = c.padIndex }
+									c.placement = "Inventory"
+									c.padIndex = nil
+								end
+							end
+							if next(hidden) then
+								world.store.saveProfile(live)
+								world.stats.carryShrinks += 1
+							end
+						end
+						if accepted then
+							world.mustTake[raidId] = true
+						end
+						transfer(raidId, comer, defenderId, target, seen, measured, accepted)
+						-- The carry is over: the earners go back.
+						if next(hidden) and online(defenderId) then
+							local back = world.store.loadProfile(defenderId)
+							for uid, was in hidden do
+								local c = back.critters[uid]
+								if c and c.placement == "Inventory" then
+									c.placement = was.placement
+									c.padIndex = was.padIndex
+								end
+							end
+							world.store.saveProfile(back)
+						end
 					end
 				end
 			end
@@ -849,13 +930,21 @@ tests["1,000 raids with crashes, duplicates, races and long absences never dupli
 	-- Without these it would not prove that a refill lifts protection (D-036).
 	expect.truthy(stats.plannedShrinks > 0, "an owner emptied the den before the grab and refilled it after")
 	expect.truthy(stats.refillReopened > 0, "a live steal landed on a den the day's base alone would protect")
+	-- Without these it would not prove that a mid-carry shrink cannot refuse the steal (D-037).
+	expect.truthy(stats.carryShrinks > 0, "an owner shrank a refilled den during the carry")
+	expect.truthy(stats.carryShrinkDefeated > 0, "a debit landed only because it counted the grab's rate")
 end
 
 tests["the same holds across 5 more random seeds"] = function()
+	local defeated = 0
 	for seed = 2, 6 do
 		local _, _, _, _, _, stats = runSimulation(seed * 7919)
 		expect.truthy(stats.refillReopened > 0, `seed {seed * 7919}: a refill reopened a protected den`)
+		-- Every seed checks that a debit after a mid-carry shrink still takes the critter (mustTake);
+		-- the case where only the grab's rate decides it is rarer, so it is counted over the seeds.
+		defeated += stats.carryShrinkDefeated
 	end
+	expect.truthy(defeated > 0, "a mid-carry shrink was defeated on these seeds too")
 end
 
 return tests

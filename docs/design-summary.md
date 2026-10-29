@@ -34,9 +34,11 @@ raid back or raid others → upgrade den and traps → collect more critters.
 - **Live stealing:** grab, carry, owner can tag to drop, 45 s lockdown with cooldown. Critter only
   (no Glow) in Phase 0. Live loss rules (D-031): after a live loss the den can't be grabbed from
   for 60 s (`postLossSafetySeconds`); 2 live steals per day between the same two players; daily
-  live protection is value-based: once today's live losses reach 50% of the den's Glow per second
-  (measured at its first live loss of the day), the den is protected from live steals for the
-  rest of the UTC day. Live steals move critters through Escrow on the two in-server profiles.
+  live protection is value-based: the den is protected from live steals while today's live
+  losses reach 50% of the larger of the day's base (its Glow per second at its first live loss of
+  the day) and its current Glow per second (D-036), so refilling the den lifts protection; the
+  escrow debit also counts the grab's rate, so shrinking the den mid-carry cannot refuse a steal
+  (D-037). Live steals move critters through Escrow on the two in-server profiles.
 - **Defenses:** traps on a grid, critters assigned as guards (earn nothing).
 - **Gear:** grapple, smoke bomb, decoy, speed coil, lockpick (live raids only).
 

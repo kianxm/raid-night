@@ -307,8 +307,13 @@ tests["later losses that day never change the base, whatever their record carrie
 	steal(owner, 3, "fox2", NOW + 60, 10) -- a later grab measured a smaller den
 	expect.eq(owner.liveLossBaseRate, 100, "kept")
 	expect.truthy(RaidRules.liveProtected(owner, NOW + 60), "50 of 100")
-	local slipped = debit(owner, 4, "fox3", NOW + 120, 1000) -- nor a bigger one
-	expect.eq(slipped.critter, nil, "protected: nothing taken")
+	-- Nor a bigger one. Its grab saw a den of 1,000 Glow/s, so its debit lands (D-037), but the
+	-- day's base stays the first loss's.
+	local third = debit(owner, 4, "fox3", NOW + 120, 1000)
+	expect.eq(third.critter and third.critter.uid, "fox3", "50 of max(100, 50, 1,000): not protected at this debit")
+	expect.eq(owner.liveLossBaseRate, 100)
+	local fourth = debit(owner, 5, "fox4", NOW + 180, 10)
+	expect.eq(fourth.critter, nil, "a smaller grab-time rate never lowers the line: 75 of 100")
 	expect.eq(owner.liveLossBaseRate, 100)
 end
 
@@ -415,7 +420,7 @@ tests["refilling lifts protection mid-day, and shrinking the den brings it back 
 	expect.truthy(Economy.place(owner, "king", "Inventory", nil, PHYSICAL_PADS, t + 1))
 	expect.truthy(RaidRules.liveProtected(owner, t + 1), "back to 50 of the 100 base")
 	expect.eq(select(2, canGrab(owner, 4, 3, t + 1, NOW + 60)), Reason.LiveProtected, "grabs refused again")
-	local slipped = debit(owner, 4, "fox3", t + 1) -- a grab checked before the shrink
+	local slipped = debit(owner, 4, "fox3", t + 1) -- a record with no grab-time rate (an older one)
 	expect.eq(slipped.critter, nil, "the debit reads the same line: nothing taken")
 	expect.truthy(owner.critters.fox3, "fox3 stays home")
 
@@ -511,6 +516,90 @@ tests["RaidService reads protection only through RaidRules, from the live profil
 		),
 		"syncPrompts and refreshDens run on it"
 	)
+end
+
+-- The escrow debit also counts the record's grab-time rate (decision D-037) ------------------------
+
+-- Four foxes, two of them stolen (50 of a 100 base: protected), then refilled with a king on pad 1:
+-- 650 Glow/s, not protected, so a grab is accepted.
+local function refilledFoxDen(t: number): PlayerProfile
+	local owner = foxDen()
+	steal(owner, 1, "fox1", NOW, 100)
+	steal(owner, 3, "fox2", NOW + 60, 100)
+	expect.truthy(RaidRules.liveProtected(owner, NOW + 60), "50 of 100")
+	fixtures.give(owner, fixtures.critter("king", "king_bandit", "Inventory"))
+	refill(owner, "king", 1, t)
+	expect.falsy(RaidRules.liveProtected(owner, t), "50 of 650")
+	return owner
+end
+
+tests["a shrink during the carry cannot make the debit refuse a refilled den's steal (D-037)"] = function()
+	local t = NOW + 600
+	local owner = refilledFoxDen(t)
+	local ok, reason = canGrab(owner, 4, 3, t, NOW + 60)
+	expect.truthy(ok, `the grab is accepted: {reason}`)
+	local grabRate = Economy.denRate(owner) -- RaidService measures it as it accepts the grab
+	expect.eq(grabRate, 650)
+	-- Alerted, the owner hides the king before the escape lands.
+	expect.truthy(Economy.place(owner, "king", "Inventory", nil, PHYSICAL_PADS, t + 5))
+	expect.truthy(RaidRules.liveProtected(owner, t + 5), "the den as it is now: 50 of max(100, 50)")
+	expect.falsy(RaidRules.liveProtectedAtDebit(owner, t + 5, grabRate), "50 of max(100, 50, 650)")
+	steal(owner, 4, "fox3", t + 5, grabRate) -- the debit lands anyway
+	expect.eq(owner.liveLossRateToday, 75)
+	expect.eq(owner.liveLossBaseRate, 100, "the base is still the day's first")
+	-- Grabs and the den attribute never count a record's rate: the shrunk den is protected now.
+	expect.truthy(RaidRules.liveProtected(owner, t + 5), "75 of max(100, 25)")
+	local later = RaidRules.liveGrabReadyAt(t + 5)
+	expect.eq(select(2, canGrab(owner, 5, 4, later, t + 5)), Reason.LiveProtected, "fox4 cannot be grabbed")
+end
+
+tests["a record without a grab-time rate reads the den as it is at the debit (D-037)"] = function()
+	local t = NOW + 600
+	local owner = refilledFoxDen(t)
+	expect.truthy(Economy.place(owner, "king", "Inventory", nil, PHYSICAL_PADS, t + 5))
+	local applied = debit(owner, 4, "fox3", t + 5) -- an older record: no liveBaseRate
+	expect.eq(applied.critter, nil, "50 of max(100, 50): protected, nothing taken")
+	expect.truthy(owner.critters.fox3, "fox3 stays home")
+end
+
+tests["the grab-time rate only raises the line; nil or a bad value is ignored (D-037)"] = function()
+	local nan = 0 / 0
+	local protectedDen = foxDen()
+	steal(protectedDen, 1, "fox1", NOW, 100)
+	steal(protectedDen, 3, "fox2", NOW + 60, 100) -- 50 of 100, the den earns 50
+	local openDen = refilledFoxDen(NOW + 600) -- 50 of 650
+	for _, case in { { protectedDen, NOW + 60 }, { openDen, NOW + 600 } } do
+		local owner, at = case[1] :: PlayerProfile, case[2] :: number
+		local plain = RaidRules.liveProtected(owner, at)
+		for _, bad in { nan, -1, math.huge, -math.huge } do
+			expect.eq(RaidRules.liveProtectedAtDebit(owner, at, bad), plain, `{bad} is no measurement`)
+		end
+		expect.eq(RaidRules.liveProtectedAtDebit(owner, at, nil), plain, "nil: the den as it is")
+		expect.eq(RaidRules.liveProtectedAtDebit(owner, at, 0), plain, "0 is below every line")
+		expect.eq(RaidRules.liveProtectedAtDebit(owner, at, 10), plain, "a smaller grab never lowers the line")
+	end
+	expect.truthy(RaidRules.liveProtectedAtDebit(protectedDen, NOW + 60, 100), "50 of max(100, 50, 100): the share")
+	expect.falsy(RaidRules.liveProtectedAtDebit(protectedDen, NOW + 60, 100.002), "just over the line")
+	-- The fields' NaN rule is unchanged at the debit: a NaN loss or base still counts as protected.
+	openDen.liveLossRateToday = nan
+	expect.truthy(RaidRules.liveProtectedAtDebit(openDen, NOW + 600, 650))
+	-- And with no live loss today, a record's rate protects nothing.
+	expect.falsy(RaidRules.liveProtectedAtDebit(foxDen(), NOW, 0))
+end
+
+tests["only the escrow debit counts the record's rate; RaidService never does (D-037)"] = function()
+	local escrow = source.codeOnly(source.read("src/Shared/Escrow.luau"))
+	local debitBody = source.functionBody(escrow, "Escrow.debitDefender") or ""
+	expect.truthy(
+		string.find(debitBody, "RaidRules.liveProtectedAtDebit(defender, now, record.liveBaseRate)", 1, true),
+		"debitDefender passes the record's grab-time rate"
+	)
+	expect.falsy(string.find(escrow, "RaidRules.liveProtected(", 1, true), "and nothing in Escrow reads the den alone")
+	local raid = source.codeOnly(source.read("src/Server/Services/RaidService.luau"))
+	expect.falsy(string.find(raid, "liveProtectedAtDebit", 1, true), "grabs and the den attribute: the den now")
+	local rules = source.codeOnly(source.read("src/Shared/RaidRules.luau"))
+	local grab = source.functionBody(rules, "RaidRules.canGrabLive") or ""
+	expect.truthy(string.find(grab, "RaidRules.liveProtected(profile, g.now)", 1, true), "canGrabLive is unchanged")
 end
 
 return tests

@@ -23,11 +23,13 @@
 	  3. Repeating any step, any number of times, changes nothing after the first success.
 	  4. Daily loss limits hold at the debit, by the record's kind (decision D-031). Live: a
 	     critter still on its pad is taken exactly when the den is not protected at the debit
-	     (RaidRules.liveProtected: today's live losses below protectionLossShare of the larger of
-	     the day's base and the den's Glow/s just before the debit, D-036), so the steal that
-	     crosses the line is the last while the den stays as it is; refilling it reopens it. The
-	     day's first live loss sets the base from the record's grab-time base when it has one
-	     (D-034). Async: nothing once the defender lost maxLossesPerDay critters that day.
+	     (RaidRules.liveProtectedAtDebit: today's live losses below protectionLossShare of the
+	     largest of the day's base, the den's Glow/s just before the debit (D-036) and the
+	     record's grab-time rate (D-037)), so the steal that crosses the line is the last while
+	     the den stays as it is; refilling it reopens it, and shrinking it during a carry cannot
+	     refuse that carry. The day's first live loss sets the base from the record's grab-time
+	     base when it has one (D-034). Async: nothing once the defender lost maxLossesPerDay
+	     critters that day.
 	  5. A Live debit that takes nothing grants nothing (D-033): no shield, revenge token, pair
 	     count or raid-log entry; only its idempotency entry.
 
@@ -148,14 +150,15 @@ end
 --[[
 	Step 1, on the DEFENDER's profile. Takes the grabbed critter if it is still on a pad and the
 	den's daily loss rule allows it (decision D-031): a Live record takes nothing from a den that
-	is live-protected right now (RaidRules.liveProtected, read with the critter still in the den:
-	the larger of the day's base and the den's Glow/s, D-036), an Async record nothing once the
-	defender is at Config.Limits.maxLossesPerDay. Takes up to `glowRequested` from storage either
-	way. Records the defender-side consequences: the live loss value (with the record's grab-time base
-	on the day's first live loss, D-034), then shield, pair count, revenge token and log
-	(RaidRules.recordIncoming). A Live debit that took no critter and no Glow grants none of
-	those (decision D-033): an empty steal must not use up the raider's pair slot or reward the
-	defender. Its appliedTransfers entry is still written, for idempotency.
+	is live-protected at the debit (RaidRules.liveProtectedAtDebit, read with the critter still in
+	the den: the largest of the day's base, the den's Glow/s (D-036) and the record's grab-time
+	rate (D-037)), an Async record nothing once the defender is at Config.Limits.maxLossesPerDay.
+	Takes up to `glowRequested` from storage either way. Records the defender-side consequences:
+	the live loss value (with the record's grab-time base on the day's first live loss, D-034),
+	then shield, pair count, revenge token and log (RaidRules.recordIncoming). A Live debit that
+	took no critter and no Glow grants none of those (decision D-033): an empty steal must not
+	use up the raider's pair slot or reward the defender. Its appliedTransfers entry is still
+	written, for idempotency.
 	Idempotent: a repeat returns the first result unchanged.
 ]]
 function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now: number): AppliedTransfer
@@ -174,7 +177,7 @@ function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now
 	if record.critterUid then
 		local critter = defender.critters[record.critterUid]
 		local mayLose = if live
-			then not RaidRules.liveProtected(defender, now)
+			then not RaidRules.liveProtectedAtDebit(defender, now, record.liveBaseRate)
 			else defender.lossesToday < Config.Limits.maxLossesPerDay
 		-- The critter may have moved to the vault, been sold, or been stolen by a concurrent raid
 		-- since the snapshot, or the den may be at its daily limit. In those cases the raid still
