@@ -49,6 +49,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "AsyncRaidRules",
+		load = function()
+			return require("./specs/AsyncRaidRules.spec")
+		end,
+	},
+	{
 		name = "LiveLossRules",
 		load = function()
 			return require("./specs/LiveLossRules.spec")

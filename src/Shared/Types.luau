@@ -146,6 +146,9 @@ export type PlayerProfile = {
 	-- Social and notifications
 	nemesisUserId: number?,
 	notificationPromptedAt: number?,
+	-- When the player last opened their raid log (unix seconds), set server-side on GetRaidLog.
+	-- Missing = never (old saves), so no migration (D-005).
+	raidLogSeenAt: number?,
 }
 
 -- Snapshots and matchmaking ---------------------------------------------------------------------
