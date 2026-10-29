@@ -285,6 +285,19 @@ tests["a 1.5x speed hack fails within 2 s at every weight"] = function()
 	end
 end
 
+tests["a 1.15x speed hack fails within 6 s at every weight"] = function()
+	-- The budget starts at budgetSlack (2) and loses (1.15 - moveRefill) x v = 0.05 v studs a
+	-- second, so it runs out after 2 / (0.05 v) = 40 / v s: 2.8 s Light ... 5.6 s VeryHeavy.
+	expect.eq(RaidRules.Live.moveRefill, 1.1, "the bound below assumes this refill")
+	for weight, v in SPEEDS do
+		local result, at = simulate(v, 6, function(t)
+			return 1.15 * v * t
+		end)
+		expect.eq(result, "TooFast", weight)
+		expect.truthy(at <= 40 / v + 0.2, `{weight} lasted {at} s`)
+	end
+end
+
 tests["chained 7-stud hops fail"] = function()
 	local v = SPEEDS.VeryHeavy
 	local result = simulate(v, 3, function(t)
@@ -337,6 +350,36 @@ end
 
 tests["a hop from the owner's den straight into yours never escapes"] = function()
 	expect.eq(outcome({ insideDefenderDen = false, insideOwnDen = true, moved = 1 }), "SkippedStreet")
+end
+
+tests["stepping out, coming back, banking and then hopping the gap never escapes"] = function()
+	local v = SPEEDS.Light
+	local budget, crossed = RaidRules.carryStartBudget(), false
+	local function sample(overrides: { [string]: any }): RaidRules.CarryOutcome
+		overrides.walkSpeed = v
+		overrides.budget = budget
+		overrides.crossedStreet = crossed
+		local result
+		result, budget, crossed = RaidRules.carryStep(step(overrides))
+		return result
+	end
+	-- One step out into the gap: the street counts as crossed.
+	expect.eq(sample({ moved = 1, wasInsideDefenderDen = true, insideDefenderDen = false }), "Continue")
+	expect.truthy(crossed)
+	-- Back into the owner's den: forgotten.
+	expect.eq(sample({ moved = 1, wasInsideDefenderDen = false, insideDefenderDen = true }), "Continue")
+	expect.falsy(crossed, "returning to the owner's den resets the street")
+	-- Stand still for 2 s to bank, then hop 12 studs straight into your own den.
+	for _ = 1, 20 do
+		sample({ moved = 0 })
+	end
+	expect.truthy(budget >= 12, "the hop is affordable, so only the street rule stops it")
+	expect.eq(sample({ moved = 12, insideDefenderDen = false, insideOwnDen = true }), "SkippedStreet")
+end
+
+tests["walking out through a third den or the plaza still counts as the street"] = function()
+	local _, _, crossed = RaidRules.carryStep(step({ crossedStreet = true, insideDefenderDen = false }))
+	expect.truthy(crossed)
 end
 
 tests["a teleport home is refused before the escape counts"] = function()
