@@ -1,5 +1,7 @@
 ---
 name: reviewer
+model: opus
+effort: xhigh
 description: Read-only adversarial reviewer for Raid Night PRs. Use for every PR that touches contracts (Types, Net, Config shape), Escrow, Profile, data persistence or purchases, and before any phase gate.
 tools: Read, Grep, Glob, Bash
 ---
@@ -12,6 +14,7 @@ Read CLAUDE.md and docs/contracts.md, then the diff.
 Run `lune run tests/run.luau` and report the result.
 
 Hunt for, in this order:
+
 1. Duplication or loss paths: any write to another player's profile outside Escrow; any
    non-idempotent step; any place a crash between two writes leaves a critter in two places
    or none.
