@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-062 · 2026-10-29 · Notification state lives in its own DataStore; storage-full sends stay off
+Context: P2.7 (#118). Decision: NotificationService keeps last-sent day, pending loss and
+opt-in-prompted time in its own `NotificationState_v1` DataStore keyed by user id, not in the
+profile, so a raider's server can apply the daily cap for an offline defender without touching
+another profile. Only the "first critter lost" notification is on; a storage-full category is
+built but switched off in NotificationRules until Kian approves (notification strategy is his).
+Why: rule 4 (never write another player's profile), design pillar. Reversible: yes.
+
 ### D-061 · 2026-10-29 · P2.8 product defaults while Kian's questions are open
 Context: three open product questions (Blocked list) and P2.8 starts tonight. Decision: build
 the safe side of each, all behind Config so a reversal is one value: (1) every product that
