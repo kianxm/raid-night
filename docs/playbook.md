@@ -451,7 +451,8 @@ policy compliance and kill switches. _Done when:_ no blocking findings.
 
 **P3.9 Live loss rules tuning.** Tune `Config.LiveRaid.postLossSafetySeconds`,
 `protectionLossShare` (live protection share) and `maxStealsPerPairPerDay` (live pair limit),
-driven by churn after first loss, raid success rate and like ratio. Propose with expected
+driven by churn after first loss, raid success rate and like ratio (note: a rich den can lose any
+number of low-value critters in a day, one carry at a time, 60 s apart). Propose with expected
 effect, **stop** for approval, apply. Needs analytics for first live loss and churn after it
 (Appendix A). _Done when:_ one tuning round applied with before/after numbers.
 

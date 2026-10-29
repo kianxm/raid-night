@@ -29,7 +29,7 @@ Current phase: 0 → 1 (Phase 0 gate approved; Phase 1 not started, waiting for 
 | P0.10b | ui | P0.10 | Done | #57 | 1 | Fixes #54 (compact column on short screens, fit tested 320-900 px) and #55 (true per-species odds). Studio-simulated; real phone check deferred |
 | C2 | data | — | Done | #59 | 1 | Reviewer APPROVED. Config.Boosts + contracts.md Robux-linked multipliers (D-030) |
 | P0.12 | economy | C2 | Done | #62 | 2 | Reviewer APPROVED; S1/S2/S5 landed: glowBoostFactor({ vip, lanternNight, paidRandomRestricted?, purchasesEnabled }) fails closed, factor clamped to [1, maxGlowBoostFactor()], NaN `now` ignored. 206 tests |
-| P0.5g | data | — | In review | #64, #65 | 1 | Stacked; merge #64 then #65 together (#64 alone would let the count cap empty-commit live steals). 210 tests. Reviewer running |
+| P0.5g | data | — | Done | #64, #65 | 1 | Reviewer APPROVED both. Value-based live protection, postLossSafetySeconds, live pair limit, EscrowRecord.kind, simulation reaches protection 53-65x per seed. 225 tests on integration. Follow-ups: D-033 (data), base-measurement question (Kian) |
 | P0.5h | raid | P0.5g | Todo | | 0 | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
 | P0.5i | ui | P0.5h | Todo | | 0 | Show "Protected today" and the post-loss countdown from den LiveProtected / LiveGrabReadyAt (display only) |
 
@@ -38,10 +38,10 @@ Current phase: 0 → 1 (Phase 0 gate approved; Phase 1 not started, waiting for 
 State at handover (2026-10-28): integration green, all Phase 0 tasks done except the post-gate
 follow-ups below. Kian approved the Phase 0 gate; he will say when to start Phase 1.
 1. #62 (P0.12): DONE (merged).
-2. #64 + #65 (P0.5g): a reviewer was running. If no review is posted, run a fresh `reviewer` on
-   both (focus: recordLiveLoss exactly once incl. recovery, empty-commit side effects, old data,
-   value rule gaming, canGrabLive order). Fix → re-review → merge #64 then #65.
-3. Then P0.5h (raid): RaidService wiring per the canGrabLive changes in #64's description
+2. #64 + #65 (P0.5g): DONE (merged). Follow-up data PR: D-033 (empty live commits grant nothing;
+   pin in the simulation), plus a liveProtected NaN unit test; then the contracts.md mirror (item 4)
+   in the same or next PR. If Kian picks a base option, it lands here too (data) and in P0.5h.
+3. Then P0.5h (raid; also fix the stale "owner hit the loss cap" warning text to name protection): RaidService wiring per the canGrabLive changes in #64's description
    (lastLiveLossAt in server memory, set on Committed and on give-up while InFlight; in-flight
    refusal; den attributes LiveProtected / LiveGrabReadyAt). Then P0.5i (ui) display.
 4. Data mirror PR: copy into docs/contracts.md (rules in #62's description): Money model:
@@ -80,6 +80,14 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
+
+Needed before P0.5h ships (the rest of P0.5h can proceed):
+- Live protection base can be gamed (reviewer on #64): the base is the den's rate at its first
+  live loss, and the owner is alerted at the grab, so during the carry they can move high earners
+  to Inventory/Vault, shrink the base, and get full-day protection from one cheap loss, then move
+  them back. Options: (a) placement-independent base (every owned critter at its pad rate),
+  (b) the den's rate at the moment of the grab, before the alert (recommended; RaidService passes
+  it into the record), (c) the highest den rate seen that day.
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
