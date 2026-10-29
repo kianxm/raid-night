@@ -66,14 +66,14 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| C6 | data | — | Todo | | 0 | Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
+| C6 | data | — | In progress | agent/data/C6 | 1 | Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
 | P2.1 | assets | — | Blocked | #87 (open) | 1 | Generation paused: no credits (D-057); Gate 1 picks are Kian's. Prompts and 40 fronts done in #87 |
 | P2.2 | assets | — | Todo | | 0 | Briefs + prompts only; generation blocked (D-057) |
-| P2.3 | raid | — | Todo | | 0 | Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
+| P2.3 | raid | — | In progress | agent/raid/P2.3 | 1 | Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
 | P2.4 | economy | — | Todo | | 0 | Was P2.1: model-id seam with placeholder fallback, mutation effects, eggMaxTier → Mythic (D-057) |
-| P2.5 | ui | — | Todo | | 0 | Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
+| P2.5 | ui | — | In progress | agent/ui/P2.5 | 1 | Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
 | P2.6 | ui | P2.5, C6 | Todo | | 0 | Onboarding (Appendix C) |
-| P2.7 | notifications | — | Todo | | 0 | Send rules, opt-in timing, launch data; strings for Kian |
+| P2.7 | notifications | — | In progress | agent/notifications/P2.7 | 1 | Send rules, opt-in timing, launch data; strings for Kian |
 | P2.8 | economy | C6 | Todo | | 0 | Passes/products, glow-factor helper, policy audit; products for Kian |
 | P2.9 | data | C6 | Todo | | 0 | Analytics events (Appendix A) + funnels |
 | P2.10 | raid | C6, P2.3 | Todo | | 0 | Gear (live only for lockpick) |
