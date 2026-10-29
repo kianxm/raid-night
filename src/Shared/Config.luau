@@ -144,6 +144,9 @@ local Config = {
 		recentlyRaidedSeconds = 4 * HOUR, -- skip dens raided this recently
 		activeWithinSeconds = 7 * DAY, -- only dens whose owner played this recently
 		candidates = 3, -- targets offered per Raid Portal visit
+		maxRevengeTargets = 5, -- revenge rows shown above the candidates, soonest-expiring first
+		maxBlockedUserIds = 200, -- longest block list a client may report (longer is refused)
+		presenceRefreshSeconds = 60, -- how often a server rewrites userId -> server presence
 	},
 
 	Snapshot = {

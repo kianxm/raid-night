@@ -18,7 +18,7 @@ sections for what you touch. Update this page in the same commit as any contract
 | Key | Type | Written by | Notes |
 | --- | --- | --- | --- |
 | Profile per user | `PlayerProfile` | DataService only (session-locked) | Others send messages |
-| Snapshot per user | `DenSnapshot` | SnapshotService | Never includes vault critters |
+| Snapshot per user | `DenSnapshot` | SnapshotService | Never includes vault critters. DataStore `DenSnapshots`, key `Snapshot_<userId>` |
 | Escrow per raidId | `EscrowRecord` | EscrowService | Write-once create, then state moves forward only |
 | Open escrows per user | `EscrowOpenIndex` | EscrowService | Both raider and defender; added before the record, removed once terminal |
 
@@ -185,6 +185,40 @@ listed there. `Profile.prepare` does not prune them.
 If you change `Escrow.luau`, `RaidRules.recordIncoming`, `RaidRules.recordLiveLoss`,
 `RaidRules.liveProtected`, `RaidRules.liveProtectedAtDebit` or anything in `appliedTransfers`,
 the simulation must still pass, and the `reviewer` agent must sign off.
+
+## Matchmaking
+
+Snapshots (SnapshotService) are saved on leave and every `Config.Snapshot.intervalSeconds` while
+online, built from a copy of the profile (the live profile is not accrued). Optional
+`DenSnapshot.blockedUserIds` is the owner's last reported Roblox block list; missing blocks
+nobody, so no migration. Until a session's first report, the previous snapshot's list is kept.
+
+MemoryStore (MatchmakingService). In `Memory` persistence (D-019) all of it lives in server
+memory instead, so test ids never reach a real pool.
+
+| Structure | Key | Value | TTL |
+| --- | --- | --- | --- |
+| Sorted map `Pool_<band>` per `Matchmaking.powerBand` | userId | `Matchmaking.encodeEntry` array; sortKey `lastActiveAt` | `Config.Matchmaking.activeWithinSeconds` |
+| Hash map `RaidLocks` | defender userId | `{ raiderUserId, raidId, released? }` | `Config.Raid.lockTtlSeconds` (released: 10 s) |
+| Hash map `Presence` | userId | `{ jobId, placeId, at }` | 2.5 x `Config.Matchmaking.presenceRefreshSeconds` |
+
+- Only offline dens are listed: an entry is written when a leave snapshot saves and removed
+  when the player's profile loads again.
+- One raider per defender: `MatchmakingService.acquireLock` / `releaseLock` are single
+  `UpdateAsync` calls (`Matchmaking.lockAfterAcquire` / `lockAfterRelease`). A retry with the same
+  raidId keeps the lock; an unreadable lock counts as held. Acquire refuses while
+  `Config.Flags.raids` is off and fails closed during a MemoryStore backoff; release is never gated.
+- `Net.Requests.GetRaidTargets` returns `{}` unless `Config.Flags.raids` and `asyncRaids` are
+  on. Rows: revenge targets first (`Matchmaking.revengeTargets`: any power band, at most
+  `Config.Matchmaking.maxRevengeTargets`, pair limit counts), then `pickCandidates`.
+  `RaidTarget.revengeRaidId` is set on revenge rows (pass it to StartRaid); `topTier` is the
+  highest tier on the den's pads. No row ever shows exact Glow.
+- Blocked players never match, either direction: the raider's reported list, and each target's
+  snapshot `blockedUserIds`. A target whose snapshot cannot be read is not shown.
+- `Net.Requests.ReportBlocked` (RemoteEvent, `{ number }`): distinct positive whole userIds, at
+  most `Config.Matchmaking.maxBlockedUserIds`; anything else is ignored.
+- Limits per 10 s: `Net.Limits.GetRaidTargets` 3 (and one call at a time per player),
+  `Net.Limits.ReportBlocked` 2.
 
 ## Kill switches
 

@@ -61,6 +61,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "Matchmaking",
+		load = function()
+			return require("./specs/Matchmaking.spec")
+		end,
+	},
+	{
 		name = "Plots",
 		load = function()
 			return require("./specs/Plots.spec")

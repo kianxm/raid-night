@@ -27,6 +27,8 @@ export type RaidTarget = {
 	displayName: string,
 	power: number,
 	isRevenge: boolean,
+	revengeRaidId: string?, -- set on revenge rows; pass it to StartRaid
+	topTier: Types.Tier?, -- loot hint: highest tier on the den's pads (nil = none known); never exact Glow
 }
 
 export type RaidStart = {
@@ -51,7 +53,10 @@ Net.Requests = table.freeze({
 	PlaceCritter = "PlaceCritter", -- (uid, placement, padIndex?) -> boolean
 	BuyEgg = "BuyEgg", -- () -> Critter?
 	UpgradeDen = "UpgradeDen", -- () -> boolean
-	GetRaidTargets = "GetRaidTargets", -- () -> { RaidTarget }
+	GetRaidTargets = "GetRaidTargets", -- () -> { RaidTarget }, revenge rows first
+	-- RemoteEvent: ({ number }) the local player's Roblox block list, sent on join and on every
+	-- change. Distinct positive userIds, at most Config.Matchmaking.maxBlockedUserIds, else ignored.
+	ReportBlocked = "ReportBlocked",
 	StartRaid = "StartRaid", -- (targetUserId, revengeRaidId?) -> RaidStart?
 	GrabCritter = "GrabCritter", -- RemoteEvent: (raidId, critterUid)
 	GetRaidLog = "GetRaidLog", -- () -> { RaidLogEntry }
@@ -76,6 +81,8 @@ Net.Limits = table.freeze({
 	StartRaid = 3,
 	BuyEgg = 10,
 	Lockdown = 3,
+	GetRaidTargets = 3,
+	ReportBlocked = 2,
 })
 
 --[[
