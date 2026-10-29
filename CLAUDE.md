@@ -54,7 +54,7 @@ docs/              design summary, contracts, setup, agents playbook, decisions
 | --- | --- | --- |
 | `data` | `src/Server/Services/DataService.luau`, `EscrowService.luau`, `src/Shared/Escrow.luau`, `src/Shared/Profile.luau` | UI |
 | `economy` | `src/Shared/Economy.luau`, `Config.luau` values, `Data/Critters.luau` stats, `IncomeService`, `PurchaseService` | Escrow |
-| `raid` | `src/Shared/RaidRules.luau`, `RaidService.luau`, den/pocket world code | Profiles directly |
+| `raid` | `src/Shared/RaidRules.luau`, `RaidService.luau`, `src/Server/Raid/**`, den/pocket world code (`DenWorldService`, `Plots.luau`) | Profiles directly |
 | `matchmaking` | `src/Shared/Matchmaking.luau`, `MatchmakingService`, `SnapshotService` | Escrow |
 | `notifications` | `NotificationService.luau` | Everything else |
 | `ui` | `src/Client/**` | `src/Server/**` |

@@ -3,6 +3,16 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-019 · 2026-10-28 · Studio-only test profiles; test escrow never persists
+Decision: DataService.loadTestProfile/releaseTestProfile work only in Studio and only for
+userId <= 0, in memory; any escrow with a party userId <= 0 keeps its record and index in
+memory, even with Studio API access on. Why: single-client testing of the full steal path
+(D-010) without fake data ever reaching a DataStore (principle 1). Reversible: yes.
+
+### D-018 · 2026-10-28 · Grab range in Config
+Decision: Config.LiveRaid.grabRange = 10 studs (was a RaidRules constant). Why: tuning knobs
+live in Config (principle 5). Reversible: yes.
+
 ### D-016 · 2026-10-28 · DenState.eggCost deferred to the Phase 2 UI pass
 Context: economy proposed adding eggCost to Net.DenState so the HUD stops mirroring the rescue
 rule. Decision: defer to P2.5. The client copy is display-only and matches the server after
