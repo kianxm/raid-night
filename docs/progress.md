@@ -55,7 +55,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.6 | ui | P1.3, P1.5 | Todo | | | |
 | P1.7 | economy | — | In progress | agent/economy/P1.7 | 1 | Tuning approved by orchestrator within design-doc ranges (D-041) |
 | P1.8 | economy | P1.7 | Todo | | | |
-| P1.9 | matchmaking | P1.2 | In progress | agent/matchmaking/P1.9 | 1 | Live check needs two servers or a private publish (Kian) |
+| P1.9 | matchmaking | P1.2 | In review | #94 | 1 | Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
 
 ## Setup notes
@@ -146,6 +146,11 @@ dropped based on real play.
 - Raider's own block list is session-only until their first ReportBlocked; fall back to the last snapshot (reviewer #91; small).
 - Studio hook `targets` also skips the `raids` gate; doc says asyncRaids only (reviewer #91; Studio only, doc fix).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
+- Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
+- Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).
+- getLiveRevenge can miss a block that exists only in a snapshot and was added after arrival (reviewer #94; rare).
+- `raiderOnline` tells a victim whether their raider is online (reviewer #94; privacy note, by design, blocks respected).
+- seenOnline: one MemoryStore read per revenge row per GetRaidTargets (15 s cache); watch the budget (reviewer #94). Six more in #94.
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
