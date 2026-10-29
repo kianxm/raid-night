@@ -104,8 +104,8 @@ Not for testers.
 - [ ] Kill switches: `Config.Flags.raids = true` (stealing is off without it). Leave
       `asyncRaids`, `purchases`, `trading` and `notifications` as they are (off in Phase 0).
 - [ ] You joined once yourself and saw your den, the starter egg and the three HUD buttons.
-- [ ] Known limits: repeat steals from the same player hit a per-day pair limit (D-022) and
-      are refused with no message, and a player can only lose so many critters a day. If a
+- [ ] Known limits: the same two players can only steal from each other 2 times a day (D-022)
+      and a player can lose at most 3 critters a day; the refusal shows no message. If a
       tester says "it won't let me", look at the Output for `PairLimit` or the daily cap.
 - [ ] 4 or 5 friends invited, with at least one on a phone.
 
