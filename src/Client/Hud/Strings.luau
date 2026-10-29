@@ -12,10 +12,14 @@ local Strings = {
 	buyEgg = "Buy Egg",
 	free = "Free",
 	freeEgg = "Free egg",
-	carrying = "Carrying {name}",
+	carrying = "Carrying {name} ({tier})",
 	lockdown = "Lockdown",
 	lockdownActive = "Locked {time}",
 	lockdownCooldown = "Ready in {time}",
+	lockdownStarted = "Lockdown on!",
+	lockdownRefused = "Can't lock down now",
+	beingRaided = "{name} is raiding your den!",
+	beingRaidedUnknown = "You're being raided!",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string
