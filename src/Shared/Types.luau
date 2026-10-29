@@ -198,10 +198,12 @@ export type EscrowRecord = {
 	raiderUserId: number,
 	defenderUserId: number,
 	critterUid: string?, -- the critter the raider grabbed, if any
-	glowRequested: number, -- loot Glow computed from the snapshot
+	-- Loot Glow computed from the snapshot. Live: the most the debit takes. Async: only the raid's
+	-- estimate; the debit takes its share of what is stored when it lands (P1.1).
+	glowRequested: number,
 	state: EscrowState,
 	critter: Critter?, -- filled at Debited: the exact critter taken (nil if it was gone)
-	glow: number, -- filled at Debited: Glow actually taken (<= glowRequested)
+	glow: number, -- filled at Debited: Glow actually taken (Live: <= glowRequested; Async: its share of stored at the debit)
 	isRevenge: boolean,
 	createdAt: number,
 	updatedAt: number,
