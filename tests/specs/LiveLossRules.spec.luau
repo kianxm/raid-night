@@ -99,7 +99,8 @@ end
 
 tests["liveProtected counts a NaN base or a NaN loss as protected"] = function()
 	local nan = 0 / 0
-	for _, case in { { nan, 10 }, { 100, nan }, { nan, nan } } do
+	-- A small lost value against a large one too: math.max must not drop the NaN (D-036).
+	for _, case in { { nan, 10 }, { 100, nan }, { nan, nan }, { nan, 0 }, { 0, nan } } do
 		local owner = foxDen()
 		owner.liveLossBaseRate, owner.liveLossRateToday = case[1], case[2]
 		expect.truthy(RaidRules.liveProtected(owner, NOW), `base {case[1]}, lost {case[2]}`)
@@ -110,11 +111,31 @@ tests["liveProtected counts a NaN base or a NaN loss as protected"] = function()
 	expect.falsy(RaidRules.liveProtected(owner, DAY_START + DAY), "a NaN from yesterday is not today's")
 end
 
+tests["a NaN den rate counts as protected too (D-036)"] = function()
+	local owner = foxDen()
+	owner.liveLossBaseRate, owner.liveLossRateToday = 100, 10
+	expect.falsy(RaidRules.liveProtected(owner, NOW), "10 of 100")
+	owner.rebirths = 0 / 0 -- every critter's rate, and so the den's, is NaN
+	expect.truthy(RaidRules.liveProtected(owner, NOW))
+	expect.eq(select(2, canGrab(owner, 1, 1, NOW)), Reason.LiveProtected)
+end
+
 tests["a den with no live loss today is not protected, and the check never writes"] = function()
 	local owner = foxDen()
 	expect.falsy(RaidRules.liveProtected(owner, NOW))
 	expect.eq(owner.liveLossBaseRate, nil)
 	expect.eq(owner.liveLossRateToday, nil)
+end
+
+tests["one field missing means not protected, whatever the den earns (D-036)"] = function()
+	for _, case in { { nil, 50 }, { 100, nil } } do
+		local owner = foxDen()
+		owner.liveLossBaseRate, owner.liveLossRateToday = case[1], case[2]
+		for pad = 1, 4 do
+			move(owner, `fox{pad}`, "Inventory") -- an empty den: any recorded loss would reach the line
+		end
+		expect.falsy(RaidRules.liveProtected(owner, NOW), `base {case[1]}, lost {case[2]}`)
+	end
 end
 
 tests["with no grab-time base, the base is the den's Glow/s just before its first live loss, vault included"] = function()
@@ -131,7 +152,11 @@ tests["the base stays the first loss's, however the den changes later that day"]
 	fixtures.give(owner, fixtures.critter("king", "king_bandit", "Pad", 5)) -- the den now earns 675
 	steal(owner, 3, "fox2", NOW + 120)
 	expect.eq(owner.liveLossBaseRate, 100, "not re-measured")
-	expect.truthy(RaidRules.liveProtected(owner, NOW + 120), "50 of a 100 base, though the den earns 650 now")
+	-- The line moves with the den instead (D-036): 50 of a 100 base, but the den earns 650 now.
+	expect.falsy(RaidRules.liveProtected(owner, NOW + 120), "50 lost of a den earning 650")
+	move(owner, "king", "Inventory")
+	expect.eq(owner.liveLossBaseRate, 100, "a placement never touches the base")
+	expect.truthy(RaidRules.liveProtected(owner, NOW + 120), "50 of the 100 base once the king is off")
 end
 
 tests["a loss is the critter's own Glow/s where it sat: mutation and rebirths count"] = function()
@@ -331,6 +356,161 @@ tests["transferLive refuses a bad liveBaseRate before any write and puts it in t
 	expect.truthy((checked :: number) < (created :: number), "checked before Escrow.create (which asserts)")
 	expect.truthy((checked :: number) < (firstRead :: number), "and before anything is read or written")
 	expect.truthy((created :: number) < (firstWrite :: number), "the record built with it is the one created")
+end
+
+-- Protection against max(base, the den's Glow/s now) (decision D-036) ---------------------------------
+
+local PHYSICAL_PADS = 6 -- pads in the den world
+
+-- The owner puts a critter on a pad through the server's own placement rule.
+local function refill(owner: PlayerProfile, uid: string, padIndex: number, now: number)
+	local ok, why = Economy.place(owner, uid, "Pad", padIndex, PHYSICAL_PADS, now)
+	expect.truthy(ok, `placed {uid} on pad {padIndex}: {why}`)
+end
+
+-- A den worth stealing from: the king (600) and a hare (380) on pads 1-2, a rat (3, a Common) on 3.
+local function richDen(): PlayerProfile
+	local owner = fixtures.veteran(2, NOW)
+	fixtures.give(owner, fixtures.critter("king", "king_bandit", "Pad", 1))
+	fixtures.give(owner, fixtures.critter("hare", "storm_hare", "Pad", 2))
+	fixtures.give(owner, fixtures.critter("rat", "crumb_rat", "Pad", 3))
+	expect.eq(Economy.denRate(owner), 983)
+	return owner
+end
+
+tests["a planned shrink buys nothing: empty the den but one Common, lose it, refill (D-036)"] = function()
+	local owner = richDen()
+	local alt, raider = 7, 8
+	-- Before anyone grabs, so even the grab-time base (D-034) is the rat alone.
+	move(owner, "king", "Inventory")
+	move(owner, "hare", "Inventory")
+	local grabBase = Economy.denRate(owner)
+	expect.eq(grabBase, 3)
+	steal(owner, alt, "rat", NOW, grabBase) -- lost to an alt, or a carry the owner let land
+	expect.eq(owner.liveLossBaseRate, 3, "a true measurement: the den really earned 3 Glow/s")
+	expect.truthy(RaidRules.liveProtected(owner, NOW), "only while the den stays empty")
+	local later = RaidRules.liveGrabReadyAt(NOW)
+	refill(owner, "king", 1, later)
+	expect.falsy(RaidRules.liveProtected(owner, later), "3 lost of a den earning 600 again")
+	refill(owner, "hare", 2, later)
+	local ok, reason = canGrab(owner, raider, 1, later, NOW)
+	expect.truthy(ok, `a real raider can grab the king: {reason}`)
+	steal(owner, raider, "king", later)
+	expect.eq(owner.liveLossBaseRate, 3, "the base is still the day's first")
+	expect.truthy(RaidRules.liveProtected(owner, later), "a real loss protects: 603 lost, the den earns 380")
+end
+
+tests["refilling lifts protection mid-day, and shrinking the den brings it back (D-036)"] = function()
+	local owner = foxDen()
+	steal(owner, 1, "fox1", NOW, 100)
+	steal(owner, 3, "fox2", NOW + 60, 100)
+	expect.truthy(RaidRules.liveProtected(owner, NOW + 60), "50 of 100")
+	local t = NOW + 600
+	fixtures.give(owner, fixtures.critter("king", "king_bandit", "Inventory")) -- a fresh hatch
+	expect.truthy(RaidRules.liveProtected(owner, t), "Inventory earns nothing, so it changes nothing")
+	refill(owner, "king", 1, t) -- onto the stolen fox's pad
+	expect.falsy(RaidRules.liveProtected(owner, t), "50 lost of a den earning 650")
+	expect.truthy((canGrab(owner, 4, 3, t, NOW + 60)), "grabs reopen")
+
+	expect.truthy(Economy.place(owner, "king", "Inventory", nil, PHYSICAL_PADS, t + 1))
+	expect.truthy(RaidRules.liveProtected(owner, t + 1), "back to 50 of the 100 base")
+	expect.eq(select(2, canGrab(owner, 4, 3, t + 1, NOW + 60)), Reason.LiveProtected, "grabs refused again")
+	local slipped = debit(owner, 4, "fox3", t + 1) -- a grab checked before the shrink
+	expect.eq(slipped.critter, nil, "the debit reads the same line: nothing taken")
+	expect.truthy(owner.critters.fox3, "fox3 stays home")
+
+	refill(owner, "king", 1, t + 2)
+	steal(owner, 4, "fox3", t + 2) -- and lands once the den is refilled
+	expect.eq(owner.liveLossBaseRate, 100, "no placement ever moved the base")
+	expect.eq(owner.liveLossRateToday, 75)
+end
+
+tests["a real loss of the den's top earner protects until the den earns over twice the loss (D-036)"] = function()
+	local owner = kingAndRat()
+	steal(owner, 1, "king", NOW, Economy.denRate(owner))
+	expect.truthy(RaidRules.liveProtected(owner, NOW), "600 lost: the den dropped to 3 with it")
+	expect.eq(select(2, canGrab(owner, 3, 2, RaidRules.liveGrabReadyAt(NOW), NOW)), Reason.LiveProtected)
+	local t = NOW + 600
+	-- The owner hatches replacements, which go straight onto free pads (as Economy.autoPlace does).
+	for n, species in { "storm_hare", "king_bandit" } do
+		fixtures.give(owner, fixtures.critter(`new{n}`, species, "Inventory"))
+		refill(owner, `new{n}`, if n == 1 then 1 else 3, t)
+	end
+	expect.eq(Economy.denRate(owner), 983)
+	expect.truthy(RaidRules.liveProtected(owner, t), "600 of 983 is still over half")
+	fixtures.give(owner, fixtures.critter("new3", "storm_hare", "Inventory"))
+	refill(owner, "new3", 4, t)
+	expect.eq(Economy.denRate(owner), 1363)
+	expect.falsy(RaidRules.liveProtected(owner, t), "600 of 1,363: worth stealing from again")
+end
+
+tests["once the den earns more than the base, the line is exactly the share of its Glow/s (D-036)"] = function()
+	local owner = foxDen()
+	steal(owner, 1, "fox1", NOW, 100)
+	steal(owner, 3, "fox2", NOW + 60, 100)
+	for n = 5, 7 do
+		fixtures.give(owner, fixtures.critter(`fox{n}`, "crescent_fox", "Inventory"))
+	end
+	refill(owner, "fox5", 1, NOW + 60)
+	refill(owner, "fox6", 2, NOW + 60)
+	expect.eq(Economy.denRate(owner), 100)
+	expect.truthy(RaidRules.liveProtected(owner, NOW + 60), "50 of 100: exactly the share")
+	refill(owner, "fox7", 5, NOW + 60)
+	expect.eq(Economy.denRate(owner), 125)
+	expect.falsy(RaidRules.liveProtected(owner, NOW + 60), "50 of 125")
+end
+
+tests["the base is a floor: emptying the den after a small loss never protects it (D-036)"] = function()
+	local owner = foxDen()
+	steal(owner, 1, "fox1", NOW, 100)
+	for pad = 2, 4 do
+		move(owner, `fox{pad}`, "Inventory")
+	end
+	expect.eq(Economy.denRate(owner), 0)
+	expect.falsy(RaidRules.liveProtected(owner, NOW + 60), "25 of the day's 100 base")
+end
+
+tests["the den's rate counts Vault critters at their vault rate, Inventory and Guards not at all (D-036)"] = function()
+	local owner = foxDen()
+	steal(owner, 1, "fox1", NOW, 100)
+	steal(owner, 3, "fox2", NOW + 60, 100)
+	local king = fixtures.give(owner, fixtures.critter("king", "king_bandit", "Inventory"))
+	expect.truthy(RaidRules.liveProtected(owner, NOW + 60), "Inventory: 50 of 100")
+	king.placement = "Guard" -- guards defend and earn nothing
+	expect.truthy(RaidRules.liveProtected(owner, NOW + 60), "Guard: 50 of 100")
+	expect.truthy(Economy.place(owner, "king", "Vault", nil, PHYSICAL_PADS, NOW + 60))
+	expect.eq(Economy.denRate(owner), 50 + 600 * Config.Income.vaultMultiplier)
+	expect.falsy(RaidRules.liveProtected(owner, NOW + 60), "Vault: 50 of 350, though the vault is never stolen from")
+end
+
+tests["RaidService reads protection only through RaidRules, from the live profile, on every tick (D-036)"] = function()
+	local code = source.codeOnly(source.read("src/Server/Services/RaidService.luau"))
+	-- No copy of the rule that a change to liveProtected could miss.
+	for _, word in { "liveLossBaseRate", "liveLossRateToday", "protectionLossShare" } do
+		expect.falsy(string.find(code, word, 1, true), `RaidService reads {word} itself`)
+	end
+	-- The grab check hands canGrabLive the owner's live profile; the den attribute and the prompt
+	-- check call liveProtected on it. ownerOf returns DataService.getProfile's live table.
+	local check = string.match(code, "local function checkGrab%(.-\nend\n") or ""
+	expect.truthy(string.find(check, "local ownerUserId, ownerProfile = ownerOf%(plot%)"), "checkGrab: live owner")
+	expect.truthy(string.find(check, "ownerProfile = ownerProfile,", 1, true), "checkGrab: passed to canGrabLive")
+	local refresh = string.match(code, "local function refreshDen%(.-\nend\n") or ""
+	expect.truthy(string.find(refresh, "local ownerUserId, ownerProfile = ownerOf%(plot%)"), "refreshDen: live owner")
+	expect.truthy(
+		string.find(refresh, "RaidRules.liveProtected(ownerProfile, os.time())", 1, true),
+		"refreshDen: computed fresh, never cached"
+	)
+	local closed = string.match(code, "local function denClosed%(.-\nend\n") or ""
+	expect.truthy(string.find(closed, "RaidRules.liveProtected(ownerProfile, now)", 1, true), "denClosed")
+	-- Both refresh on the 0.5 s prompt tick, so a refill shows within a tick.
+	expect.truthy(string.find(code, "local PROMPT_TICK = 0.5", 1, true), "the tick")
+	expect.truthy(
+		string.find(
+			code,
+			'if promptClock >= PROMPT_TICK then%s+promptClock = 0%s+guard%("prompts", syncPrompts%)%s+guard%("den attributes", refreshDens%)'
+		),
+		"syncPrompts and refreshDens run on it"
+	)
 end
 
 return tests

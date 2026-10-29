@@ -70,10 +70,11 @@
 	from, so DataService refuses to release one while an escrow for it is open here.
 
 	Live loss rules (decision D-031): transferLive creates "Live" records, whose debit takes no
-	critter from a den protected for the day (Escrow.debitDefender), measures the day's first
-	live loss against the record's liveBaseRate when it has one (D-034), and grants the defender
-	nothing when it takes nothing (D-033). Live steals use this same-server path, on the two
-	profiles loaded here, until P1.1 adds the cross-server one.
+	critter from a den that is live-protected at the debit (Escrow.debitDefender; measured
+	against the larger of the day's base and the den's Glow/s then, D-036), measures the day's
+	first live loss against the record's liveBaseRate when it has one (D-034), and grants the
+	defender nothing when it takes nothing (D-033). Live steals use this same-server path, on the
+	two profiles loaded here, until P1.1 adds the cross-server one.
 
 	TODO (P1.1, decision D-012): the void assumes only the creating call debits. Debits delivered
 	by ProfileStore message (or applied to an offline profile) will race it. Read the TODO in

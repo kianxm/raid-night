@@ -259,22 +259,36 @@ end
 	    that steal's grab was accepted, before the owner was alerted (decision D-034): the record's
 	    liveBaseRate. An owner who moves high earners off their pads during the carry cannot
 	    shrink it. A record without one falls back to denRate just before the debit.
-	  - Once today's losses reach Config.LiveRaid.protectionLossShare of the base, the den is
-	    protected from live steals for the rest of the UTC day. The debit that crosses the line
-	    lands; nothing after it does (canGrabLive refuses, and Escrow.debitDefender takes nothing).
+	  - The den is protected from live steals while today's losses reach
+	    Config.LiveRaid.protectionLossShare of the larger of the base and the den's Glow/s right
+	    now (decision D-036). The base is a floor: shrinking the den never lowers the line below
+	    it. The den's rate lifts it: an owner who emptied the den before the grab (so the base
+	    itself is small), lost one cheap critter and refilled is not protected, and neither is a
+	    den refilled after a real loss. A real loss keeps protecting, since the den's rate drops
+	    with the stolen critter. The debit that crosses the line lands; nothing after it does
+	    while the line holds (canGrabLive refuses, and Escrow.debitDefender takes nothing).
 	  - After any live loss nobody can grab from the den for postLossSafetySeconds.
 	Both fields live on the profile, belong to lossDay and reset with it, so stealing a few cheap
 	critters from a rich den never protects it, and losing the den's best critter does.
 ]]
 
--- Read-only: is this den protected from live steals for the rest of today? A profile without the
--- fields (no live loss today, or a save from before D-031) is not. A NaN counts as protected.
+--[[
+	Read-only: is this den protected from live steals right now (decision D-036)? True while
+	today's live losses reach protectionLossShare x max(liveLossBaseRate, Economy.denRate(profile)),
+	so it can turn off and on again during the day as the owner refills or shrinks the den.
+	A profile without the fields (no live loss today, or a save from before D-031) is not
+	protected. A NaN in either field, or in the den's rate, counts as protected.
+]]
 function RaidRules.liveProtected(profile: PlayerProfile, now: number): boolean
 	local base, lost = profile.liveLossBaseRate, profile.liveLossRateToday
 	if profile.lossDay ~= RaidRules.dayIndex(now) or base == nil or lost == nil then
 		return false
 	end
-	return not (lost < Config.LiveRaid.protectionLossShare * base)
+	local rate = Economy.denRate(profile)
+	if base ~= base or lost ~= lost or rate ~= rate then
+		return true -- math.max would drop a NaN depending on argument order, so decide it here
+	end
+	return lost >= Config.LiveRaid.protectionLossShare * math.max(base, rate)
 end
 
 --[[
