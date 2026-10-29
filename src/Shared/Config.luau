@@ -67,7 +67,10 @@ local Config = {
 	-- Live stealing in a den whose owner is online (decision D-003). Server-enforced.
 	LiveRaid = {
 		lockdownSeconds = 45, -- a Lockdown blocks new raiders from entering the den this long
-		lockdownCooldownSeconds = 120, -- before the owner can start another Lockdown
+		-- Counts from the END of a Lockdown (decision D-011). LockdownUntil = start + lockdownSeconds;
+		-- LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds, the earliest the next one can
+		-- start. So a den is locked at most 45 s in every 165 s.
+		lockdownCooldownSeconds = 120,
 		tagRange = 6, -- studs: how close the owner must be to tag a raider
 		grabHoldSeconds = 1, -- how long a raider holds the grab to pick a critter up
 	},

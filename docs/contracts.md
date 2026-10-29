@@ -77,7 +77,7 @@ Live stealing happens in an online owner's den (RaidService, decision D-003). Tu
 | Key | Launch value | Meaning |
 | --- | --- | --- |
 | `lockdownSeconds` | 45 | How long a Lockdown lasts |
-| `lockdownCooldownSeconds` | 120 | Wait before the owner can start another Lockdown |
+| `lockdownCooldownSeconds` | 120 | Wait after a Lockdown ENDS before the owner can start another |
 | `tagRange` | 6 | Studs: how close the owner must be to tag a raider |
 | `grabHoldSeconds` | 1 | How long a raider holds the grab to pick a critter up |
 
@@ -87,6 +87,10 @@ Live stealing happens in an online owner's den (RaidService, decision D-003). Tu
 - Only the den's owner can start one, and it applies to live raids only.
 - It blocks ENTRY only. Raiders already inside can leave, but a carried critter drops at the
   border.
+- The cooldown counts from the END of a Lockdown (decision D-011). For a Lockdown started at
+  server time `start`: `LockdownUntil = start + lockdownSeconds` (when it ends) and
+  `LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds` (the earliest the owner can start
+  the next one). A den is locked at most 45 s in every 165 s.
 - Duration and cooldown are enforced server-side from the server's own state. The client only
   asks; `LockdownUntil` and `LockdownReadyAt` below are for display.
 
