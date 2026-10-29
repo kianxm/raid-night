@@ -301,6 +301,17 @@ from an async `raid_started`. The tutorial den logs no raid event.
 `raided_offline` is logged on the defender when they are in the server that saved the debit,
 otherwise on the raider (`attributedTo = "Raider"`), since a profile no server holds has no Player.
 
+Economy call points (P2.8c): IncomeService logs `egg_bought` (price 0 for the rescue egg),
+`critter_placed` (PlaceCritter only, not auto-placement) and `glow_collected` (player collects; the
+auto-collect pass logs only its economy flows, to spare the per-player budget). PurchaseService
+logs `purchase` once per first grant of a receipt (never a redelivery) and once per pass purchase
+MarketplaceService confirms. Economy flows: Glow source `Collect`; Glow sinks `Egg`, `DenUpgrade`,
+`GearUpgrade`; DenGlow source `DenOfflineIncome` (the offline gap, when the first accrue of a load
+pays it) and `DenIncome` (online income summed inside the Glow-factor helper and logged before each
+collect and at the leave, not per accrue); DenGlow sink `DenCollect`. `RaidLoot` and `DenRaided`
+are EscrowService's. `rebirth` and the `Rebirth` sink wait for the rebirth request, which is not
+served yet (D-026's escrow check first).
+
 ## Notification opt-in remotes (P2.7c, D-059)
 
 `ExperienceNotificationService:PromptOptIn` is client-only, so NotificationService (created even
@@ -313,17 +324,6 @@ additive remotes in `ReplicatedStorage.Remotes`:
 | `Net.Requests.ReportOptInResult` | RemoteEvent `({ shown: boolean, accepted: boolean })` | 3 | Accepted only while a push is pending for that player (cleared on use or leave). `NotificationRules.cleanOptInReport`: both booleans, `accepted` needs `shown`; malformed is ignored and the prompt stays pending. `shown = true` saves `promptedAt` (30-day clock) and logs `optin_result`; `shown = false` clears the pending prompt, saves nothing |
 
 `optin_prompted` is logged at the push. Nothing new is persisted.
-
-Economy call points (P2.8c): IncomeService logs `egg_bought` (price 0 for the rescue egg),
-`critter_placed` (PlaceCritter only, not auto-placement) and `glow_collected` (player collects; the
-auto-collect pass logs only its economy flows, to spare the per-player budget). PurchaseService
-logs `purchase` once per first grant of a receipt (never a redelivery) and once per pass purchase
-MarketplaceService confirms. Economy flows: Glow source `Collect`; Glow sinks `Egg`, `DenUpgrade`,
-`GearUpgrade`; DenGlow source `DenOfflineIncome` (the offline gap, when the first accrue of a load
-pays it) and `DenIncome` (online income summed inside the Glow-factor helper and logged before each
-collect and at the leave, not per accrue); DenGlow sink `DenCollect`. `RaidLoot` and `DenRaided`
-are EscrowService's. `rebirth` and the `Rebirth` sink wait for the rebirth request, which is not
-served yet (D-026's escrow check first).
 
 ## Money model
 
