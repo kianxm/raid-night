@@ -149,14 +149,17 @@ tests["EscrowService takes its storage mode only from a decided persistence()"] 
 			`{name} picks its backend through backend() first`
 		)
 	end
-	-- transferLive refuses before any write while undecided.
-	local live = source.functionBody(code, "EscrowService.transferLive") or ""
-	local refused = string.find(live, 'if storage%(%) == nil then%s*return "Refused"')
-	local driven = string.find(live, "pcall%(%s*startOrResume")
-	expect.truthy(
-		refused and driven and (refused :: number) < (driven :: number),
-		"transferLive refuses while undecided"
-	)
+	-- Both transfers refuse before any write while undecided, or when storage() itself fails
+	-- (pcall, D-026), instead of throwing out of the call.
+	for name, start in { transferLive = "startOrResume", transferAsync = "startAsync" } do
+		local body = source.functionBody(code, `EscrowService.{name}`) or ""
+		local refused = string.find(
+			body,
+			'local ready, decided = pcall%(storage%)%s*if not ready or decided == nil then%s*return "Refused"'
+		)
+		local driven = string.find(body, `pcall%(%s*{start}`)
+		expect.truthy(refused and driven and (refused :: number) < (driven :: number), `{name} refuses while undecided`)
+	end
 end
 
 return tests

@@ -2,14 +2,16 @@
 --[[
 	EscrowService (owner: data agent; every change reviewed by the reviewer agent)
 
-	Turns a successful live raid into a safe transfer using Shared/Escrow.luau, and finishes any
-	transfer that a crash or an unconfirmed save left in flight.
+	Turns a successful raid into a safe transfer using Shared/Escrow.luau, and finishes any
+	transfer that a crash, an unconfirmed save or an absent party left in flight.
 
 	Public API (everything else is private):
 	  canStartTransfer(kind, isRevenge?)  may a NEW transfer start? Escrow.canStartTransfer with
 	                          Config.Flags: `raids` is the master switch; "Async" and revenge also
 	                          need `asyncRaids`; unknown kinds are refused. The only code here that
-	                          reads a flag (a Lune test guards this).
+	                          reads a flag (a Lune test guards this). Studio only: the ServerStorage
+	                          attribute StudioAsyncRaids = true counts asyncRaids as on (never read
+	                          in a live server), so async raids can be playtested before they ship.
 	  transferLive(raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge?,
 	               liveBaseRate?)
 	                          same-server live steal. Yields (seconds normally, about 2 minutes
@@ -39,6 +41,31 @@
 	                          retry reuses the first call's createNonce: a create that landed with
 	                          its response lost is still that call's own, so the steal continues
 	                          instead of voiding.
+	  transferAsync(raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge?)
+	                          an async raid's escape (P1.3), from the snapshot the raid was built
+	                          on. The raider must be loaded here; the defender may be offline,
+	                          online in another server, or here. Yields (seconds normally, about 2
+	                          minutes worst case). Returns (status, reason):
+	                            "Committed"  the loot moved; both sides saved
+	                            "InFlight"   started, or may have; it finishes without the caller.
+	                                         Usually the defender is online elsewhere: their
+	                                         server applies the debit, then this server credits
+	                                         the raider and pushes DenChanged. A retry with
+	                                         IDENTICAL arguments is safe, never needed
+	                            "Refused"    nothing moved: switch off, bad input, the raider not
+	                                         loaded here, or the raidId used by another transfer
+	                          Once created it is never voided. The debit runs when it lands: it
+	                          accrues the defender's offline income to then and takes the raid's
+	                          share of that stored Glow (RaidRules.lootGlow's share, capped by what
+	                          is there), and the critter only if it is still on its pad and the den
+	                          is under maxLossesPerDay (D-031). glowRequested (the snapshot's
+	                          RaidRules.lootGlow) is only the estimate the raid showed. Read the
+	                          outcome from the raider's profile (the credit is exactly what was
+	                          debited), never from the snapshot. critterUid, glowRequested and
+	                          isRevenge come from server state, never from a remote. Refresh the
+	                          raider after it, as for transferLive; a later commit is pushed from
+	                          here.
+	  studioRecord(raidId)    Studio only: the stored record, read-only (playtests)
 
 	Storage (docs/contracts.md), DataStore "EscrowRecords"; memory instead when
 	DataService.persistence() is "Memory" (Studio without API access, or Studio's memory switch,
@@ -51,7 +78,8 @@
 	  Open_<userId>    Types.EscrowOpenIndex, for BOTH parties: written before the record, removed
 	                   once it is terminal; with no record, only once older than 15 minutes (a
 	                   re-add by a retry moves createdAt forward, Escrow.indexAdd)
-	Each DataStore call: 4 attempts, 1/2/4 s backoff. Every transform is idempotent.
+	Each DataStore call: 4 attempts, 1/2/4 s backoff. Every transform is idempotent and stores
+	the userIds the key is about (both parties for a record, the owner for an index; D-008).
 
 	New raid: busy lock -> start checks -> index both parties -> create record (with a per-call
 	createNonce, so an attempt that landed but errored is still this call's own) -> Escrow.advance
@@ -59,12 +87,32 @@
 	background. Profiles come fresh from DataService.getProfile (accrued first), and a profile
 	save counts only when the written data holds this raid's exact appliedTransfers entry.
 
+	Async raid: the same lock, checks (asyncRaids) and indexes, then Escrow.recover, which never
+	voids an Async record and delivers its debit: on the defender's profile when it is loaded here
+	(saveNow); otherwise DataService.updateOffline, one atomic write that lands only while no
+	server holds the profile; or, when a server does, an "EscrowDebit" message (just the raidId),
+	whose listener in that server runs the same recovery with the defender loaded. This server
+	keeps retrying while the raider is here and credits once the record is Debited.
+
 	Recovery never reads a flag. On every profile load: read Open_<userId>, prune
-	appliedTransfers except open raids, then Escrow.recover each open raid (Pending with the
+	appliedTransfers except open raids, then Escrow.recover each open raid (Live, Pending with the
 	defender here: their saved debit -> Debited; none -> a confirmed save by this session without
-	the entry, then Voided; Debited with the raider here: credit and commit). A sweep retries what
-	this server left in flight, with per-raid backoff, while the party the record needs is here
-	(Pending: the defender, Debited: the raider); otherwise that party's next load picks it up.
+	the entry, then Voided; Async, Pending: deliver the debit; Debited with the raider here: credit
+	and commit). A sweep every 15 s retries what this server left in flight, with per-raid
+	backoff, while a party the record needs is here (Pending: the defender, or for Async the
+	raider; Debited: the raider); otherwise that party's next load picks it up. Every 60 s it
+	reads every loaded player's Open_ index again (raids other servers opened, lost messages),
+	leaving raids under backoff or waiting for an absent party alone. A drive that is not the
+	transfer call itself pushes DenChanged to each party here whose profile it changed (D-026).
+
+	Duplication alarm: a step that refuses a second copy of a critter, or two different loots for
+	one raid, stops that raid in this server (never retried here; record and profiles stay as
+	they are for a human) and raises an error so it shows in the error report.
+
+	Studio playtests (ServerStorage attributes, never read in a live server): StudioAsyncRaids
+	(above), and StudioEscrowPause = "<checkpoint>" (an Escrow checkpoint name, e.g.
+	"deliveredDebit"): any drive reaching it waits there up to 2 minutes, so the server can be
+	stopped mid-transfer to test recovery on rejoin.
 
 	Studio test profiles (DataService.loadTestProfile, decision D-019) have no load to recover
 	from, so DataService refuses to release one while an escrow for it is open here.
@@ -74,27 +122,32 @@
 	against the largest of the day's base, the den's Glow/s then (D-036) and the record's
 	liveBaseRate (D-037), so a shrink during the carry cannot refuse it), measures the day's
 	first live loss against the record's liveBaseRate when it has one (D-034), and grants the
-	defender nothing when it takes nothing (D-033). Live steals use this same-server path, on the
-	two profiles loaded here, until P1.1 adds the cross-server one.
+	defender nothing when it takes nothing (D-033). Live steals stay on this same-server path, on
+	the two profiles loaded here; only async debits cross servers (D-012 closed: no Async record is
+	ever voided, so no late debit can race a void).
 
-	TODO (P1.1, decision D-012): the void assumes only the creating call debits. Debits delivered
-	by ProfileStore message (or applied to an offline profile) will race it. Read the TODO in
-	Shared/Escrow.luau before adding any async transport.
+	TODO (when rebirth is wired; D-026): applyRebirth must skip or refuse critters that are
+	locked (carried, or in an open escrow).
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local ServerStorage = game:GetService("ServerStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Economy = require(ReplicatedStorage.Shared.Economy)
 local Escrow = require(ReplicatedStorage.Shared.Escrow)
 local Types = require(ReplicatedStorage.Shared.Types)
 local DataService = require(script.Parent.DataService)
+local IncomeService = require(script.Parent.IncomeService) :: any
 
 type EscrowRecord = Types.EscrowRecord
 type EscrowOpenIndex = Types.EscrowOpenIndex
 type PlayerProfile = Types.PlayerProfile
+type AppliedTransfer = Types.AppliedTransfer
 
 export type TransferKind = Types.TransferKind
 export type TransferStatus = "Committed" | "InFlight" | "Refused"
@@ -104,9 +157,18 @@ local MAX_RAID_ID_LENGTH = Config.Escrow.maxRaidIdLength
 local CALL_RETRY_DELAYS = { 1, 2, 4 } -- seconds between DataStore attempts
 local INDEX_STALE_SECONDS = 15 * 60 -- a record-less index entry younger than this may be mid-create
 local SWEEP_SECONDS = 15
+local RESCAN_SECONDS = 60 -- every loaded player's open index is read again this often
 local RETRY_FIRST_SECONDS = 30
 local RETRY_MAX_SECONDS = 30 * 60
 local CLOSE_WAIT_SECONDS = 25
+local MAX_CRITTER_UID_LENGTH = 64
+local DEBIT_TOPIC = "EscrowDebit" -- DataService message { raidId }: an async debit for a profile held there
+-- The words in a drive's error that mean a step refused a second copy, or two loots met.
+local ALARM_SIGNS = { "duplicate", "conflicting loot", "already used for a" }
+-- Studio only (ServerStorage attributes, read only when RunService:IsStudio()).
+local STUDIO_ASYNC = "StudioAsyncRaids"
+local STUDIO_PAUSE = "StudioEscrowPause"
+local STUDIO_PAUSE_SECONDS = 120
 
 local EscrowService = {}
 
@@ -122,6 +184,9 @@ getOptions.UseCache = false -- recovery must see the latest record, not a 4 s ca
 local busy: { [string]: true } = {} -- raidIds being driven right now in this server
 local retry: { [string]: Retry } = {} -- raids this server left in flight
 local needsIndex: { [number]: Retry } = {} -- loaded players whose index read failed
+local parked: { [string]: number } = {} -- raids left for an absent party's load: raidId -> that party
+local alarmed: { [string]: true } = {} -- raids that raised the duplication alarm: not driven here again
+local nextRescanAt = 0
 
 local function deepCopy(value: any): any
 	if type(value) ~= "table" then
@@ -168,7 +233,7 @@ end
 local function backend(): "DataStore" | "Memory"
 	local decided = storage()
 	if decided == nil then
-		error("escrow storage not ready: DataService has not decided where profiles live", 0)
+		error("escrow storage not ready: DataService not started (or still checking DataStore access)", 0)
 	end
 	return decided
 end
@@ -198,8 +263,9 @@ local function read(key: string): any
 	end)
 end
 
--- transform(stored) returns the new value, or nil to leave the key unchanged.
-local function update(key: string, transform: (any) -> any)
+-- transform(stored) returns the new value, or nil to leave the key unchanged. `userIds`: the
+-- players the key is about, stored with each write for GDPR erasure tooling (decision D-008).
+local function update(key: string, userIds: { number }, transform: (any) -> any)
 	if backend() == "Memory" then
 		local result = transform(deepCopy(memory[key]))
 		if result ~= nil then
@@ -209,7 +275,13 @@ local function update(key: string, transform: (any) -> any)
 	end
 	local store = assert(dataStore, "escrow storage not ready")
 	withRetries(`update {key}`, function()
-		store:UpdateAsync(key, transform)
+		store:UpdateAsync(key, function(stored: any)
+			local value = transform(stored)
+			if value == nil then
+				return nil
+			end
+			return value, userIds
+		end)
 	end)
 end
 
@@ -223,7 +295,7 @@ end
 
 local function saveRecord(record: EscrowRecord)
 	local refusal: string? = nil
-	update(recordKey(record.raidId), function(stored)
+	update(recordKey(record.raidId), { record.raiderUserId, record.defenderUserId }, function(stored)
 		local ok, why = Escrow.canReplace(stored, record)
 		refusal = if ok then nil else why
 		return if ok then record else nil
@@ -239,7 +311,7 @@ end
 local function createRecord(record: EscrowRecord): (EscrowRecord, boolean)
 	local existing: EscrowRecord? = nil
 	local ours = false
-	update(recordKey(record.raidId), function(stored: EscrowRecord?)
+	update(recordKey(record.raidId), { record.raiderUserId, record.defenderUserId }, function(stored: EscrowRecord?)
 		local toWrite, isOurs = Escrow.decideCreate(stored, record)
 		existing, ours = stored, isOurs
 		return toWrite
@@ -248,7 +320,7 @@ local function createRecord(record: EscrowRecord): (EscrowRecord, boolean)
 end
 
 local function indexAdd(userId: number, raidId: string, role: "Raider" | "Defender", createdAt: number)
-	update(indexKey(userId), function(stored: EscrowOpenIndex?)
+	update(indexKey(userId), { userId }, function(stored: EscrowOpenIndex?)
 		return Escrow.indexAdd(stored, raidId, role, createdAt)
 	end)
 end
@@ -257,7 +329,7 @@ end
 -- or after that time (its record may still be being created). Decided inside the transform.
 local function indexRemove(userId: number, raidId: string, staleBefore: number?): boolean
 	local gone = false
-	update(indexKey(userId), function(stored: EscrowOpenIndex?)
+	update(indexKey(userId), { userId }, function(stored: EscrowOpenIndex?)
 		local entry = if stored then stored[raidId] else nil
 		if stored == nil or entry == nil then
 			gone = true
@@ -283,10 +355,13 @@ local function closeIndexes(record: EscrowRecord)
 	end
 end
 
--- Escrow.Store for one raid. Profiles come fresh from DataService each time. `last.record` is a
--- copy of the record as last read or confirmed written, so a drive that errors part-way still
--- knows which party the record needs next.
-local function storeFor(raidId: string, last: { record: EscrowRecord? }): Escrow.Store
+-- What one drive saw: `record`, a copy of the record as last read or confirmed written (so a
+-- drive that errors part-way still knows which party it needs next), and `touched`, the parties
+-- loaded here whose live profile it changed (refreshed after a late drive, D-026).
+type Seen = { record: EscrowRecord?, touched: { [number]: true } }
+
+-- Escrow.Store for one raid. Profiles come fresh from DataService each time.
+local function storeFor(raidId: string, last: Seen): Escrow.Store
 	return {
 		loadRecord = function(id: string): EscrowRecord?
 			local record: EscrowRecord? = read(recordKey(id))
@@ -302,10 +377,13 @@ local function storeFor(raidId: string, last: { record: EscrowRecord? }): Escrow
 			if not profile then
 				error(`profile {userId} is not loaded in this server`, 0)
 			end
+			last.touched[userId] = true
 			-- Money model: accrue before `stored` changes. P2.8 GATE (D-032; docs/contracts.md, Money
 			-- model): before Config.Flags.purchases turns on, pass the player's
 			-- Economy.glowBoostFactor here, or accrue after a call that did. Factor 1 only under-pays
 			-- a boosted window, never over-pays, and today every factor is 1 (purchases is off).
+			-- An Async debit takes its share of `stored` as accrued here, to the debit.
+			-- P2.8: factor 1 until then.
 			Economy.accrue(profile, os.time())
 			return profile
 		end,
@@ -317,12 +395,14 @@ local function storeFor(raidId: string, last: { record: EscrowRecord? }): Escrow
 			if entry == nil then
 				error(`profile {profile.userId} has no entry for {raidId} to save`, 0)
 			end
-			local role, at = entry.role, entry.at
+			-- The exact entry the record will carry (loot included), so another server's save of a
+			-- different debit for this raid never confirms this one (Escrow.sameApplied).
+			local expected = deepCopy(entry)
 			local ok, why = DataService.saveNow(profile.userId, function(saved: any): boolean
 				local applied = type(saved) == "table"
 					and type(saved.appliedTransfers) == "table"
 					and saved.appliedTransfers[raidId]
-				return type(applied) == "table" and applied.role == role and applied.at == at
+				return Escrow.sameApplied(expected, applied)
 			end)
 			if not ok then
 				error(`save not confirmed: {why}`, 0)
@@ -359,13 +439,38 @@ local function storeFor(raidId: string, last: { record: EscrowRecord? }): Escrow
 				error(`void not proven: {why}`, 0)
 			end
 		end,
+		-- Async only: the debit for a defender not loaded here. One atomic write to their saved
+		-- profile while no server holds it (debitDefender is idempotent, so a repeat writes
+		-- nothing and returns the saved entry); held by a server: a message it delivers.
+		debitAbsent = function(record: EscrowRecord, now: number): AppliedTransfer?
+			assert(record.raidId == raidId, "escrow store used for another raid")
+			local defenderId = record.defenderUserId
+			-- Accrues the den to the debit, then debits, inside the one write (a repeat writes nothing).
+			local outcome, result = DataService.updateOffline(defenderId, function(profile: PlayerProfile)
+				return Escrow.debitAbsentProfile(profile, record, now)
+			end)
+			if outcome == "done" then
+				return result
+			elseif outcome == "held" then
+				local sent, why = DataService.sendMessage(defenderId, DEBIT_TOPIC, { raidId = raidId })
+				if not sent then
+					error(`debit message to {defenderId} not confirmed: {why}`, 0)
+				end
+				return nil -- the server that holds the defender delivers it
+			end
+			error(`defender {defenderId} cannot be debited offline ({outcome}): {result}`, 0)
+		end,
 	}
 end
 
--- The party a record needs next: Pending settles where the defender is loaded, Debited where
--- the raider is. With no record seen, `from` (whose index led here).
+-- The party a record needs next: Pending settles where the defender is loaded (an Async one
+-- also from the raider's server, which delivers the debit and waits for it), Debited where the
+-- raider is. With no record seen, `from` (whose index led here).
 local function needFor(record: EscrowRecord?, from: number): number
 	if record and record.state == "Pending" then
+		if Escrow.kindOf(record) == "Async" and not isHere(record.defenderUserId) then
+			return record.raiderUserId
+		end
 		return record.defenderUserId
 	elseif record and record.state == "Debited" then
 		return record.raiderUserId
@@ -373,23 +478,76 @@ local function needFor(record: EscrowRecord?, from: number): number
 	return from
 end
 
+-- Studio only: the StudioEscrowPause checkpoint, so a playtest can stop the server mid-transfer.
+local function studioCheckpoint(raidId: string): ((string) -> ())?
+	if not RunService:IsStudio() then
+		return nil
+	end
+	return function(name: string)
+		if ServerStorage:GetAttribute(STUDIO_PAUSE) ~= name then
+			return
+		end
+		warn(`[EscrowService] Studio pause: {raidId} waits at {name} for up to {STUDIO_PAUSE_SECONDS} s; stop now`)
+		local deadline = os.clock() + STUDIO_PAUSE_SECONDS
+		while ServerStorage:GetAttribute(STUDIO_PAUSE) == name and os.clock() < deadline do
+			task.wait(0.5)
+		end
+	end
+end
+
+-- Pushes DenChanged (IncomeService.refresh) to each party here whose live profile a late drive
+-- changed: a commit the raider's raid call gave up on, or a debit by message (D-026).
+local function refresh(touched: { [number]: true })
+	for userId in touched do
+		local player = Players:GetPlayerByUserId(userId)
+		if player and DataService.getProfile(userId) then
+			task.spawn(function()
+				local ok, err = pcall(IncomeService.refresh, player)
+				if not ok then
+					warn(`[EscrowService] could not refresh {userId}: {err}`)
+				end
+			end)
+		end
+	end
+end
+
+-- A step refused a second copy of a critter, or met two loots for one raid. Stops the raid in
+-- this server (record and profiles stay as they are, for a human) and reports it as an error.
+local function raiseAlarm(raidId: string, message: string)
+	alarmed[raidId] = true
+	retry[raidId] = nil
+	warn(`[EscrowService] DUPLICATION ALARM {raidId}: {message}`)
+	task.spawn(error, `[EscrowService] DUPLICATION ALARM {raidId}: {message}`, 0)
+end
+
 -- Advances one raid as far as it can go. The caller holds busy[raidId]. `live` only for the call
--- that created the record; every other path recovers. `from` is whose index led here.
+-- that created a Live record; every other path (an async transfer too) recovers. `from` is whose
+-- index led here. `late`: not the transfer call itself, so changed parties are refreshed here.
 -- Never reads a kill switch.
-local function drive(raidId: string, from: number, live: boolean): (TransferStatus, string?)
-	local last: { record: EscrowRecord? } = {}
+local function drive(raidId: string, from: number, live: boolean, late: boolean): (TransferStatus, string?)
+	if alarmed[raidId] then
+		return "InFlight", "stopped by a duplication alarm in this server"
+	end
+	local last: Seen = { touched = {} }
 	local store = storeFor(raidId, last)
 	local now = os.time()
+	local checkpoint = studioCheckpoint(raidId)
 	local ok, result = pcall(function(): EscrowRecord?
 		if live then
-			return Escrow.advance(raidId, store, now)
+			return Escrow.advance(raidId, store, now, checkpoint)
 		end
-		return Escrow.recover(raidId, store, now, isHere)
+		return Escrow.recover(raidId, store, now, isHere, checkpoint)
 	end)
+	if late then
+		refresh(last.touched)
+	end
 	if not ok then
 		local message = tostring(result)
-		if string.find(message, "duplicate", 1, true) then
-			warn(`[EscrowService] DUPLICATION ALARM {raidId}: {message}`)
+		for _, sign in ALARM_SIGNS do
+			if string.find(message, sign, 1, true) then
+				raiseAlarm(raidId, message)
+				return "InFlight", message
+			end
 		end
 		retry[raidId] = backoff(retry[raidId], from, needFor(last.record, from))
 		return "InFlight", message
@@ -406,6 +564,7 @@ local function drive(raidId: string, from: number, live: boolean): (TransferStat
 	end
 	if Escrow.isTerminal(record) then
 		retry[raidId] = nil
+		parked[raidId] = nil
 		task.spawn(closeIndexes, record)
 		if record.state == "Voided" then
 			return "Refused", "voided: nothing moved"
@@ -421,14 +580,16 @@ local function driveLocked(raidId: string, from: number)
 		return
 	end
 	busy[raidId] = true
-	local status, reason = drive(raidId, from, false)
+	local status, reason = drive(raidId, from, false, true)
 	busy[raidId] = nil
 	if status == "InFlight" then
 		warn(`[EscrowService] {raidId} still in flight: {reason}`)
 	end
 end
 
-local function recoverUser(userId: number)
+-- Reads a loaded player's open index and drives each raid in it. A `rescan` (the 60 s sweep)
+-- leaves raids under their own backoff here, and raids parked for an absent party, alone.
+local function recoverUser(userId: number, rescan: boolean?)
 	local ok, result = pcall(read, indexKey(userId))
 	if not ok or storage() == nil then
 		needsIndex[userId] = backoff(needsIndex[userId], userId, userId)
@@ -443,6 +604,11 @@ local function recoverUser(userId: number)
 		Escrow.pruneApplied(profile, os.time(), open)
 	end
 	for raidId in open do
+		local waitingFor = parked[raidId]
+		if rescan and (retry[raidId] or (waitingFor and not isHere(waitingFor))) then
+			continue
+		end
+		parked[raidId] = nil
 		driveLocked(raidId, userId)
 	end
 end
@@ -462,15 +628,30 @@ local function sweep()
 		end
 		if not isHere(entry.need) then
 			retry[raidId] = nil -- the party it needs settles it from their own index on load
+			parked[raidId] = entry.need
 			continue
 		end
 		driveLocked(raidId, entry.from)
+	end
+	if clock >= nextRescanAt then
+		nextRescanAt = clock + RESCAN_SECONDS
+		for _, player in Players:GetPlayers() do
+			local userId = player.UserId
+			if isHere(userId) and needsIndex[userId] == nil then
+				task.spawn(recoverUser, userId, true) -- one player's error never stops the rest
+			end
+		end
 	end
 end
 
 -- The ONLY code in this service that reads a kill switch. Recovery never calls it.
 function EscrowService.canStartTransfer(kind: TransferKind, isRevenge: boolean?): (boolean, string?)
-	return Escrow.canStartTransfer(Config.Flags, kind, isRevenge)
+	local switches: Escrow.KillSwitches = Config.Flags
+	if RunService:IsStudio() and ServerStorage:GetAttribute(STUDIO_ASYNC) == true then
+		-- Studio playtests only: asyncRaids counts as on; the master switch still applies.
+		switches = { raids = Config.Flags.raids, asyncRaids = true }
+	end
+	return Escrow.canStartTransfer(switches, kind, isRevenge)
 end
 
 local function startOrResume(
@@ -519,7 +700,7 @@ local function startOrResume(
 			return "Refused", "raidId already used by a different transfer"
 		end
 		local _, ours = Escrow.decideCreate(existing, record)
-		return drive(raidId, raiderUserId, ours)
+		return drive(raidId, raiderUserId, ours, false)
 	end
 	if awaiting and not awaiting.nonce then
 		return "InFlight", "an earlier attempt's record may still land; recovery decides"
@@ -554,7 +735,7 @@ local function startOrResume(
 	if not Escrow.sameTransfer(stored, record) then
 		return "Refused", "raidId already used by a different transfer"
 	end
-	local status, reason = drive(raidId, raiderUserId, ours)
+	local status, reason = drive(raidId, raiderUserId, ours, false)
 	local entry = retry[raidId]
 	if ours and entry then
 		entry.nonce = nonce -- still in flight: the caller's retry continues as this call
@@ -577,7 +758,10 @@ function EscrowService.transferLive(
 	if busy[raidId] then
 		return "InFlight", "already being advanced"
 	end
-	if storage() == nil then
+	-- Undecided (DataService not started, or ProfileStore still checking), or storage() failed:
+	-- refuse before any write (D-026).
+	local ready, decided = pcall(storage)
+	if not ready or decided == nil then
 		return "Refused", "escrow storage not ready" -- no profile can be loaded yet either
 	end
 	busy[raidId] = true -- held from before the first write until the drive ends
@@ -596,6 +780,117 @@ function EscrowService.transferLive(
 		return "InFlight", `could not confirm the raid's state; retry with the same raidId: {status}`
 	end
 	return status, reason
+end
+
+-- An async raid's escape (transferAsync). An existing record for the raidId is driven, never
+-- re-gated. A new one: kill switch, raider here, both indexes, the record, then recovery, which
+-- delivers the debit wherever the defender is and never voids an Async record.
+local function startAsync(
+	raidId: string,
+	raiderUserId: number,
+	defenderUserId: number,
+	critterUid: string?,
+	glowRequested: number,
+	isRevenge: boolean
+): (TransferStatus, string?)
+	if type(raiderUserId) ~= "number" or type(defenderUserId) ~= "number" or raiderUserId == defenderUserId then
+		return "Refused", "raider and defender must be two different players"
+	end
+	if
+		critterUid ~= nil and (type(critterUid) ~= "string" or #critterUid == 0 or #critterUid > MAX_CRITTER_UID_LENGTH)
+	then
+		return "Refused", "critterUid must be nil or a critter uid"
+	end
+	if type(glowRequested) ~= "number" or not (glowRequested >= 0 and glowRequested < math.huge) then
+		return "Refused", "glowRequested must be a finite number >= 0"
+	end
+	local now = os.time()
+	local record = Escrow.create(
+		raidId,
+		raiderUserId,
+		defenderUserId,
+		critterUid,
+		math.floor(glowRequested),
+		isRevenge,
+		now,
+		"Async"
+	)
+	record.createNonce = HttpService:GenerateGUID(false)
+
+	-- Nothing is written before this read; unless an earlier call for the raid is still awaited
+	-- here, a failed read moved nothing.
+	local readOk, existing = pcall(read, recordKey(raidId))
+	if not readOk then
+		local earlier = retry[raidId] ~= nil or parked[raidId] ~= nil
+		return if earlier then "InFlight" else "Refused", `could not read the raid's record: {existing}`
+	end
+	if existing then
+		if not Escrow.sameTransfer(existing, record) then
+			return "Refused", "raidId already used by a different transfer"
+		end
+		return drive(raidId, raiderUserId, false, false)
+	end
+
+	-- A new raid: the only place a kill switch applies.
+	local allowed, why = EscrowService.canStartTransfer("Async", isRevenge)
+	if not allowed then
+		return "Refused", why
+	end
+	if not isHere(raiderUserId) then
+		return "Refused", "the raider must be loaded in this server"
+	end
+	local indexed, indexError = pcall(function()
+		indexAdd(raiderUserId, raidId, "Raider", now)
+		indexAdd(defenderUserId, raidId, "Defender", now)
+	end)
+	if not indexed then
+		return "Refused", `could not start: {indexError}`
+	end
+	local created, stored = pcall(createRecord, record)
+	if not created then
+		retry[raidId] = backoff(retry[raidId], raiderUserId, raiderUserId)
+		return "InFlight", `record create not confirmed: {stored}`
+	end
+	if not Escrow.sameTransfer(stored, record) then
+		return "Refused", "raidId already used by a different transfer"
+	end
+	return drive(raidId, raiderUserId, false, false)
+end
+
+function EscrowService.transferAsync(
+	raidId: string,
+	raiderUserId: number,
+	defenderUserId: number,
+	critterUid: string?,
+	glowRequested: number,
+	isRevenge: boolean?
+): (TransferStatus, string?)
+	if type(raidId) ~= "string" or #raidId == 0 or #raidId > MAX_RAID_ID_LENGTH then
+		return "Refused", `raidId must be 1 to {MAX_RAID_ID_LENGTH} characters`
+	end
+	if busy[raidId] then
+		return "InFlight", "already being advanced"
+	end
+	local ready, decided = pcall(storage)
+	if not ready or decided == nil then
+		return "Refused", "escrow storage not ready"
+	end
+	busy[raidId] = true
+	local ok, status, reason =
+		pcall(startAsync, raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge == true)
+	busy[raidId] = nil
+	if not ok then
+		return "InFlight", `could not confirm the raid's state; retry with the same raidId: {status}`
+	end
+	return status, reason
+end
+
+-- Studio only: the stored record for a raid, read-only (playtest checks).
+function EscrowService.studioRecord(raidId: string): EscrowRecord?
+	if not RunService:IsStudio() then
+		error("EscrowService.studioRecord is Studio-only")
+	end
+	return read(recordKey(raidId))
 end
 
 -- Why a Studio test profile must not be released yet (an escrow for it is open here), or nil.
@@ -625,11 +920,24 @@ function EscrowService.start()
 	DataService.onProfileLoaded(function(player: Player)
 		recoverUser(player.UserId)
 	end)
+	-- An async debit for a profile loaded here, from the raider's server. Only a wake-up: the
+	-- record decides, so a repeat, a late one, or one for a settled raid changes nothing.
+	DataService.onMessage(DEBIT_TOPIC, function(userId: number, data: any)
+		local raidId = if type(data) == "table" then data.raidId else nil
+		if type(raidId) ~= "string" or #raidId == 0 or #raidId > MAX_RAID_ID_LENGTH then
+			warn(`[EscrowService] ignoring a malformed debit message for {userId}`)
+			return
+		end
+		task.spawn(driveLocked, raidId, userId)
+	end)
 	DataService.guardTestRelease(openEscrowFor)
 	task.spawn(function()
 		while true do
 			task.wait(SWEEP_SECONDS)
-			sweep()
+			local ok, err = pcall(sweep) -- an error never stops recovery on this server
+			if not ok then
+				warn(`[EscrowService] sweep failed; retrying next tick: {err}`)
+			end
 		end
 	end)
 	game:BindToClose(function()
