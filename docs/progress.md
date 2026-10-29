@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 0 → 1 (Phase 0 gate approved, follow-ups done, main promoted; Phase 1 not started, waiting for Kian) · Last updated: 2026-10-28
+Current phase: 1 (running) · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -41,9 +41,22 @@ Current phase: 0 → 1 (Phase 0 gate approved, follow-ups done, main promoted; P
 Read `docs/orchestrator-handoff.md` first; it is the current state. Follow the playbook's
 "Context discipline" (section 2).
 
-## Phase 1: Async core (not started; entry needs the Phase 0 gate)
+## Phase 1: Async core (parallelism 4)
 
-P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
+Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
+
+| Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| P1.1 | data | — | In progress | agent/data/P1.1 | 1 | Carries D-008, D-012 #6, D-026 TODOs, C5 day-high check |
+| P1.2 | matchmaking | P1.1 | Todo | | | |
+| P1.3 | raid | P1.1, P1.2 | Todo | | | |
+| P1.4 | raid | P1.3 | Todo | | | |
+| P1.5 | ui | — | In progress | agent/ui/P1.5 | 1 | Mock data behind Net |
+| P1.6 | ui | P1.3, P1.5 | Todo | | | |
+| P1.7 | economy | — | In progress | agent/economy/P1.7 | 1 | Tuning approved by orchestrator within design-doc ranges (D-041) |
+| P1.8 | economy | P1.7 | Todo | | | |
+| P1.9 | matchmaking | P1.2 | Todo | | | Live check needs two servers or a private publish (Kian) |
+| P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
 
 ## Setup notes
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil

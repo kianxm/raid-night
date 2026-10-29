@@ -3,6 +3,16 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-041 · 2026-10-29 · Phase 1 runs unattended overnight (Kian)
+Context: Kian started Phase 1 and is away overnight. Decision: the orchestrator makes every
+technical call under the decision policy and logs it here. Steps that need a human or a live
+environment (multi-client or two-server runs, a private publish, Creator Dashboard) are skipped
+and listed under "Needs Kian" in the gate report; ready tasks keep running. P1.7's tuning stop is
+approved by the orchestrator when every proposed value sits inside the design doc's ranges
+(Config only, reversible); anything outside them waits for Kian. Irreversible choices that could
+go either way are prepared, not taken. Why: keep the phase moving without crossing Kian's
+decisions. Reversible: yes (Kian can overturn any entry at the gate).
+
 ### D-039 · 2026-10-29 · Process speed-ups (Kian)
 Context: ~24 h of Phase 0 produced 77 PRs, 25 of them ledger-only; the live-protection chain
 (P0.5g to C5, ~3,200 lines, D-033 to D-037) was reviewer rounds on edge cases that lose nothing,
