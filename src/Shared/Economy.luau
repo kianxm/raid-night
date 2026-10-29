@@ -222,6 +222,8 @@ end
 	Moves an owned critter to a Pad (with `padIndex`), the Vault or Inventory. A critter moved
 	onto an occupied pad swaps with the occupant, which takes the mover's old spot, so no slot
 	limit can be broken by a swap. Guard placement is not available yet (no guard slots exist).
+	`isLocked(uid)` marks critters that must not move (a raider is carrying them): a placement
+	never moves a locked critter, neither as the mover nor as a swap's displaced occupant.
 	Accrues first. Returns false and a reason, without changing anything, if the move is invalid.
 ]]
 function Economy.place(
@@ -230,11 +232,15 @@ function Economy.place(
 	placement: Placement,
 	padIndex: number?,
 	physicalPads: number,
-	now: number
+	now: number,
+	isLocked: ((uid: string) -> boolean)?
 ): (boolean, string?)
 	local critter = profile.critters[uid]
 	if not critter then
 		return false, "not your critter"
+	end
+	if isLocked and isLocked(uid) then
+		return false, "critter is busy"
 	end
 	local occupant: Critter? = nil
 	if placement == "Pad" then
@@ -243,6 +249,9 @@ function Economy.place(
 			return false, "pad is locked or does not exist"
 		end
 		occupant = Economy.padOccupant(profile, padIndex)
+		if occupant and occupant ~= critter and isLocked and isLocked(occupant.uid) then
+			return false, "pad is busy"
+		end
 	elseif placement == "Vault" then
 		if critter.placement ~= "Vault" and Economy.vaultCount(profile) >= profile.vaultSlots then
 			return false, "vault is full"
