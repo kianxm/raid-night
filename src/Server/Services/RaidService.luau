@@ -622,11 +622,12 @@ function RaidService.start()
 			return (ownerOf(plot))
 		end,
 		rootOf,
-		function(player: Player)
+		function(player: Player, delta: Vector3)
+			-- Shift the last sample by exactly the server's push: the next sample then charges the
+			-- client for what it moved, and never for what the server moved.
 			local carry = carries[player]
-			local root = rootOf(player)
-			if carry and root then
-				carry.lastPos = root.Position -- a server push-back is not a teleport by the client
+			if carry then
+				carry.lastPos += delta
 			end
 		end
 	)
