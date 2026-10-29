@@ -323,7 +323,7 @@ async, for the raid log and the async cap. Values live in `Config.LiveRaid` (tab
      The grab was accepted only while the den was open against the den as it was then. So an
      owner who refilled, was alerted by the grab and moved earners off during the carry cannot
      make the debit take nothing. The grab-time rate only raises the line. A record without a
-     valid one (older records, Async) is checked against the den as it is at the debit.
+     valid one is checked against the den as it is at the debit.
      `canGrabLive` and the den attribute are unchanged: at a grab, the den's rate now is the
      grab-time rate.
 4. **Escrow.** Live steals keep moving critters through `Escrow.luau`, on the two profiles

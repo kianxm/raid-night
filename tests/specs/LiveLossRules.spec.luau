@@ -587,6 +587,28 @@ tests["the grab-time rate only raises the line; nil or a bad value is ignored (D
 	expect.falsy(RaidRules.liveProtectedAtDebit(foxDen(), NOW, 0))
 end
 
+tests["a den a refill reopened still refuses the pair's third steal and grabs in the safety window"] = function()
+	local owner = foxDen()
+	local raider, other = 1, 3
+	steal(owner, raider, "fox1", NOW, 100)
+	local lastLoss = NOW + 60
+	steal(owner, raider, "fox2", lastLoss, 100) -- the pair's second live steal today: 50 of 100
+	expect.truthy(RaidRules.liveProtected(owner, lastLoss))
+	fixtures.give(owner, fixtures.critter("king", "king_bandit", "Inventory"))
+	refill(owner, "king", 1, lastLoss + 10)
+	expect.falsy(RaidRules.liveProtected(owner, lastLoss + 10), "the refill reopened the den: 50 of 650")
+
+	-- Within the 60 s after the last loss, nobody can grab, the refill notwithstanding.
+	local soon = lastLoss + Live.postLossSafetySeconds - 1
+	expect.eq(select(2, canGrab(owner, other, 3, soon, lastLoss)), Reason.PostLossSafety, "inside the window")
+	local ready = RaidRules.liveGrabReadyAt(lastLoss)
+	expect.truthy((canGrab(owner, other, 3, ready, lastLoss)), "another raider once the window is over")
+	-- The same pair has had its two live steals today: a third is refused, however long it waits.
+	expect.eq(select(2, canGrab(owner, raider, 3, ready, lastLoss)), Reason.PairLimit, "the pair's third")
+	expect.eq(select(2, canGrab(owner, raider, 1, DAY_START + DAY - 1, lastLoss)), Reason.PairLimit, "all day")
+	expect.truthy((canGrab(owner, raider, 3, DAY_START + DAY, lastLoss)), "until the UTC day rolls")
+end
+
 tests["only the escrow debit counts the record's rate; RaidService never does (D-037)"] = function()
 	local escrow = source.codeOnly(source.read("src/Shared/Escrow.luau"))
 	local debitBody = source.functionBody(escrow, "Escrow.debitDefender") or ""
