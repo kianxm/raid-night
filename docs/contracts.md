@@ -297,7 +297,8 @@ counts every loss, live and async. Values live in `Config.LiveRaid` (table above
 
 Profile fields, both belonging to `lossDay` and reset to nil when the day rolls
 (`RaidRules.resetDailyIfNeeded`, on load and before every debit). Missing means no live loss
-today, so the den is not protected; no migration, and `Profile.spec` checks an old save:
+today, so the den is not protected; no migration and no `SCHEMA_VERSION` bump, and
+`Profile.spec` checks an old save:
 
 | Field | Meaning |
 | --- | --- |
@@ -306,13 +307,15 @@ today, so the den is not protected; no migration, and `Profile.spec` checks an o
 
 Pure rules in `RaidRules` (the server always decides):
 
-- `liveProtected(profile, now)`: read-only; rule 3's line on the profile as it is at the call.
+- `liveProtected(profile, now)`: read-only; true when `lossDay` is today and rule 3's line
+  holds, on the profile as it is at the call.
   Used by `canGrabLive` (every hold frame) and RaidService's `LiveProtected` attribute and steal
   prompts (every 0.5 s). A NaN in either field, or in the den's rate, counts as protected; a
   missing field means not protected, however small the den.
 - `liveProtectedAtDebit(profile, now, grabRate?)`: the same with `grabRate` (the record's
   `liveBaseRate`) in the `max`. Only `Escrow.debitDefender` calls it, with the targeted critter
-  still in the den. A `grabRate` that is not a finite number >= 0 counts as none.
+  still in the den. A `grabRate` that is not a finite number >= 0 counts as none
+  (`Escrow.create` refuses those anyway, via `Escrow.checkLiveBaseRate`).
 - `recordLiveLoss(defender, critter, now, grabBaseRate?)`: called by `Escrow.debitDefender` for a
   Live debit that takes a critter, before the critter leaves the profile. On the day's first
   loss it sets the base from `grabBaseRate` when that is a finite number >= 0, else from
