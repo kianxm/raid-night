@@ -24,6 +24,7 @@ local LanternBanner = require(Client:WaitForChild("Hud"):WaitForChild("LanternBa
 local Request = require(Client:WaitForChild("Request"))
 local MenuController = require(script.Parent:WaitForChild("MenuController")) :: any
 local GearController = require(script.Parent:WaitForChild("GearController")) :: any
+local OnboardingController = require(script.Parent:WaitForChild("OnboardingController")) :: any
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
 local ShopController = {}
@@ -257,7 +258,7 @@ function ShopController.start()
 					return
 				end
 				refreshExtras(state)
-				local price = Economy.eggPrice(state.denLevel)
+				local price = Economy.paidEggPrice(state.denLevel, OnboardingController.getStatus())
 				local free = HudMath.isRescue(#state.critters, state.glow, state.stored, price)
 				local egg = ShopMath.egg(state.glow, price, free)
 				eggTitle.Text = if free then Strings.shopEggFree else Strings.shopEggTitle

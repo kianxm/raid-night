@@ -25,6 +25,7 @@ local Hud = script.Parent.Parent:WaitForChild("Hud")
 local Ui = require(script.Parent.Parent:WaitForChild("Raid"):WaitForChild("Ui"))
 local Strings = require(Hud:WaitForChild("Strings"))
 local HudMath = require(Hud:WaitForChild("HudMath"))
+local OnboardingController = require(script.Parent:WaitForChild("OnboardingController")) :: any
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
 local LOCKDOWN_REMOTE = Net.Requests.Lockdown
@@ -482,7 +483,7 @@ function HudController.start()
 		if state then
 			local elapsed = os.clock() - receivedAt
 			local stored = HudMath.predictStored(state.stored, state.storageCap, state.ratePerSecond, elapsed)
-			local price = Economy.eggPrice(state.denLevel)
+			local price = Economy.paidEggPrice(state.denLevel, OnboardingController.getStatus())
 			local free = HudMath.isRescue(#state.critters, state.glow, stored, price)
 
 			ui.glowText.Text = HudMath.abbreviate(state.glow) .. " " .. Strings.glow
