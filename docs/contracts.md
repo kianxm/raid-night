@@ -19,6 +19,12 @@ the why. Update it in the same commit as any contract change.
 | Profile per user | `PlayerProfile` | DataService only (session-locked) | Others send messages |
 | Snapshot per user | `DenSnapshot` | SnapshotService | Never includes vault critters |
 | Escrow per raidId | `EscrowRecord` | EscrowService | Write-once create, then state moves forward only |
+| Open escrows per raider | `{ [raidId]: createdAt }` | EscrowService | Recovery index; added before the record, removed once terminal |
+
+Escrow storage: DataStore `EscrowRecords`, keys `Escrow_<raidId>` (raidId at most 43 characters)
+and `Open_<raiderUserId>`. Forward-only is enforced by `Escrow.canReplace` inside every
+`UpdateAsync`. In Studio without API access (`DataService.persistence() == "Memory"`) both live
+in server memory, like profiles do.
 
 ## Money model
 
@@ -48,19 +54,24 @@ simulation must still pass, and the `reviewer` agent must sign off.
 ## Kill switches
 
 `Config.Flags` holds one boolean per feature. `false` turns the feature off everywhere. Services
-read `Config.Flags.<name>` directly and check it before acting on a request.
+read `Config.Flags.<name>` directly and check it before acting on a request. Raid and transfer
+starts go through the pure `Escrow.canStartTransfer(Config.Flags, kind, isRevenge)`, which
+EscrowService and RaidService both call.
 
 | Flag | Gates | Default |
 | --- | --- | --- |
-| `raids` | Live stealing (RaidService) and new `Live` escrow transfers | `true` |
-| `asyncRaids` | Offline raids in pocket dens and new `Async` escrow transfers | `false` |
+| `raids` | Master switch: starting any raid or escrow transfer of any kind (live, async, revenge) | `true` |
+| `asyncRaids` | Additionally gates async raids and revenge raids (new `Async` transfers, and any transfer with `isRevenge`); needs `raids` on too | `false` |
 | `purchases` | Robux products (PurchaseService) | `false` |
 | `trading` | Trading (post-launch) | `false` |
 | `notifications` | Experience notifications (NotificationService) | `false` |
 
-Defaults turn on only the features that exist. Escrow recovery is never gated: records already
-in `Pending` or `Debited` always advance, so turning a flag off cannot strand loot in flight.
-Adding a flag is a contract change.
+Unknown transfer kinds are always refused. Switches block STARTING new raids and transfers only.
+Escrow recovery and transfers already in flight are never gated: records in `Pending` or
+`Debited` always advance to completion, so turning a flag off cannot strand loot in flight.
+Raid semantics approved by Kian 2026-10-28 (relayed by the orchestrator in P0.3b).
+
+Defaults turn on only the features that exist. Adding a flag is a contract change.
 
 ## Schema changes
 

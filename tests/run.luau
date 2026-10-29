@@ -55,6 +55,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "EscrowKillSwitch",
+		load = function()
+			return require("./specs/EscrowKillSwitch.spec")
+		end,
+	},
+	{
 		name = "EscrowSimulation",
 		load = function()
 			return require("./specs/EscrowSimulation.spec")

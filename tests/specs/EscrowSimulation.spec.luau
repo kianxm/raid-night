@@ -80,6 +80,10 @@ local function newWorld(seed: number)
 			return if r then deepCopy(r) else nil
 		end,
 		saveRecord = function(record)
+			-- The server's record store refuses any write that is not a forward move; every write
+			-- the driver makes, including after crashes and duplicates, must pass the same rule.
+			local ok, why = Escrow.canReplace(records[record.raidId], record)
+			assert(ok, `record store refused {record.raidId}: {why}`)
 			records[record.raidId] = deepCopy(record)
 		end,
 		loadProfile = function(userId)

@@ -132,4 +132,49 @@ tests["old idempotency entries are pruned after the retention window"] = functio
 	expect.eq(Escrow.pruneApplied(raider, NOW + Config.Escrow.appliedTransferRetentionSeconds + 1), 1)
 end
 
+-- Snapshots of one record at each state, for the record-store rule.
+local function stages()
+	local raider, defender, record = setup()
+	local pending = table.clone(record)
+	Escrow.markDebited(record, Escrow.debitDefender(defender, record, NOW), NOW)
+	local debited = table.clone(record)
+	Escrow.creditRaider(raider, record, NOW)
+	Escrow.markCommitted(record, NOW)
+	local voided = table.clone(pending)
+	voided.state = "Voided"
+	return pending, debited, table.clone(record), voided
+end
+
+tests["the record store creates only Pending records"] = function()
+	local pending, debited = stages()
+	expect.truthy(Escrow.canReplace(nil, pending), "create")
+	expect.falsy(Escrow.canReplace(nil, debited), "a Debited record with nothing stored")
+end
+
+tests["the record store accepts forward moves and repeats, and refuses going back"] = function()
+	local pending, debited, committed, voided = stages()
+	expect.truthy(Escrow.canReplace(pending, debited), "Pending -> Debited")
+	expect.truthy(Escrow.canReplace(debited, committed), "Debited -> Committed")
+	expect.truthy(Escrow.canReplace(pending, voided), "Pending -> Voided")
+	expect.truthy(Escrow.canReplace(debited, debited), "repeat")
+	expect.falsy(Escrow.canReplace(committed, debited), "Committed -> Debited")
+	expect.falsy(Escrow.canReplace(debited, pending), "Debited -> Pending")
+	expect.falsy(Escrow.canReplace(debited, voided), "Debited -> Voided would strand loot")
+	expect.falsy(Escrow.canReplace(voided, debited), "Voided -> Debited")
+end
+
+tests["the record store refuses a different transfer or different loot under the same raidId"] = function()
+	local pending, debited = stages()
+	local other = table.clone(pending)
+	other.raiderUserId = 99
+	expect.falsy(Escrow.canReplace(pending, other), "different raider")
+	expect.falsy(Escrow.sameTransfer(pending, other))
+	local moreGlow = table.clone(debited)
+	moreGlow.glow += 1
+	expect.falsy(Escrow.canReplace(debited, moreGlow), "different Glow")
+	local noCritter = table.clone(debited)
+	noCritter.critter = nil
+	expect.falsy(Escrow.canReplace(debited, noCritter), "different critter")
+end
+
 return tests

@@ -218,6 +218,75 @@ function Escrow.isTerminal(record: EscrowRecord): boolean
 end
 
 --[[
+	Kill switches (docs/contracts.md, approved by Kian 2026-10-28): may a NEW raid or transfer of
+	this kind start? `raids` is the master switch for every kind. "Async" raids, and any revenge
+	raid, also need `asyncRaids`. Unknown kinds are refused. Pass `Config.Flags` in.
+
+	Switches only stop new transfers. Nothing below (advance and its steps) reads a flag, so a
+	record already in Pending or Debited always finishes.
+]]
+export type KillSwitches = { raids: boolean, asyncRaids: boolean }
+
+function Escrow.canStartTransfer(flags: KillSwitches, kind: string, isRevenge: boolean?): (boolean, string?)
+	if kind ~= "Live" and kind ~= "Async" then
+		return false, `unknown transfer kind {kind}`
+	end
+	if not flags.raids then
+		return false, "raids are switched off"
+	end
+	if (kind == "Async" or isRevenge) and not flags.asyncRaids then
+		return false, if isRevenge then "revenge raids are switched off" else "async raids are switched off"
+	end
+	return true, nil
+end
+
+-- Whether two records describe the same transfer (same raid, parties and request).
+function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
+	return a.raidId == b.raidId
+		and a.raiderUserId == b.raiderUserId
+		and a.defenderUserId == b.defenderUserId
+		and a.critterUid == b.critterUid
+		and a.glowRequested == b.glowRequested
+end
+
+local FORWARD: { [string]: { [string]: true } } = {
+	Pending = { Pending = true, Debited = true, Voided = true },
+	Debited = { Debited = true, Committed = true },
+	Committed = { Committed = true },
+	Voided = { Voided = true },
+}
+
+--[[
+	The record store's write rule: may `incoming` replace `stored` (nil = no record yet)? A record
+	is created once, in Pending, and then only moves forward along the state machine. A repeat of
+	the same state is allowed only if it agrees on the loot. Pure; the server checks it inside its
+	DataStore update, and the simulation's store asserts it on every write.
+]]
+function Escrow.canReplace(stored: EscrowRecord?, incoming: EscrowRecord): (boolean, string?)
+	if stored == nil then
+		if incoming.state == "Pending" then
+			return true, nil
+		end
+		return false, `no record to move to {incoming.state}`
+	end
+	if not Escrow.sameTransfer(stored, incoming) then
+		return false, "a different transfer already uses this raidId"
+	end
+	local allowed = FORWARD[stored.state]
+	if not allowed or not allowed[incoming.state] then
+		return false, `cannot move from {stored.state} to {incoming.state}`
+	end
+	if stored.state == "Debited" or stored.state == "Committed" then
+		local storedUid = if stored.critter then stored.critter.uid else nil
+		local incomingUid = if incoming.critter then incoming.critter.uid else nil
+		if storedUid ~= incomingUid or stored.glow ~= incoming.glow then
+			return false, "conflicting loot for this raidId"
+		end
+	end
+	return true, nil
+end
+
+--[[
 	Drives a record to a terminal state, one single-key write at a time. Safe to call any
 	number of times, from any server, after any crash. `checkpoint`, if given, is called after
 	every save; the simulation uses it to inject crashes.
