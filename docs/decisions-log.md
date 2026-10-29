@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-042 · 2026-10-29 · P1.2 runs alongside P1.1; tools/sim goes to economy
+Context: P1.2 lists P1.1 as a dependency, but snapshots, pools, locks and presence live in
+matchmaking's own files and only read DataService as it is. Decision: start P1.2 in parallel
+with P1.1; it must not depend on new P1.1 code. P1.3 still waits for both. `tools/sim/**` is
+owned by economy (P1.7). Why: P1.1 is the critical path; this fills the fourth slot without
+sharing files. Reversible: yes (process).
+
 ### D-041 · 2026-10-29 · Phase 1 runs unattended overnight (Kian)
 Context: Kian started Phase 1 and is away overnight. Decision: the orchestrator makes every
 technical call under the decision policy and logs it here. Steps that need a human or a live

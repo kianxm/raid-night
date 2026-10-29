@@ -48,7 +48,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | P1.1 | data | — | In progress | agent/data/P1.1 | 1 | Carries D-008, D-012 #6, D-026 TODOs, C5 day-high check |
-| P1.2 | matchmaking | P1.1 | Todo | | | |
+| P1.2 | matchmaking | P1.1 | In progress | agent/matchmaking/P1.2 | 1 | Runs alongside P1.1 (D-042) |
 | P1.3 | raid | P1.1, P1.2 | Todo | | | |
 | P1.4 | raid | P1.3 | Todo | | | |
 | P1.5 | ui | — | In progress | agent/ui/P1.5 | 1 | Mock data behind Net |
