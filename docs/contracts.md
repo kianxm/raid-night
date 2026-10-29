@@ -66,6 +66,37 @@ Escrow storage: DataStore `EscrowRecords`.
 - `stored`: Glow in the den. Accrues lazily. Stealable (25% per raid, capped by what is there).
 - `glow`: banked Glow. Never stealable. Loot lands here (safe once home).
 - Always `Economy.accrue` before changing placements or den level.
+- **Earned.** One critter earns its species base × mutation × placement × rebirth Glow per
+  second (`Economy.critterRate`). Placement is 1 on a Pad, `Config.Income.vaultMultiplier` in
+  the Vault, and 0 as a Guard or in Inventory. A den earns the sum (`Economy.denRate`).
+  Robux-linked boosts (D-030, D-032) multiply what is earned:
+  earned = base × mutation × placement × rebirth × factor. The factor is
+  `Economy.glowBoostFactor(...)` (see Robux-linked Glow multipliers), and it applies only
+  through `Economy.accrue(profile, now, factor?)` and `Economy.collect(profile, now, factor?)`.
+- **The factor is clamped.** It defaults to 1. A factor outside
+  `[1, Economy.maxGlowBoostFactor()]` (1 + `vipGlowBonus` + `lanternNightGlowBonus`, so 2.0 at
+  launch) counts as 1: nil, 0, negatives, NaN, inf, 1e300. So a bad value can never remove
+  Glow, stop earning, or pay more than every boost together.
+- **Cap rule.** The storage cap never uses the factor. It is the unboosted
+  `denRate(profile) × storageCapSeconds(denLevel)` (`Economy.storageCap`). A boost fills
+  storage faster, never deeper, so a boost ending never leaves stored Glow above the cap and
+  nothing is clawed back. Accrue never removes Glow already stored, even if the cap shrank.
+- **Timing rule.** Treat the factor like the rate: always call
+  `Economy.accrue(profile, now, oldFactor)` before the factor changes. That covers Lantern
+  Night starting or ending, VIP ownership becoming known (or bought mid-session), the
+  PolicyService result arriving, and the player joining or leaving a server with an active
+  Lantern Night. Accrual pays one factor for the whole elapsed period, so a late accrue at the
+  new factor would boost (or un-boost) time already earned. Economy functions that accrue
+  internally (`place`, `autoPlace`, `upgradeDen`, `buyEgg`, and `collect` without a factor)
+  use factor 1. A server running a boost therefore accrues with the factor first, and their
+  internal accrue is then a no-op because no time has passed.
+- **A NaN `now` changes nothing.** `accrue` returns 0 and leaves `stored` and
+  `storedUpdatedAt` as they were.
+- `Net.DenState.ratePerSecond` and `storageCap` are unboosted (`denRate`, `storageCap`).
+  Showing a boosted rate would be a contract change.
+- **P2.8 gate.** `EscrowService` and `Matchmaking` still accrue at factor 1. Both must pass
+  the player's factor, or accrue after a call that did, before `Config.Flags.purchases` turns
+  on. This is a hard gate for P2.8, not an optional TODO.
 
 ## Escrow
 
@@ -164,7 +195,7 @@ EscrowService and RaidService must call it before starting any raid or transfer.
 | --- | --- | --- |
 | `raids` | Master switch: starting any raid or escrow transfer of any kind (live, async, revenge) | `true` |
 | `asyncRaids` | Additionally gates async raids and revenge raids (new `Async` transfers, and any transfer with `isRevenge`); needs `raids` on too | `false` |
-| `purchases` | Robux products (PurchaseService) | `false` |
+| `purchases` | Robux products (PurchaseService), and Robux-linked Glow multipliers (`Economy.glowBoostFactor`'s `purchasesEnabled`, D-032) | `false` |
 | `trading` | Trading (post-launch) | `false` |
 | `notifications` | Experience notifications (NotificationService) | `false` |
 
@@ -294,8 +325,8 @@ The pure rules live in `RaidRules`, and the server always decides:
 RaidService (P0.5h) measures the grab-time base: `Economy.denRate(ownerProfile)` when it
 accepts the grab request, before the hold starts and before `BeingRaidedLive` reaches the owner.
 It keeps that value with the carry and passes it as `transferLive`'s last argument on every
-attempt (D-034). Until it does, live records carry no base, and the debit measures the den
-instead.
+attempt (D-034). So every new live record carries a grab-time base. Records without one are
+older records or async ones, and their debit falls back to `denRate` at the debit.
 
 RaidService (P0.5h) shows the state with the den attributes `LiveProtected` and
 `LiveGrabReadyAt` (see Replicated attributes). They are for display only: the server decides
@@ -357,8 +388,23 @@ PolicyService can't be read for a player, treat them as restricted (no Robux-lin
 multiplier). The multiplier is computed by Economy (pure, tested) and applied through
 Economy.accrue's factor (economy's P0.12).
 
-The restriction is `ArePaidRandomItemsRestricted` in the player's PolicyService info. Values
-live in `Config.Boosts`:
+The restriction is `ArePaidRandomItemsRestricted` in the player's PolicyService info.
+
+`Economy.glowBoostFactor({ vip, lanternNight, paidRandomRestricted?, purchasesEnabled })`
+(type `Economy.GlowBoostInputs`) turns a player's boosts into one factor. The fields are named,
+not positional, so the two policy booleans cannot be swapped. It returns 1 (no boost) when:
+
+- `paidRandomRestricted` is not `false`. `true` or nil both count: nil means PolicyService
+  has not answered or could not be read, and that fails closed.
+- `purchasesEnabled` is not `true`. Callers pass `Config.Flags.purchases`, the kill switch.
+- `vip` or `lanternNight` is missing or not a boolean, or the inputs are not a table.
+
+Otherwise it returns 1 + `vipGlowBonus` (if `vip`) + `lanternNightGlowBonus` (if
+`lanternNight`), added together. Every input comes only from the server: the restriction from
+PolicyService, VIP ownership from MarketplaceService, and Lantern Night from the server's own
+timer. None ever comes from a client request.
+
+Values live in `Config.Boosts`:
 
 | Key | Launch value | Meaning |
 | --- | --- | --- |
