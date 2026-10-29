@@ -20,6 +20,7 @@ Nothing. Open PRs: #92-#110 (minus #91/#89 merged). `preview/phase1` (a6ad68f) =
 4. Phase 1 gate playtest with friends (deferred multi-client list in progress.md).
 
 ## Ask Kian
+- Restart Studio/MCP plugin (wedged); test escrow p11-sd-1 pending into his real account (D-055).
 - Merge permission/merges (D-044); #92 first.
 - P1.7/P1.8 pacing: approve ~3-week first rebirth, pick another, or keep values (D-045).
 - P2.8 product questions (not urgent).

@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-055 · 2026-10-29 · Studio check of preview/phase1 by temporary script sync
+Context: no Phase 1 server code had run in Roblox, and merges wait for Kian (D-044). Decision: the
+integration agent synced preview/phase1's 27 changed scripts into the open, unsaved edit place
+(HttpEnabled on temporarily), recorded originals, and restored them afterwards; Rojo and the main
+checkout untouched, nothing saved or published. Outcome: groups A and B1 passed; the Studio MCP
+play control wedged after the first forced stop, so the rest is unrun. One deviation: the test
+transfer used Kian's real account as the raider (Studio DataStore, not a live game); left Pending
+and recorded under Needs Kian. Why: catch runtime errors before morning. Reversible: yes.
+
 ### D-054 · 2026-10-29 · One revenge raid per token
 Context: data on #109: "spending" a token only marked its shield bypass used, so a second +10%
 revenge raid stayed possible within the pair limit. Decision: an Async credit that moves

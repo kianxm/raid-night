@@ -56,7 +56,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
 | P1.8 | economy | P1.7 | Blocked | #96 (stacked on #95) | 1 | Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
 | P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); reviewer APPROVED (no Glow bonus on live revenge, retries keep identical args). Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
-| P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit), preview/phase1 | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Dry run: all 17 PRs merge in order into `preview/phase1` (a6ad68f, no PR), 5 conflicts resolved, 340 tests + EscrowSimulation green, lint/format/types clean. Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
+| P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit), preview/phase1 | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Dry run: all 17 PRs merge in order into `preview/phase1` (a6ad68f, no PR), 5 conflicts resolved, 340 tests + EscrowSimulation green, lint/format/types clean. P1.10c: preview scripts hand-synced into the open edit place (27 scripts), A + B1 passed, then Studio MCP play control wedged after the first forced stop; recovery check, rest of the pass and the soak not run; Studio restored to integration, nothing saved (D-055). Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
 
 ## Setup notes
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
@@ -95,6 +95,15 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 - Rollout: turn `Config.Flags.asyncRaids` on only after every pre-P1.1 server has shut down
   (shut down old servers after the publish that ships #97/#98); an old server would void a Pending
   async record and could lose the critter and Glow (D-049).
+
+- Studio MCP wedged ("Start play hasn't finished yet" for 30+ min after a forced stop): restart Studio
+  or the MCP plugin before the next Studio run.
+- Test data left in the Studio DataStore (D-055): EscrowRecords `p11-sd-1` is Pending with raider =
+  Kian's real account 11086525754 and test defender -1 already debited of critter `seed-1-1` (Glow 0).
+  On preview/Phase 1 code the recovery sweep commits it once into 11086525754 (that is the pending
+  forced-shutdown check: expect exactly one seed-1-1). On today's integration code an old recovery may
+  void it and the test critter is lost from -1 (test data only). Seeded test defenders `Player_-1`,
+  `Player_-2`, `Player_-3` exist. Kian's profile is otherwise unchanged (Glow 133018, 13 critters).
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
