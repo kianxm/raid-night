@@ -334,14 +334,14 @@ local function storeFor(raidId: string, last: { record: EscrowRecord? }): Escrow
 		-- may lack the entry only because its debit has not saved yet. A final save on leave does
 		-- not count either (the session is already inactive); the void then waits for a later load.
 		--
-		-- TODO (P1.1, decision D-012; #25 review): one window stays open. saveNow accepts any
-		-- OnAfterSave while the session is active, including an autosave whose UpdateAsync was
-		-- already in flight: its transform ran while we held the lock, then another server took
-		-- the lock (about 40 s with no release from us) and debited, and only then did the
-		-- autosave's response arrive. That save "proves" a void the new owner contradicts. Phase 0
-		-- accepts it (it needs a DataStore call hanging for over 40 s). The P1.1 void tombstone
-		-- must be written INSIDE this proof save (in the saved data that confirm checks), so the
-		-- proof and the tombstone land in one write and a later debit sees it and refuses.
+		-- Known window (#25 review; Live records only, since an Async record is never voided):
+		-- saveNow accepts any OnAfterSave while the session is active, including an autosave whose
+		-- UpdateAsync was already in flight: its transform ran while we held the lock, then another
+		-- server took the lock (about 40 s with no release from us) and its creating live call
+		-- debited, and only then did the autosave's response arrive. That save "proves" a void the
+		-- new owner contradicts. Accepted (it needs a DataStore call hanging for over 40 s); the
+		-- fix, a tombstone written inside this proof save that debitDefender refuses, is on the
+		-- hardening backlog.
 		saveProfileWithoutEntry = function(profile: PlayerProfile, id: string)
 			assert(id == raidId, "escrow store used for another raid")
 			local userId = profile.userId

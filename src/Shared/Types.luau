@@ -200,7 +200,7 @@ export type EscrowRecord = {
 	glowRequested: number,
 	state: EscrowState,
 	critter: Critter?, -- filled at Debited: the exact critter taken (nil if it was gone)
-	glow: number, -- filled at Debited: Glow actually taken (<= glowRequested)
+	glow: number, -- filled at Debited: Glow actually taken (Live: <= glowRequested; Async: its share of stored at the debit)
 	isRevenge: boolean,
 	createdAt: number,
 	updatedAt: number,

@@ -113,7 +113,8 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 1. A critter uid exists in exactly one place: one profile, or in flight for one raid.
 2. Glow is conserved. A Live debit takes up to `glowRequested` from `stored`. An Async debit
    (P1.1) takes the raid's share (`RaidRules.lootGlow`'s share, revenge bonus included) of
-   `stored` as it is at the debit, which the server accrues to the debit first (Money model):
+   `stored` as it is at the debit, which the server accrues to the debit first (Money model; for
+   a defender no server holds, `Escrow.debitAbsentProfile` inside the one atomic write):
    the record's `glowRequested` (the snapshot's figure) is only the estimate the raid showed.
    Neither ever takes more than is stored, and the raider is credited exactly what was debited.
 3. Repeating any step changes nothing after the first success.
@@ -220,6 +221,9 @@ Escrow recovery and transfers already in flight are never gated: records in `Pen
 Raid semantics approved by Kian 2026-10-28 (decision D-002).
 
 Defaults turn on only the features that exist. Adding a flag is a contract change.
+
+Rollout (D-049): `asyncRaids` is flipped only after every server running pre-P1.1 code is shut
+down, since such a server would recover an Async record under the Live rules and could void it.
 
 ## Schema changes
 
