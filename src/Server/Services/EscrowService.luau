@@ -146,9 +146,10 @@
 	ever voided, so no late debit can race a void).
 
 	After a step lands (P2.9): once this server has SAVED a record as Debited, it announces the
-	loss, deferred on its own thread inside pcall (never part of the transfer): an Async debit logs
-	raided_offline (on the defender when they are here, else on the raider) and, with the defender
-	here, a DenGlow "DenRaided" economy sink; any debit that moved something calls
+	loss, deferred on its own thread inside pcall (never part of the transfer): any debit that took
+	Glow, Live or Async, logs a DenGlow "DenRaided" economy sink with the defender here (P2.9b); an
+	Async debit also logs raided_offline (on the defender when they are here, else on the raider);
+	any debit that moved something calls
 	NotificationService.onLoss({ defenderUserId, raidId, raiderName, kind, critterName }) when that
 	service exists and has onLoss (PR #118; looked up by name, so this works without it).
 	raiderName is the raider's DisplayName if they are here, else their Roblox username; critterName
@@ -456,6 +457,12 @@ end
 local function announceDebit(record: EscrowRecord)
 	local moved = record.critter ~= nil or record.glow > 0
 	local defender = Players:GetPlayerByUserId(record.defenderUserId)
+	-- DenRaided: the den Glow the debit took, Live or Async (P2.9b), on the defender when here. It
+	-- balances the raider's RaidLoot source (announceCredit) for the same record.glow.
+	local profile = DataService.getProfile(record.defenderUserId)
+	if defender and profile and record.glow > 0 then
+		AnalyticsService.economy(defender, "DenRaided", record.glow, math.max(0, math.floor(profile.stored)))
+	end
 	if Escrow.kindOf(record) == "Async" then
 		-- raided_offline: Roblox analytics need a Player in this server, so a debit written to a
 		-- profile no server holds is logged on the raider (whose server delivered it).
@@ -468,10 +475,6 @@ local function announceDebit(record: EscrowRecord)
 				revenge = record.isRevenge,
 				attributedTo = if defender then "Defender" else "Raider",
 			})
-		end
-		local profile = DataService.getProfile(record.defenderUserId)
-		if defender and profile and record.glow > 0 then
-			AnalyticsService.economy(defender, "DenRaided", record.glow, math.max(0, math.floor(profile.stored)))
 		end
 	end
 	local service = notifications()

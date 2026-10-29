@@ -232,7 +232,8 @@ end
 
 tests["DataService.advanceOnboarding takes server steps on the server's clock, never yields or saves"] = function()
 	local advance = body(dataServiceCode(), "DataService.advanceOnboarding")
-	has(advance, "Profile.advanceOnboardingTo(profile, stepId, os.time())", "server steps only, server time")
+	has(advance, "local now = os.time()", "the server's clock")
+	has(advance, "Profile.advanceOnboardingTo(profile, stepId, now)", "server steps only, server time")
 	has(advance, "pushOnboarding(userId, profile)", "the client hears about it")
 	for _, banned in { "task.wait", "task.delay", "saveNow", ":Wait(", "coroutine.yield" } do
 		hasNot(advance, banned, `no {banned}`)
@@ -244,7 +245,8 @@ end
 tests["AckOnboarding is rate-limited and accepts only the pure rule's next client step"] = function()
 	local ack = body(dataServiceCode(), "onAckOnboarding")
 	has(ack, "take(player, Net.Requests.AckOnboarding, Net.Limits.AckOnboarding)", "rate-limited")
-	has(ack, "Profile.acknowledgeOnboarding(profile, stepId, os.time())", "server time, pure rule")
+	has(ack, "local now = os.time()", "the server's clock")
+	has(ack, "Profile.acknowledgeOnboarding(profile, stepId, now)", "server time, pure rule")
 	hasNot(ack, "Profile.advanceOnboarding(", "never the unchecked numeric advance")
 	hasNot(ack, "advanceOnboardingTo", "never a server step")
 	hasNot(ack, "saveNow", "never forces a save")

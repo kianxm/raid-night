@@ -225,9 +225,18 @@ Schema: `src/Shared/Analytics.luau` (pure, tested in `Analytics.spec`). Sender:
 - **Funnels.** Onboarding (Roblox one-time onboarding funnel, accounts under 7 days from
   `createdAt`): Join, FirstHatch, FirstCollect, FirstSteal, FirstRaid. RaidFlow (recurring, one
   funnel session per portal trip): Portal, TargetPicked, RaidStarted, Escaped. Steps come from
-  events (`Analytics.funnelSteps`), so callers fire only the event.
+  events (`Analytics.funnelSteps`), so callers fire only the event. `onboarding_step` completes a
+  funnel step by onboarding step id (`Analytics.ONBOARDING_FUNNEL`): `hatch` FirstHatch, `collect`
+  FirstCollect, `stealHome` FirstSteal; FirstRaid comes only from an Async `raid_started`.
+- **Onboarding steps are Profile's.** `onboarding_step`'s range (1 to `ONBOARDING_LAST_STEP`), its
+  step labels (`"<n> <id>"`, e.g. `Step - 3 collect`) and the funnel mapping are derived from
+  `Profile.ONBOARDING_STEPS`, so a new onboarding step needs no Analytics edit (`Analytics.spec`
+  fails if a mapped id is not a step).
 - **Economy.** Currencies `Glow` (banked) and `DenGlow` (stored). Flow ids in `Analytics.ECONOMY`;
-  amount > 0, endingBalance >= 0 (the balance of that currency after the change).
+  amount > 0, endingBalance >= 0 (the balance of that currency after the change). Raids balance:
+  every debit that took Glow, Live or Async, logs a `DenRaided` sink on the defender when they are
+  in the server that saved it, and the credit a `RaidLoot` source on the raider when they are
+  (EscrowService, after the record save, fire-and-forget).
 - **Budget.** Per player a burst of 20, then 15 a minute (`Analytics.take`), under Roblox's
   120 + 20 x CCU per minute; `session_end` and `purchase` skip it.
 - **Studio.** Roblox records nothing from Studio. Set the ServerStorage boolean attribute
@@ -236,7 +245,7 @@ Schema: `src/Shared/Analytics.luau` (pure, tested in `Analytics.spec`). Sender:
 
 | Event | Fields (value first) | Fired by |
 | --- | --- | --- |
-| `onboarding_step` | secondsSinceJoin; step 1-5 | onboarding API (C6b) |
+| `onboarding_step` | secondsSinceJoin (from `createdAt`); step 1-6 (`Profile.ONBOARDING_STEPS`) | DataService, once per step completed by an advance (a server event or an ack; a jump logs each step passed) |
 | `egg_bought` | price; tier, denLevel | economy |
 | `critter_placed` | (count); tier, placement | economy |
 | `glow_collected` | amount; storageFill (stored / cap before the collect) | economy |

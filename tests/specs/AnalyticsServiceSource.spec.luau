@@ -6,7 +6,9 @@
 	  - Escrow.luau stays pure and untouched by analytics; EscrowService announces a step only
 	    after the record write landed, deferred and inside pcall, and reaches NotificationService
 	    only through the optional lookup (works with or without PR #118).
-	  - DataService opens the session on load and logs session_end before EndSession.
+	  - DataService opens the session on load and logs session_end before EndSession, and logs
+	    onboarding_step after an onboarding advance wrote, never before or without it (P2.9b).
+	  - Every debit that took Glow logs the DenRaided sink, Live included (P2.9b).
 ]]
 
 local fs = require("@lune/fs")
@@ -132,6 +134,62 @@ tests["EscrowService announces a step only after its record write, deferred and 
 			rest = string.sub(rest, 1, (first :: number) - 1) .. string.sub(rest, (last :: number) + 1)
 		end
 		expect.eq(count(rest, call), 0, `{call} only in the announcers`)
+	end
+end
+
+tests["every debit that took Glow logs DenRaided, Live included, so live raids balance RaidLoot"] = function()
+	local code = source.codeOnly(source.read(ESCROW_SERVICE))
+	local debit = source.functionBody(code, "announceDebit") or ""
+	local sink = string.find(debit, 'AnalyticsService%.economy%(defender, "DenRaided", record%.glow,')
+	local asyncOnly = string.find(debit, 'if Escrow%.kindOf%(record%) == "Async" then')
+	expect.truthy(sink and asyncOnly, "found")
+	expect.truthy((sink :: number) < (asyncOnly :: number), "the sink is logged before, not inside, the Async branch")
+	expect.truthy(string.find(debit, "if defender and profile and record%.glow > 0 then"), "only Glow that moved")
+	expect.eq(count(code, '"DenRaided"'), 1, "logged in one place")
+	local credit = source.functionBody(code, "announceCredit") or ""
+	expect.truthy(string.find(credit, 'AnalyticsService%.economy%(raider, "RaidLoot", record%.glow,'), "its source")
+	expect.falsy(string.find(credit, "kindOf"), "the source is logged for every kind too")
+end
+
+tests["DataService logs onboarding_step only after an onboarding advance wrote"] = function()
+	local code = source.codeOnly(source.read(DATA))
+	local trackOnboarding = source.functionBody(code, "trackOnboarding") or ""
+	expect.truthy(
+		string.find(trackOnboarding, "Analytics%.onboardingStepEvents%(before, after, profile%.createdAt, now%)"),
+		"one event per step completed, seconds since the first join"
+	)
+	expect.truthy(
+		string.find(trackOnboarding, 'AnalyticsService%.track%(userId, "onboarding_step", fields%)'),
+		"fire-and-forget"
+	)
+	-- Never throws into advanceOnboarding: its callers act on the result after the write
+	-- (IncomeService.grantTutorialCritter's once-only claim), so all of it runs in pcall.
+	local guarded = string.find(trackOnboarding, "local ok, err = pcall%(function%(%)")
+	local events = string.find(trackOnboarding, "Analytics%.onboardingStepEvents%(")
+	local tracked = string.find(trackOnboarding, "AnalyticsService%.track%(")
+	local closed = string.find(trackOnboarding, "\n\tend%)\n\tif not ok then")
+	expect.truthy(guarded and events and tracked and closed, "guarded: found")
+	expect.truthy(
+		(guarded :: number) < (events :: number) and (tracked :: number) < (closed :: number),
+		"the step count, the events and every track call run inside the pcall"
+	)
+	for _, banned in { "task%.wait", "task%.delay", "saveNow", ":Wait%(" } do
+		expect.falsy(string.find(trackOnboarding, banned), `never yields ({banned})`)
+	end
+	expect.eq(count(code, '"onboarding_step"'), 1, "logged in one place")
+	local cases = {
+		{ "DataService.advanceOnboarding", "if not Profile%.advanceOnboardingTo%(profile, stepId, now%) then" },
+		{ "onAckOnboarding", 'if outcome == "Advanced" then' },
+	}
+	for _, case in cases do
+		local name, wrote = case[1], case[2]
+		local fn = source.functionBody(code, name) or ""
+		local before = string.find(fn, "local before = Profile%.onboardingStep%(profile%)")
+		local gate = string.find(fn, wrote)
+		local tracked = string.find(fn, "trackOnboarding%(userId, profile, before, now%)")
+		expect.truthy(before and gate and tracked, `{name}: found`)
+		expect.truthy((before :: number) < (gate :: number), `{name}: the step count is read before the advance`)
+		expect.truthy((gate :: number) < (tracked :: number), `{name}: logged only once the advance wrote`)
 	end
 end
 
