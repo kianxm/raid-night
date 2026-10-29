@@ -95,6 +95,18 @@ function Profile.prepare(data: any, userId: number, now: number): PlayerProfile
 end
 
 --[[
+	Studio test ids (decision D-019): whole numbers at or below TEST_USER_ID_MAX. No Roblox account
+	has one, and they stay clear of Studio's Local Server test players (Player1 is -1, Player2 is
+	-2, ...). DataService holds a test profile only in Studio with memory persistence, so a test id
+	never reaches a DataStore.
+]]
+Profile.TEST_USER_ID_MAX = -1_000_000
+
+function Profile.isTestUserId(userId: number): boolean
+	return type(userId) == "number" and userId % 1 == 0 and userId <= Profile.TEST_USER_ID_MAX
+end
+
+--[[
 	Whether a critter may leave its owner by trade or gift. Any trading or gifting code must
 	refuse a critter this returns false for (the reviewer checks). Raids are not trades: escrow
 	moves untradeable critters like any other, and the flag travels with them (decision D-005).

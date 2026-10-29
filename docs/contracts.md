@@ -23,6 +23,21 @@ the why. Update it in the same commit as any contract change.
 
 Profile storage: ProfileStore store `PlayerProfiles`, key `Player_<userId>` (`DataService.luau`).
 
+Studio-only memory and test profiles (decision D-019, details in `DataService.luau`):
+
+- **Memory switch.** Setting the boolean attribute `StudioMemoryProfiles` on `ServerStorage` to
+  `true` before pressing Play runs every profile from ProfileStore's mock store, in memory, even
+  with Studio API access on. `DataService.persistence()` is then `"Memory"`, so escrow records
+  stay in memory too, and nothing is saved. It is read once at start and only when
+  `RunService:IsStudio()`; missing or `false` means normal saving. It is a developer setting on
+  a server-only service, not a replicated attribute: clients can neither see nor set it.
+- **Test profiles.** `DataService.loadTestProfile(userId, profile)` holds a fake in-memory
+  profile for RaidService's single-client test hook. It works only in Studio with memory
+  persistence, and only for reserved ids (`Profile.isTestUserId`: whole numbers <=
+  -1,000,000, clear of real accounts and of Studio Local Server players -1, -2, ...). It is
+  never saved, and `saveNow` on it confirms at once. `releaseTestProfile(userId)` works like a
+  leave (`onProfileReleasing` runs), and it refuses while an escrow for that id is still open.
+
 **Never change the store name or the key format.** ProfileStore would find no save under the
 new name and hand every player a fresh template. Everyone silently starts over: the old saves
 still exist, but nothing reads them. The same applies to `EscrowRecords` and its keys below,
@@ -37,8 +52,9 @@ Escrow storage: DataStore `EscrowRecords`.
   raider and the defender alike. An entry with no record is removed only once it is older than
   15 minutes (its create may still be in progress). Re-adding a listed raid (a retry) moves its
   `createdAt` forward, never back (`Escrow.indexAdd`), so the retry is protected too.
-- In Studio without API access (`DataService.persistence() == "Memory"`) both live in server
-  memory, like profiles do.
+- When `DataService.persistence() == "Memory"` (Studio without API access, or the Studio memory
+  switch above) both live in server memory, like profiles do. Profiles and escrow always share
+  one mode: a saved profile never holds an escrow entry that only memory knew.
 
 ## Money model
 
@@ -77,7 +93,10 @@ It runs on either party's load, with the parties loaded in that server:
 
 Retrying `EscrowService.transferLive` (P0.5): call again with IDENTICAL arguments (raidId,
 raider, defender, critterUid, glowRequested, isRevenge). Once a record is stored, the same raidId
-with any other argument returns `Refused` ("raidId already used by a different transfer").
+with any other argument returns `Refused` ("raidId already used by a different transfer"). While
+the server still waits on a retry of the raid (an earlier call returned `InFlight`), the retry
+reuses that call's `createNonce`. So a create that landed but lost its response is still the
+call's own, and the steal continues (`Escrow.advance`) instead of being voided.
 
 Phase 1 (P1.1, decision D-012): the void rule assumes only the creating call debits. A debit
 delivered by ProfileStore message, or applied to an offline profile, could land after a void and
@@ -130,6 +149,11 @@ Live stealing happens in an online owner's den (RaidService, decision D-003).
 - Carrying or dropping a critter never changes any profile; only an escape committed through
   Escrow (`EscrowService.transferLive`) moves ownership. A dropped critter goes back to its pad.
 - Phase 0 live steals take the critter only, no stored Glow (D-015).
+- `Net.Limits.GrabCritter` (5 per 10 s) also limits live grab starts from the steal prompt.
+- `Net.Pushes.BeingRaidedLive` (raiderUserId) goes to the den owner when a raider grabs.
+- `Net.Pushes.RaidEnded` goes to the raider whenever a live carry ends (decision D-020). In the
+  `RaidEnd` payload, `escaped` is true only when `transferLive` returned `Committed`. `raidId` is
+  the escrow raidId, or `""` for a drop before escape. `speciesId` is set, and `glow` is 0.
 
 Tuning lives in `Config.LiveRaid`:
 
@@ -139,6 +163,7 @@ Tuning lives in `Config.LiveRaid`:
 | `lockdownCooldownSeconds` | 120 | Wait after a Lockdown ENDS before the owner can start another |
 | `tagRange` | 6 | Studs: how close the owner must be to tag a raider |
 | `grabHoldSeconds` | 1 | How long a raider holds the grab to pick a critter up |
+| `grabRange` | 10 | Studs from the raider's root part to the pad centre: how close a raider must be to start a grab and to keep holding it (D-018) |
 
 `Net.Requests.Lockdown` is `() -> boolean` (true if a Lockdown started), limited by
 `Net.Limits.Lockdown` (3 per 10 s). Lockdown rules:
@@ -179,9 +204,6 @@ server-written and display-only:
 | Critter Model | `CritterUid`, `SpeciesId`, `Tier` | string | Which critter this model draws |
 | Critter Model | `PadIndex`, `OwnerUserId` | number | Where it sits and whose it is |
 
-One existing read: IncomeService reads `CritterUid` and `PadIndex` back from critter models it
-built itself, only to decide what to redraw. Clients cannot change those values on the server.
-
 ## Eggs
 
 `Config.Economy.eggMaxTier` (`"Uncommon"` at launch) is the highest tier a bought egg can hatch.
@@ -190,9 +212,9 @@ Tiers up to it keep their `Config.EggOdds` ratios, renormalized to sum to 1
 Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table (from
 P0.4b) and ignores `eggMaxTier` (decision D-004).
 
-If Glow ever becomes purchasable with Robux, Glow eggs become paid random items: the
-renormalized odds must be shown before purchase and PolicyService checks must pass before that
-product ships (open question for Kian; CLAUDE.md rule 6).
+If Glow became purchasable with Robux, Glow eggs would become paid random items. CLAUDE.md rule
+6 forbids this at launch: Glow stays non-purchasable while it buys eggs, unless Kian changes the
+rule. If he does, show the odds and pass PolicyService before shipping.
 
 ## Tradeability
 

@@ -36,9 +36,11 @@ without this server's final save:
   the lock is taken at once.
 - `StartSessionAsync` with `Steal = true` takes it immediately. We never pass it.
 
-The old server only finds out on its next save. That save writes nothing, the session ends
-(`OnSessionEnd`), and `OnLastSave` never fires, so `onProfileReleasing` listeners do not run.
-**Every change since its last successful save is dropped.** Two consequences:
+The old server only finds out on its next save. That save writes nothing and the session ends
+(`OnSessionEnd`). If that save is an autosave, `OnLastSave` never fires, so `onProfileReleasing`
+listeners do not run. If it is the release on leave (or shutdown), `OnLastSave` fires first and
+the listeners run, but their write is dropped all the same. **Either way, every change since its
+last successful save is dropped.** Two consequences:
 
 - Anything that must be durable confirms a save with `DataService.saveNow` before it counts:
   escrow steps do, and Robux receipts must.
