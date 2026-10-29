@@ -100,6 +100,58 @@ local Strings = {
 	failServerFull = "Their server is full",
 	failServerGone = "Their server closed",
 	failTeleport = "Couldn't join. Try again",
+	raiderFallback = "Raider",
+
+	-- Menu strip and shared
+	menuShop = "Shop",
+	menuClose = "Close",
+
+	-- Shop (Glow only: no Robux items at launch)
+	shopTitle = "Shop",
+	shopEggTitle = "Night egg",
+	shopEggFree = "Free egg",
+	shopBuyFor = "Buy  {price} Glow",
+	shopBuyFree = "Get it free",
+	shopNeedGlow = "Need {n} more Glow",
+	shopHatched = "Hatched {name}!",
+	shopBuyFailed = "Couldn't buy that now",
+	shopUpgradeTitle = "Den level {n}",
+	shopPads = "{n} pads",
+	shopUpgradeFor = "Upgrade  {price} Glow",
+	shopMaxLevel = "Max level",
+	shopUpgraded = "Den upgraded!",
+	shopUpgradeFailed = "Couldn't upgrade now",
+
+	-- Bag (inventory) and Den management
+	menuBag = "Bag",
+	menuDen = "Den",
+	bagTitle = "Bag",
+	bagEmpty = "Nothing in your bag",
+	bagToPad = "Pad",
+	bagToVault = "Vault",
+	critterLine = "{tier}",
+	critterLineMutation = "{tier}, {mutation}",
+	placeDone = "Moved!",
+	placeFailed = "Can't move it now",
+	denTitle = "Your den",
+	denPads = "Pads {used}/{total}",
+	denVault = "Vault {used}",
+	denBag = "Bag {n}",
+	denPickHint = "Tap a critter, then a pad",
+	denPadEmpty = "Empty",
+	denToVault = "To Vault",
+	denToBag = "To Bag",
+	denSelected = "{name} selected",
+
+	-- Settings
+	menuSettings = "Gear",
+	settingsTitle = "Settings",
+	settingsMusic = "Music",
+	settingsSfx = "Sound effects",
+	settingsReducedMotion = "Reduced motion",
+	settingsOn = "On",
+	settingsOff = "Off",
+	settingsPercent = "{pct}%",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string
