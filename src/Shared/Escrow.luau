@@ -33,26 +33,28 @@
 	  5. A Live debit that takes nothing grants nothing (D-033): no shield, revenge token, pair
 	     count or raid-log entry; only its idempotency entry.
 
-	Transport today (Phase 0; server layer, not this module):
-	  - Only same-server live transfers exist. EscrowService.transferLive runs `advance` with both
-	    profiles loaded in its own server. Only the call that creates a record ever debits, and
-	    its same-server retries while that server awaits them (they keep its createNonce).
-	  - Recovery (`recover`) runs on either party's load and on a timer. It never debits afresh:
-	    a Pending record settles from the defender's saved debit, or is voided once a confirmed
-	    save proves this server still holds the defender's session and no debit was saved.
-	  - Idempotency entries (appliedTransfers) of a still-open raid are never pruned.
-
-	TODO (P1.1, async raids; decision D-012): the void rule assumes only the creating call
-	debits. A debit delivered by ProfileStore message, or applied to an offline profile, can land
-	after recovery voided the record, stranding the loot. Before adding either, make the void
-	something a later debit must see and refuse (for example a tombstone entry on the defender,
-	written inside the void proof save; see EscrowService saveProfileWithoutEntry). Recovery can
-	tell live from async by `Escrow.kindOf(record)` (D-031).
+	Transport (server layer, not this module), by the record's kind:
+	  - Live: same-server steals. EscrowService.transferLive runs `advance` with both profiles
+	    loaded in its own server. Only the call that creates a record ever debits, and its
+	    same-server retries while that server awaits them (they keep its createNonce). Recovery
+	    (`recover`) never debits a Live record afresh: Pending settles from the defender's saved
+	    debit, or is voided once a confirmed save proves this server still holds the defender's
+	    session and no debit was saved.
+	  - Async (P1.1; closes decision D-012's race): never voided. Every path (`recover`, from any
+	    server, as often as it likes) delivers the debit: on the defender's profile when it is
+	    loaded here, otherwise through `Store.debitAbsent` (one atomic write to a profile no
+	    server holds, or a message to the server that holds it, which delivers it there). The
+	    defender's saved data decides alone: debitDefender is idempotent by raidId, so a debit
+	    delivered twice, late or by two servers lands once, and with no void there is nothing for
+	    a late debit to race.
+	  - Recovery runs on either party's load and on a timer. Idempotency entries
+	    (appliedTransfers) of a still-open raid are never pruned.
 ]]
 
 local Types = require("./Types")
 local Config = require("./Config")
 local RaidRules = require("./RaidRules")
+local Economy = require("./Economy")
 
 type PlayerProfile = Types.PlayerProfile
 type EscrowRecord = Types.EscrowRecord
@@ -69,12 +71,18 @@ local Escrow = {}
 -- `saveProfileWithoutEntry` is the void proof: it returns only once a save written by a session
 -- that still holds the profile's lock has landed with NO appliedTransfers entry for `raidId`,
 -- and errors otherwise (a stale session whose lock another server took can never pass it).
+-- `debitAbsent` (Async records only) delivers the debit to a defender who is not loaded here:
+-- it runs Escrow.debitAbsentProfile (accrue to the debit, then debitDefender) on their latest
+-- saved profile in one atomic write that lands only while no server holds that profile, and
+-- returns the saved entry; or, when a server holds it, asks that server (a message) and returns
+-- nil. It errors when it could do neither.
 export type Store = {
 	loadRecord: (raidId: string) -> EscrowRecord?,
 	saveRecord: (record: EscrowRecord) -> (),
 	loadProfile: (userId: number) -> PlayerProfile,
 	saveProfile: (profile: PlayerProfile) -> (),
 	saveProfileWithoutEntry: (profile: PlayerProfile, raidId: string) -> (),
+	debitAbsent: ((record: EscrowRecord, now: number) -> AppliedTransfer?)?,
 }
 
 local function cloneCritter(critter: Critter): Critter
@@ -153,7 +161,9 @@ end
 	is live-protected at the debit (RaidRules.liveProtectedAtDebit, read with the critter still in
 	the den: the largest of the day's base, the den's Glow/s (D-036) and the record's grab-time
 	rate (D-037)), an Async record nothing once the defender is at Config.Limits.maxLossesPerDay.
-	Takes up to `glowRequested` from storage either way. Records the defender-side consequences:
+	Glow from storage: a Live record up to `glowRequested`; an Async record (P1.1) the raid's
+	share (RaidRules.lootGlow) of what is stored at this debit, which the server accrues first,
+	never the snapshot's figure. Never more than is stored. Records the defender-side consequences:
 	the live loss value (with the record's grab-time base on the day's first live loss, D-034),
 	then shield, pair count, revenge token and log (RaidRules.recordIncoming). A Live debit that
 	took no critter and no Glow grants none of those (decision D-033): an empty steal must not
@@ -192,7 +202,17 @@ function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now
 		end
 	end
 
-	local glow = math.clamp(math.floor(defender.stored), 0, record.glowRequested)
+	-- Live: up to the record's request. Async (P1.1): the raid's share (RaidRules.lootGlow, the one
+	-- formula) of what is stored now, which the server accrued up to this debit; the snapshot's
+	-- request is only the estimate the raid showed. Never more than is stored.
+	local storedNow = math.floor(defender.stored)
+	local glow = if live
+		then math.clamp(storedNow, 0, record.glowRequested)
+		else math.clamp(
+			RaidRules.lootGlow({ storedGlow = storedNow } :: any, record.isRevenge),
+			0,
+			math.max(storedNow, 0)
+		)
 	defender.stored -= glow
 
 	local applied: AppliedTransfer = {
@@ -217,6 +237,26 @@ function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now
 	)
 
 	return applied
+end
+
+--[[
+	The debit for a defender no server holds, run inside the server's one atomic write to their
+	saved profile (Store.debitAbsent). First the den's offline income up to `now` (Money model:
+	accrue before `stored` changes), so an Async debit takes its share of what is stored at the
+	debit; then debitDefender. A repeat (this raid's debit already saved) changes nothing, not
+	even the accrual. Returns (write, applied): write is false for a repeat.
+]]
+function Escrow.debitAbsentProfile(
+	defender: PlayerProfile,
+	record: EscrowRecord,
+	now: number
+): (boolean, AppliedTransfer)
+	local fresh = defender.appliedTransfers[record.raidId] == nil
+	if fresh then
+		-- P2.8: factor 1; pass Economy.glowBoostFactor once purchases ship.
+		Economy.accrue(defender, now)
+	end
+	return fresh, Escrow.debitDefender(defender, record, now)
 end
 
 -- Step 2, on the RECORD. Stores what was actually taken. Idempotent.
@@ -271,6 +311,40 @@ function Escrow.creditRaider(raider: PlayerProfile, record: EscrowRecord, now: n
 	return applied
 end
 
+--[[
+	Whether `saved` (an appliedTransfers entry read back from saved data, any shape) is exactly
+	`expected`: same role, time, Glow and critter, every critter field alike. The server confirms
+	a profile save with it, so a debit only counts once the very entry it will record is saved:
+	a stale session's own debit can never be confirmed by another server's save of a different
+	one for the same raid in the same second (the record's loot is always the surviving debit's).
+]]
+function Escrow.sameApplied(expected: AppliedTransfer, saved: any): boolean
+	if type(saved) ~= "table" then
+		return false
+	end
+	if saved.role ~= expected.role or saved.at ~= expected.at or saved.glow ~= expected.glow then
+		return false
+	end
+	local a, b = expected.critter, saved.critter
+	if a == nil or b == nil then
+		return a == nil and b == nil
+	end
+	if type(b) ~= "table" then
+		return false
+	end
+	for key, value in a :: any do
+		if b[key] ~= value then
+			return false
+		end
+	end
+	for key in b do
+		if (a :: any)[key] == nil then
+			return false
+		end
+	end
+	return true
+end
+
 -- Step 4, on the RECORD. Terminal. Idempotent.
 function Escrow.markCommitted(record: EscrowRecord, now: number)
 	if record.state == "Committed" then
@@ -281,12 +355,16 @@ function Escrow.markCommitted(record: EscrowRecord, now: number)
 	record.updatedAt = now
 end
 
--- Cancels a raid before anything moved. Returns false if it is too late to void.
+-- Cancels a Live raid before anything moved. Returns false if it is too late to void, and always
+-- for an Async record, which is never voided (P1.1): any server may still deliver its debit.
 -- Needs the defender's profile: a crash between saving the defender and saving the record
 -- leaves the record Pending even though the debit already landed. Voiding then would strand
 -- the loot, so the defender's appliedTransfers entry is the real "too late" signal.
 function Escrow.void(record: EscrowRecord, defender: PlayerProfile, now: number): boolean
 	assert(defender.userId == record.defenderUserId, "void: wrong profile")
+	if Escrow.kindOf(record) == "Async" then
+		return false
+	end
 	if record.state == "Voided" then
 		return true
 	end
@@ -445,10 +523,11 @@ end
 
 --[[
 	The live path: drives a record to a terminal state, one single-key write at a time, debiting
-	the defender if that has not happened yet. Only the call that created the record uses it
+	the defender if that has not happened yet. Only the call that created a Live record uses it
 	(and its same-server retries, which keep its createNonce); later paths use `recover`, which
-	never debits afresh. Idempotent. `checkpoint`, if given, is called before the defender's
-	first save and after every save; the simulation injects crashes there.
+	never debits a Live record afresh. Async records are driven by `recover` from every path.
+	Idempotent. `checkpoint`, if given, is called before the defender's first save and after
+	every save; the simulation injects crashes there.
 ]]
 function Escrow.advance(raidId: string, store: Store, now: number, checkpoint: ((string) -> ())?): EscrowRecord?
 	local function check(name: string)
@@ -477,14 +556,59 @@ function Escrow.advance(raidId: string, store: Store, now: number, checkpoint: (
 end
 
 --[[
-	Recovery: advances a record using only what is already saved and only the parties that are
-	present (`isPresent(userId)`: loaded in this server). Never debits afresh.
+	An Async record (P1.1): never voided; its debit is delivered from wherever this runs, then
+	the raider is credited where they are present. The defender loaded here: debit and save
+	their profile (a stale session's save fails, so nothing is recorded). Absent:
+	store.debitAbsent, which writes the debit to a profile no server holds and returns the saved
+	entry, or asks the holding server by message and returns nil (that server's recovery
+	finishes it). debitDefender's idempotency makes every repeat, from any server, a no-op once
+	a debit is saved; the daily loss rule is applied at whichever delivery lands first.
+]]
+local function settleAsync(
+	record: EscrowRecord,
+	store: Store,
+	now: number,
+	isPresent: (userId: number) -> boolean,
+	check: (string) -> ()
+): EscrowRecord
+	if record.state == "Pending" then
+		if isPresent(record.defenderUserId) then
+			local defender = store.loadProfile(record.defenderUserId)
+			local applied = Escrow.debitDefender(defender, record, now)
+			check("debitedUnsaved")
+			commitDebit(store, record, defender, applied, now, check)
+		else
+			local debitAbsent = assert(store.debitAbsent, "recover: this store cannot reach an absent defender")
+			local applied = debitAbsent(record, now)
+			check("deliveredDebit")
+			if applied == nil then
+				return record -- the server that holds the defender delivers it
+			end
+			Escrow.markDebited(record, applied, now)
+			store.saveRecord(record)
+			check("savedRecordDebited")
+		end
+	end
+
+	if record.state == "Debited" and isPresent(record.raiderUserId) then
+		creditAndCommit(store, record, now, check)
+	end
+
+	return record
+end
+
+--[[
+	Recovery: advances a record using only the parties that are present (`isPresent(userId)`:
+	loaded in this server). Idempotent.
+	A Live record never debits afresh, only from what is already saved:
 	  Pending, defender present: their saved debit for this raid -> record Debited; no debit ->
 	    first prove it (store.saveProfileWithoutEntry: a save by a session that still holds the
 	    defender's lock, without an entry), then Voided. A server whose session went stale (another
 	    server took the lock and may hold the debit) fails the proof and leaves the record alone.
 	  Debited, raider present: credit and commit.
-	Anything whose party is absent is left as is, for that party's next load. Idempotent.
+	  Anything whose party is absent is left as is, for that party's next load.
+	An Async record is never voided: settleAsync delivers its debit (to an absent defender too)
+	and credits the raider where present.
 ]]
 function Escrow.recover(
 	raidId: string,
@@ -502,6 +626,10 @@ function Escrow.recover(
 	local record = store.loadRecord(raidId)
 	if not record then
 		return nil
+	end
+
+	if Escrow.kindOf(record) == "Async" then
+		return settleAsync(record, store, now, isPresent, check)
 	end
 
 	if record.state == "Pending" then

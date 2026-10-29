@@ -5,6 +5,7 @@ local Escrow = require("../../src/Shared/Escrow")
 local Config = require("../../src/Shared/Config")
 local RaidRules = require("../../src/Shared/RaidRules")
 local Types = require("../../src/Shared/Types")
+local Economy = require("../../src/Shared/Economy")
 
 local NOW = 1_800_000_000
 
@@ -224,14 +225,40 @@ end
 
 tests["an async debit that takes nothing still records the raid (unchanged by D-033)"] = function()
 	local raider, defender, record = setup("Async")
-	record.glowRequested = 0
+	defender.stored = 0
 	defender.lossesToday = Config.Limits.maxLossesPerDay
 	runAll(raider, defender, record)
 	expect.truthy(defender.critters["fox"], "capped")
+	expect.eq(raider.glow, 0, "nothing stored, nothing taken")
 	expect.eq(defender.shieldUntil, NOW + Config.Shield.afterSuccessfulRaidSeconds)
 	expect.truthy(defender.revengeTokens["raid-1"])
 	expect.eq(RaidRules.pairCount(defender, raider.userId, NOW), 1)
 	expect.eq(defender.raidLog[1].raidId, "raid-1")
+end
+
+tests["an async debit takes its share of what is stored at the debit, not the snapshot's figure"] = function()
+	local share = Config.Loot.storedGlowShare
+	-- The snapshot saw nothing stored; the den earned 4000 offline, accrued before the debit.
+	local raider, defender, record = setup("Async")
+	record.glowRequested = 0
+	defender.stored = 4000
+	runAll(raider, defender, record)
+	expect.eq(raider.glow, math.floor(4000 * share), "the share of what is stored now")
+	expect.eq(defender.stored, 4000 - math.floor(4000 * share), "taken from storage")
+	expect.eq(record.glow, raider.glow, "the credit is what was debited")
+	-- Revenge takes the bonus share; a near-empty den gives what rounds down, never more.
+	local _, revenged, revenge = setup("Async")
+	revenge.isRevenge = true
+	revenged.stored = 4000
+	expect.eq(
+		Escrow.debitDefender(revenged, revenge, NOW).glow,
+		math.floor(4000 * share * (1 + Config.Loot.revengeBonus))
+	)
+	local _, poor, scrape = setup("Async")
+	scrape.glowRequested = 1e9
+	poor.stored = 3.9
+	expect.eq(Escrow.debitDefender(poor, scrape, NOW).glow, math.floor(3 * share), "the request never raises it")
+	expect.truthy(poor.stored >= 0, "never more than is stored")
 end
 
 -- Grab-time base on the record (decision D-034) ---------------------------------------------------
@@ -480,6 +507,153 @@ tests["recover leaves a Pending record alone while its defender is away"] = func
 	end
 	Escrow.recover(record.raidId, store, NOW, raiderOnly)
 	expect.eq(records[record.raidId].state, "Pending", "not voided without the defender's profile")
+	expect.truthy(defender.critters["fox"])
+end
+
+-- Async records (P1.1): never voided; recover delivers the debit from any server -------------
+
+-- memoryStore with debitAbsent: the defender's saved profile written in one go, or (held) a
+-- message that only queues. `writes` counts the writes that landed.
+local function asyncStore(raider, defender, record, held: boolean)
+	local store, records = memoryStore(raider, defender, record)
+	local sent = { writes = 0, messages = 0 }
+	store.debitAbsent = function(r, now)
+		if held then
+			sent.messages += 1
+			return nil
+		end
+		local had = defender.appliedTransfers[r.raidId] ~= nil
+		local applied = Escrow.debitDefender(defender, r, now)
+		sent.writes += if had then 0 else 1
+		return applied
+	end
+	return store, records, sent
+end
+
+tests["recover never voids an Async record: a present defender is debited instead"] = function()
+	local raider, defender, record = setup("Async")
+	local store, records = asyncStore(raider, defender, record, false)
+	Escrow.recover(record.raidId, store, NOW, everyone)
+	expect.eq(records[record.raidId].state, "Committed", "delivered, not voided")
+	expect.truthy(raider.critters["fox"], "the raider has the fox")
+	expect.eq(defender.critters["fox"], nil)
+	expect.eq(raider.glow, 250)
+end
+
+tests["an absent defender's async debit is written once, however often it is delivered"] = function()
+	local raider, defender, record = setup("Async")
+	local store, records, sent = asyncStore(raider, defender, record, false)
+	local function raiderOnly(userId: number): boolean
+		return userId == raider.userId
+	end
+	-- The write lands, then the server dies before the record moves on: a later pass repeats it.
+	expect.throws(function()
+		Escrow.recover(record.raidId, store, NOW, raiderOnly, function(name: string)
+			if name == "deliveredDebit" then
+				error("simulated crash")
+			end
+		end)
+	end)
+	expect.eq(records[record.raidId].state, "Pending", "the record still waits")
+	Escrow.recover(record.raidId, store, NOW + 60, raiderOnly)
+	Escrow.recover(record.raidId, store, NOW + 120, raiderOnly)
+	expect.eq(sent.writes, 1, "one debit written; the repeats found it")
+	expect.eq(records[record.raidId].state, "Committed")
+	expect.eq(defender.stored, 750, "Glow taken once")
+	expect.eq(raider.glow, 250, "Glow given once")
+	expect.eq(defender.lossesToday, 1, "one loss")
+end
+
+tests["a held defender's async debit waits for that server; it stays Pending, never voided"] = function()
+	local raider, defender, record = setup("Async")
+	local store, records, sent = asyncStore(raider, defender, record, true)
+	local function raiderOnly(userId: number): boolean
+		return userId == raider.userId
+	end
+	Escrow.recover(record.raidId, store, NOW, raiderOnly)
+	Escrow.recover(record.raidId, store, NOW + 30, raiderOnly)
+	expect.eq(sent.messages, 2, "asked again on each pass")
+	expect.eq(records[record.raidId].state, "Pending", "waiting for the defender's server")
+	expect.truthy(defender.critters["fox"], "nothing moved yet")
+	-- The defender's server reads the message: recovery there, with the defender loaded.
+	local function defenderOnly(userId: number): boolean
+		return userId == defender.userId
+	end
+	Escrow.recover(record.raidId, store, NOW + 40, defenderOnly)
+	expect.eq(records[record.raidId].state, "Debited")
+	Escrow.recover(record.raidId, store, NOW + 50, raiderOnly)
+	expect.eq(records[record.raidId].state, "Committed")
+	expect.truthy(raider.critters["fox"])
+end
+
+tests["a save confirms a debit only when the exact entry, loot included, is saved"] = function()
+	local _, defender, record = setup("Async")
+	local applied = Escrow.debitDefender(defender, record, NOW)
+	-- A JSON round trip of the same entry still matches.
+	local saved = table.clone(applied)
+	saved.critter = table.clone(applied.critter :: any)
+	expect.truthy(Escrow.sameApplied(applied, saved), "the same entry")
+	-- A stale session's debit for the same raid in the same second, with other loot, does not.
+	local otherGlow = table.clone(saved)
+	otherGlow.glow += 1
+	expect.falsy(Escrow.sameApplied(applied, otherGlow), "other Glow")
+	local otherCritter = table.clone(saved)
+	otherCritter.critter = table.clone(saved.critter :: any)
+	otherCritter.critter.uid = "owl"
+	expect.falsy(Escrow.sameApplied(applied, otherCritter), "another critter")
+	local noCritter = table.clone(saved)
+	noCritter.critter = nil
+	expect.falsy(Escrow.sameApplied(applied, noCritter), "no critter")
+	local mutated = table.clone(saved)
+	mutated.critter = table.clone(saved.critter :: any)
+	mutated.critter.mutation = "Golden"
+	expect.falsy(Escrow.sameApplied(applied, mutated), "the same uid with other fields")
+	local credit = table.clone(saved)
+	credit.role = "Credit"
+	expect.falsy(Escrow.sameApplied(applied, credit), "another role")
+	expect.falsy(Escrow.sameApplied(applied, nil), "nothing saved")
+	expect.falsy(Escrow.sameApplied(applied, "debit"), "not a table")
+end
+
+tests["an Async record can never be voided, even with no debit saved"] = function()
+	local _, defender, record = setup("Async")
+	expect.falsy(Escrow.void(record, defender, NOW), "refused")
+	expect.eq(record.state, "Pending", "left for a delivery")
+	expect.eq(defender.appliedTransfers[record.raidId], nil)
+end
+
+tests["an absent defender's debit accrues offline income to the debit inside its write, then takes its share"] = function()
+	local _, defender, record = setup("Async")
+	defender.stored = 0
+	defender.storedUpdatedAt = NOW - 6 * 3600 -- six hours offline, the fox still on its pad
+	local probe = table.clone(defender)
+	Economy.accrue(probe, NOW)
+	local atDebit = math.floor(probe.stored)
+	expect.truthy(atDebit > 0, "the den earned while offline")
+	local write, applied = Escrow.debitAbsentProfile(defender, record, NOW)
+	expect.truthy(write, "a first debit writes")
+	expect.eq(defender.storedUpdatedAt, NOW, "accrued to the debit")
+	expect.eq(applied.glow, math.floor(atDebit * Config.Loot.storedGlowShare), "the share of the accrued store")
+	expect.eq(defender.stored, probe.stored - applied.glow, "taken from it")
+	-- A repeat later changes nothing, not even the accrual.
+	local stored, at = defender.stored, defender.storedUpdatedAt
+	local again, same = Escrow.debitAbsentProfile(defender, record, NOW + 600)
+	expect.falsy(again, "a repeat writes nothing")
+	expect.eq(same, applied, "the saved entry")
+	expect.eq(defender.stored, stored)
+	expect.eq(defender.storedUpdatedAt, at)
+end
+
+tests["recover refuses an absent defender's async debit when its store cannot reach them"] = function()
+	local raider, defender, record = setup("Async")
+	local store, records = memoryStore(raider, defender, record) -- no debitAbsent
+	local function raiderOnly(userId: number): boolean
+		return userId == raider.userId
+	end
+	expect.throws(function()
+		Escrow.recover(record.raidId, store, NOW, raiderOnly)
+	end)
+	expect.eq(records[record.raidId].state, "Pending")
 	expect.truthy(defender.critters["fox"])
 end
 

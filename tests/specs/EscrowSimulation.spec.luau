@@ -34,9 +34,19 @@
 
 	Live raids happen between two online players and are driven by Escrow.advance (the call that
 	creates the record, recognised by its createNonce even on a retried create); every later path
-	is Escrow.recover, which never debits afresh. A same-server retry of a live call left in
-	flight keeps the first call's createNonce (EscrowService), so it too drives with advance,
-	sometimes after a sweep's recovery already settled or voided the raid.
+	is Escrow.recover, which never debits a Live record afresh. A same-server retry of a live call
+	left in flight keeps the first call's createNonce (EscrowService), so it too drives with
+	advance, sometimes after a sweep's recovery already settled or voided the raid.
+
+	Async records (P1.1) are never voided, and every path delivers their debit (Escrow.recover):
+	  - async raids on away defenders too, built from their saved den
+	  - the raider's server has the defender loaded only sometimes; otherwise the debit goes to
+	    the defender's saved profile in one atomic write while no server holds it (an away
+	    player), or as a message to the server that holds it (an online player, or a crashed
+	    server's lock on an away one). That server delivers it with the defender loaded, on its
+	    next save; some messages are lost, some arrive twice, all may arrive late
+	  - every repeat delivery, from any server, after crashes before or after the write
+
 
 	Storage behaves like DataStore: every load returns a copy, and nothing persists until saved,
 	so a crash loses unsaved work exactly as a real server would. The record store enforces the
@@ -59,8 +69,11 @@
 	  1. every critter uid exists in exactly one place
 	  2. Glow is conserved
 	  3. a den's live losses today, before its last live steal, were under the protection line
-	     measured at that steal's debit (D-036: the line moves with the den's Glow/s)
-	  4. both sides of every committed escrow agree; a voided escrow moved nothing
+	     measured at that steal's debit (D-036: the line moves with the den's Glow/s), and under
+	     the line at the day's highest Glow/s seen at any of its live debits (kept apart, so a
+	     bookkeeping slip in the first check cannot hide a day that lost too much)
+	  4. both sides of every committed escrow agree; a voided escrow moved nothing; no Async
+	     record is ever voided
 ]]
 
 local expect = require("../lib/expect")
@@ -101,6 +114,13 @@ local SHRINK_CHANCE = 0.15 -- per raid round: the owner moves their best pad ear
 local PLANNED_SHRINK_CHANCE = 0.1 -- per raid round: the owner empties the den but one earner before the grab (D-036)
 local REFILL_RAID_CHANCE = 0.5 -- per planned shrink: a raider comes for the refilled den straight after
 local CARRY_SHRINK_CHANCE = 0.5 -- per accepted comeback grab: the alerted owner shrinks the den mid-carry (D-037)
+-- Async delivery (P1.1). Drawn from a second generator, so the live half's draws stay as before.
+local OFFLINE_RAID_CHANCE = 0.3 -- per raid round: an async raid on any den, its owner away or not
+local DEFENDER_HERE_CHANCE = 0.4 -- per async drive: an online defender is in the raider's server
+local DEAD_LOCK_CHANCE = 0.15 -- per offline write: a crashed server's lock still holds the profile
+local DELIVERY_FAIL_CHANCE = 0.1 -- per offline write or message: the DataStore call fails first
+local NUDGE_LOSS_CHANCE = 0.15 -- per message: lost before the defender's server reads it
+local NUDGE_REPEAT_CHANCE = 0.2 -- per message: delivered twice
 
 -- The test's own statement of live protection (decisions D-036, D-037), kept apart from RaidRules
 -- so the simulation checks the rule rather than the implementation against itself: today's live
@@ -178,12 +198,22 @@ local function newWorld(seed: number)
 		awayUntil[userId] = 0
 	end
 
+	local nudges: { [number]: { string } } = {}
+	for userId = 1, PLAYERS do
+		nudges[userId] = {}
+	end
+
 	local world = {
 		rng = rng,
+		arng = rngLib.new(seed * 31 + 7), -- async delivery's draws
 		profiles = profiles,
 		records = records,
 		index = index,
 		awayUntil = awayUntil,
+		nudges = nudges, -- debit messages waiting in each profile's queue (raidIds)
+		viaNudge = false, -- a message's delivery is running
+		-- The highest Glow/s any line input reached at a den's live debits today (invariant 3).
+		dayHigh = {} :: { [number]: { day: number, rate: number } },
 		before = {} :: { [string]: PlayerProfile }, -- each raid's defender as saved before it began
 		store = (nil :: any) :: Escrow.Store,
 		now = START,
@@ -219,6 +249,13 @@ local function newWorld(seed: number)
 			-- D-033: debits that took nothing at all.
 			emptyLive = 0,
 			emptyAsync = 0,
+			-- P1.1: async debits written to an unheld profile, repeats that found them already
+			-- there, messages sent (a crashed server's lock among them) and debits they delivered.
+			offlineDebits = 0,
+			offlineRepeats = 0,
+			messages = 0,
+			deadLocks = 0,
+			messageDebits = 0,
 		},
 	}
 
@@ -277,6 +314,15 @@ local function newWorld(seed: number)
 				local judged = table.clone(before)
 				judged.liveLossBaseRate = after.liveLossBaseRate
 				world.lastLiveLine[after.userId] = liveLine(judged, r.liveBaseRate)
+				-- The day's high (invariant 3): the largest line input at any of today's live debits.
+				local day = RaidRules.dayIndex(applied.at)
+				local high = world.dayHigh[after.userId]
+				if high == nil or high.day ~= day then
+					high = { day = day, rate = 0 }
+					world.dayHigh[after.userId] = high
+				end
+				local grabRate = if type(r.liveBaseRate) == "number" then r.liveBaseRate else 0
+				high.rate = math.max(high.rate, after.liveLossBaseRate :: number, Economy.denRate(before), grabRate)
 				local baseBefore = if today then before.liveLossBaseRate else nil
 				if baseBefore and lostBefore >= Config.LiveRaid.protectionLossShare * baseBefore then
 					stats.refillReopened += 1 -- the day's base alone would have refused it (D-034)
@@ -318,6 +364,16 @@ local function newWorld(seed: number)
 			end
 		end
 
+		-- Glow (P1.1): a Live debit takes up to its request; an Async one its share of what is
+		-- stored at the debit (the snapshot's figure plays no part). Never more than is stored.
+		local stored = math.max(math.floor(before.stored), 0)
+		local bonus = if r.isRevenge then 1 + Config.Loot.revengeBonus else 1
+		local glowRule = if live
+			then math.min(stored, r.glowRequested)
+			else math.floor(stored * Config.Loot.storedGlowShare * bonus)
+		expect.eq(applied.glow, glowRule, `{raidId}: the Glow a {Escrow.kindOf(r)} debit takes`)
+		expect.eq(after.stored, before.stored - applied.glow, `{raidId}: taken from storage`)
+
 		-- Invariant 5 (D-033): an empty live debit grants nothing; every other debit records the
 		-- raid on the defender (Async unchanged, even when empty).
 		local empty = applied.critter == nil and applied.glow == 0
@@ -347,6 +403,9 @@ local function newWorld(seed: number)
 		for raidId, applied in profile.appliedTransfers do
 			if applied.role == "Debit" and before.appliedTransfers[raidId] == nil then
 				checkNewDebit(before, profile, raidId, applied)
+				if world.viaNudge then
+					world.stats.messageDebits += 1
+				end
 			end
 		end
 	end
@@ -380,6 +439,37 @@ local function newWorld(seed: number)
 			assert(profile.appliedTransfers[raidId] == nil, `void proof for {raidId} with a debit in hand`)
 			assert(profiles[profile.userId].appliedTransfers[raidId] == nil, `void proof for {raidId}, debit saved`)
 			profiles[profile.userId] = deepCopy(profile)
+		end,
+		-- An async debit for a defender the driving server does not hold (EscrowService over
+		-- DataService.updateOffline and sendMessage).
+		debitAbsent = function(record, now)
+			local arng = world.arng
+			if arng.chance(DELIVERY_FAIL_CHANCE) then
+				error(`{CRASH}: DataStore call failed`)
+			end
+			local userId = record.defenderUserId
+			local away = world.now < awayUntil[userId]
+			local deadLock = away and arng.chance(DEAD_LOCK_CHANCE)
+			if not away or deadLock then
+				-- A server holds the profile (or a crashed one's lock does): the offline write is
+				-- refused, and the debit goes to that profile's message queue.
+				table.insert(world.nudges[userId], record.raidId)
+				world.stats.messages += 1
+				world.stats.deadLocks += if deadLock then 1 else 0
+				return nil
+			end
+			-- One atomic write on the latest saved profile; nothing to write if already debited.
+			local p = deepCopy(profiles[userId])
+			local had = p.appliedTransfers[record.raidId] ~= nil
+			local applied = Escrow.debitDefender(p, record, now)
+			if had then
+				world.stats.offlineRepeats += 1
+			else
+				checkSave(p)
+				profiles[userId] = p
+				world.stats.offlineDebits += 1
+			end
+			return deepCopy(applied)
 		end,
 	}
 
@@ -439,6 +529,13 @@ local function checkInvariants(world, expectedUids: number, expectedGlow: number
 				beforeLast < line,
 				`{label}: {userId} lost {beforeLast} Glow/s past {line} before the last steal`
 			)
+			-- The day-high bound (C5 note): kept from every live debit today, apart from `line`.
+			local high = world.dayHigh[userId]
+			local dayLine = if high and high.day == today then Config.LiveRaid.protectionLossShare * high.rate else 0
+			expect.truthy(
+				beforeLast < dayLine,
+				`{label}: {userId} lost {beforeLast} Glow/s past the day-high line {dayLine}`
+			)
 		end
 	end
 	for raidId, r in world.records do
@@ -491,19 +588,59 @@ local function runSimulation(seed: number)
 		end
 	end
 
-	-- `live` only for the call that created the record (EscrowService.transferLive).
-	local function drive(raidId: string, live: boolean)
+	-- `live` only for the call that created a Live record (EscrowService.transferLive); an Async
+	-- record is driven by recover on every path (EscrowService.transferAsync too). `present`: who
+	-- is loaded in the driving server; by default every online player.
+	local function drive(raidId: string, live: boolean, present: ((number) -> boolean)?)
+		local r = world.records[raidId]
+		local async = r ~= nil and Escrow.kindOf(r) == "Async"
 		local ok, err = pcall(function()
-			if live then
+			if live and not async then
 				Escrow.advance(raidId, world.store, world.now, crashy)
 			else
-				Escrow.recover(raidId, world.store, world.now, online, crashy)
+				Escrow.recover(raidId, world.store, world.now, present or online, crashy)
 			end
 		end)
 		if not ok and not string.find(tostring(err), CRASH, 1, true) then
 			error(err, 0) -- a real bug, not an injected crash
 		end
 		closeIfTerminal(raidId)
+	end
+
+	-- The raider's server, for one async drive: the raider is loaded there, and an online
+	-- defender only sometimes (otherwise in another server, reached by message).
+	local function raiderServer(raider: number, defender: number): (number) -> boolean
+		local defenderHere = online(defender) and world.arng.chance(DEFENDER_HERE_CHANCE)
+		return function(userId: number): boolean
+			return (userId == raider and online(raider)) or (userId == defender and defenderHere)
+		end
+	end
+
+	-- Each online player's server reads its message queue (on its next save) and recovers each
+	-- raid with that player loaded and the other party elsewhere. Messages can be lost or come
+	-- twice; recovery from the open indexes finishes what a lost one leaves.
+	local function deliverNudges()
+		for userId = 1, PLAYERS do
+			local queue = world.nudges[userId]
+			if #queue == 0 or not online(userId) then
+				continue
+			end
+			world.nudges[userId] = {}
+			local function here(id: number): boolean
+				return id == userId
+			end
+			for _, raidId in queue do
+				local times = if world.arng.chance(NUDGE_LOSS_CHANCE)
+					then 0
+					elseif world.arng.chance(NUDGE_REPEAT_CHANCE) then 2
+					else 1
+				for _ = 1, times do
+					world.viaNudge = true
+					drive(raidId, false, here)
+					world.viaNudge = false
+				end
+			end
+		end
 	end
 
 	-- A server that still believes it holds the defender (another server took the lock; it has
@@ -604,9 +741,13 @@ local function runSimulation(seed: number)
 		grabbed: string?,
 		snapshot: Types.DenSnapshot,
 		measured: number,
-		raidService: boolean?
+		raidService: boolean?,
+		offlineRaid: boolean? -- an async raid from the snapshot, its owner online or away
 	)
-		local kind: Types.TransferKind = if rng.chance(ASYNC_CHANCE) and not raidService then "Async" else "Live"
+		local kind: Types.TransferKind = if offlineRaid
+			then "Async"
+			elseif rng.chance(ASYNC_CHANCE) and not raidService then "Async"
+			else "Live"
 		local loot = RaidRules.lootGlow(snapshot, false)
 		local base: number? = nil
 		if kind == "Live" then
@@ -624,7 +765,11 @@ local function runSimulation(seed: number)
 		assert(created and ours, `{raidId} is new`)
 		world.store.saveRecord(created)
 		table.insert(open, raidId)
-		drive(raidId, true)
+		-- An async raid's own server holds the raider; the defender only sometimes.
+		local function own(): ((number) -> boolean)?
+			return if kind == "Async" then raiderServer(thisRaider, defenderId) else nil
+		end
+		drive(raidId, true, own())
 		if rng.chance(STALE_CHANCE) then
 			staleDrive(raidId)
 		end
@@ -637,7 +782,7 @@ local function runSimulation(seed: number)
 			end
 			local _, ours = Escrow.decideCreate(world.records[raidId], record)
 			expect.truthy(ours, `{raidId}: a retry with the kept nonce is the creating call`)
-			drive(raidId, true)
+			drive(raidId, true, own())
 			retried += 1
 		end
 		if rng.chance(DUPLICATE_CHANCE) then
@@ -645,7 +790,7 @@ local function runSimulation(seed: number)
 			-- lost) must still be recognised as this call's own.
 			local _, again = Escrow.decideCreate(world.records[raidId], record)
 			expect.truthy(again, `{raidId}: a retried create is this call's own`)
-			drive(raidId, rng.chance(0.5))
+			drive(raidId, rng.chance(0.5), own())
 		end
 		if not Escrow.isTerminal(world.records[raidId]) then
 			for _, party in { thisRaider, defenderId } do
@@ -664,6 +809,7 @@ local function runSimulation(seed: number)
 				join(userId)
 			end
 		end
+		deliverNudges()
 
 		local raiderId = pickOnline()
 		local defenderId = if raiderId then pickOnline(raiderId) else nil
@@ -855,6 +1001,24 @@ local function runSimulation(seed: number)
 			end
 		end
 
+		-- An async raid (P1.1) from a snapshot of any other den, whose owner may be away.
+		local arng = world.arng
+		local asyncRaider = if arng.chance(OFFLINE_RAID_CHANCE) then pickOnline() else nil
+		local target = arng.int(1, PLAYERS)
+		if asyncRaider and target ~= asyncRaider then
+			local seen = Matchmaking.buildSnapshot(deepCopy(world.profiles[target]), world.now)
+			local pads = {}
+			for _, c in seen.critters do
+				if c.placement == "Pad" then
+					table.insert(pads, c.uid)
+				end
+			end
+			if #pads > 0 then
+				local measured = Economy.denRate(world.profiles[target])
+				transfer(`async-{i}`, asyncRaider, target, pads[arng.int(1, #pads)], seen, measured, false, true)
+			end
+		end
+
 		if i % 25 == 0 then
 			sweep()
 			checkInvariants(world, expectedUids, expectedGlow, `seed {seed} after raid {i}`)
@@ -875,8 +1039,11 @@ local function runSimulation(seed: number)
 	while #open > 0 do
 		guard += 1
 		assert(guard < 1000, "recovery never finished")
+		deliverNudges()
 		sweep()
 	end
+	-- Late and repeated messages for raids already settled change nothing.
+	deliverNudges()
 	checkInvariants(world, expectedUids, expectedGlow, `seed {seed} final`)
 
 	-- Both sides of every committed escrow agree (where the entry was not yet legitimately
@@ -886,6 +1053,7 @@ local function runSimulation(seed: number)
 		local debit = world.profiles[r.defenderUserId].appliedTransfers[raidId]
 		local credit = world.profiles[r.raiderUserId].appliedTransfers[raidId]
 		if r.state == "Voided" then
+			expect.eq(Escrow.kindOf(r), "Live", `{raidId}: an Async record is never voided`)
 			expect.falsy(debit or credit, `{raidId} voided but a profile applied it`)
 			voided += 1
 			continue
@@ -933,6 +1101,11 @@ tests["1,000 raids with crashes, duplicates, races and long absences never dupli
 	-- Without these it would not prove that a mid-carry shrink cannot refuse the steal (D-037).
 	expect.truthy(stats.carryShrinks > 0, "an owner shrank a refilled den during the carry")
 	expect.truthy(stats.carryShrinkDefeated > 0, "a debit landed only because it counted the grab's rate")
+	-- Without these it would not prove async delivery (P1.1): offline writes and their repeats,
+	-- messages (a crashed server's lock among them) and the debits they delivered.
+	expect.truthy(stats.offlineDebits > 0 and stats.offlineRepeats > 0, "offline debits, and repeats that found them")
+	expect.truthy(stats.messages > 0 and stats.deadLocks > 0, "debits sent by message, past a dead lock too")
+	expect.truthy(stats.messageDebits > 0, "a message's delivery debited the defender in their server")
 end
 
 tests["the same holds across 5 more random seeds"] = function()
