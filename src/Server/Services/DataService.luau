@@ -39,6 +39,11 @@
 	                          "Server" step of Profile.ONBOARDING_STEPS): forward only, pushes
 	                          OnboardingChanged, logs onboarding_step per step completed (P2.9b).
 	                          Never yields. No-op if not loaded here (C6b)
+	  countSuccessfulRaid(userId, raidId)  RaidService, at an escape that moved loot: counts it
+	                          once per raidId on the raider's loaded profile
+	                          (Profile.countSuccessfulRaidOnce) and returns the new lifetime count,
+	                          or nil (not loaded here, bad raidId, or already counted). Never yields
+	                          or saves (C6c)
 	  saveNow(userId, confirm)  saves now and yields until a save whose written data passes
 	                          confirm(savedData) lands: (true) or (false, reason). Bounded: 3 tries
 	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
@@ -421,6 +426,21 @@ function DataService.markRaidLogSeen(userId: number, now: number): boolean
 		entriesSinceLastVisit = Analytics.entriesSince(profile.raidLog, profile.raidLogSeenAt),
 	})
 	return Profile.markRaidLogSeen(profile, now)
+end
+
+-- The raid ids each loaded profile counted lately (Profile.newCountedRaids: weak keys, bounded).
+local countedRaids = Profile.newCountedRaids()
+
+--[[
+	RaidService only (P2.7 opt-in timing, C6c): raider `userId` escaped from raid `raidId` (the
+	escrow raidId) and the loot moved. Counts it on their profile loaded in this server, once per
+	raidId, so a retried escape never counts twice (Profile.countSuccessfulRaidOnce), and returns the
+	new lifetime count for NotificationService.onSuccessfulRaid (1 = the first). nil means nothing
+	was counted: the profile is not loaded here, raidId is not a raidId, or it was already counted.
+	Never yields and never forces a save: the count rides the next autosave or the final save.
+]]
+function DataService.countSuccessfulRaid(userId: number, raidId: string): number?
+	return Profile.countSuccessfulRaidOnce(countedRaids, DataService.getProfile(userId), raidId)
 end
 
 --[[

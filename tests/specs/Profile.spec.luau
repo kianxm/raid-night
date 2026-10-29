@@ -378,6 +378,104 @@ tests["successful raids count up from 0 and a corrupt count starts again"] = fun
 	end
 end
 
+-- Once per raidId (C6c): DataService.countSuccessfulRaid, through countSuccessfulRaidOnce.
+
+tests["a successful raid counts once per raidId, so a retried escape never counts twice"] = function()
+	local counted = Profile.newCountedRaids()
+	local p: any = Profile.new(1, NOW)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, p, "raid-a"), 1, "the first: the opt-in prompt's trigger")
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, p, "raid-a"), nil, "a retry counts nothing and returns nil")
+	expect.eq(p.successfulRaids, 1)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, p, "raid-b"), 2, "another raid counts")
+	for _ = 1, 3 do
+		expect.eq(Profile.countSuccessfulRaidOnce(counted, p, "raid-a"), nil)
+		expect.eq(Profile.countSuccessfulRaidOnce(counted, p, "raid-b"), nil)
+	end
+	expect.eq(Profile.successfulRaids(p), 2)
+
+	-- Another raider's profile keeps its own list; a profile loaded again is a new table and starts
+	-- a new list (the session that counted the raid is over).
+	local other: any = Profile.new(2, NOW)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, other, "raid-a"), 1)
+	expect.eq(Profile.successfulRaids(p), 2, "the first raider's count is untouched")
+	local reloaded: any = table.clone(p)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, reloaded, "raid-c"), 3)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, reloaded, "raid-c"), nil)
+
+	-- A saved count it starts from, corrupt or not, is read the same way as countSuccessfulRaid's.
+	local corrupt: any = Profile.new(3, NOW)
+	corrupt.successfulRaids = 0 / 0
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, corrupt, "raid-a"), 1)
+end
+
+tests["a successful raid on a profile not loaded here counts nothing"] = function()
+	local counted = Profile.newCountedRaids()
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, nil, "raid-a"), nil, "DataService.getProfile returned nil")
+	expect.eq(next(counted), nil, "nothing remembered")
+	local p: any = Profile.new(1, NOW)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, p, "raid-a"), 1, "the raid still counts once it is loaded")
+end
+
+tests["a successful raid with a bad raidId counts nothing and remembers nothing"] = function()
+	local counted = Profile.newCountedRaids()
+	local p: any = Profile.new(1, NOW)
+	local tooLong = string.rep("x", Config.Escrow.maxRaidIdLength + 1)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, p, nil), nil, "no raidId (the old one-argument call) refused")
+	for _, bad in { "", tooLong, 42, true, {}, 0 / 0 } :: { any } do
+		expect.eq(Profile.countSuccessfulRaidOnce(counted, p, bad), nil, `{tostring(bad)} refused`)
+	end
+	expect.eq(p.successfulRaids, nil, "nothing written")
+	expect.eq(next(counted), nil, "nothing remembered")
+	local longest = string.rep("x", Config.Escrow.maxRaidIdLength)
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, p, longest), 1, "a raidId of the longest length counts")
+end
+
+tests["the counted raid ids are bounded per profile, keeping the newest"] = function()
+	local counted = Profile.newCountedRaids()
+	local p: any = Profile.new(1, NOW)
+	local max = Profile.COUNTED_RAIDS_MAX
+	expect.truthy(max >= 8 and max <= 64, "small, but far above the raids between an escape and its retry")
+	local total = max * 3 + 5
+	for i = 1, total do
+		expect.eq(Profile.countSuccessfulRaidOnce(counted, p, `raid-{i}`), i)
+		expect.truthy(#counted[p] <= max, `never more than {max} ids kept`)
+	end
+	expect.eq(#counted[p], max)
+	expect.eq(p.successfulRaids, total)
+	-- The newest max are still remembered: retrying any of them counts nothing.
+	for i = total - max + 1, total do
+		expect.eq(Profile.countSuccessfulRaidOnce(counted, p, `raid-{i}`), nil, `raid-{i} is remembered`)
+	end
+	expect.eq(p.successfulRaids, total)
+	expect.eq(#counted[p], max, "a retry adds nothing")
+	-- The oldest are forgotten (the bound's one cost): only a raid that ended max raids ago.
+	expect.eq(Profile.countSuccessfulRaidOnce(counted, p, "raid-1"), total + 1)
+	expect.eq(#counted[p], max)
+end
+
+tests["DataService.countSuccessfulRaid counts a loaded profile once per raidId, through the pure rule"] = function()
+	local code = source.codeOnly(source.read("src/Server/Services/DataService.luau"))
+	local body = source.functionBody(code, "DataService.countSuccessfulRaid")
+	expect.truthy(body, "countSuccessfulRaid found")
+	expect.truthy(
+		string.find(
+			body :: string,
+			"^function DataService%.countSuccessfulRaid%(userId: number, raidId: string%): number%?\n"
+				.. "%s*return Profile%.countSuccessfulRaidOnce%(countedRaids, DataService%.getProfile%(userId%), raidId%)"
+				.. "%s*end\n$"
+		),
+		"the loaded profile (nil when not loaded) and the pure once-per-raidId rule, and nothing else"
+	)
+	expect.eq(
+		select(2, string.gsub(code, "local countedRaids = Profile%.newCountedRaids%(%)", "")),
+		1,
+		"one module-level list of counted raids"
+	)
+	expect.eq(select(2, string.gsub(code, "countedRaids%s*=", "")), 1, "never replaced")
+	expect.eq(select(2, string.gsub(code, "successfulRaids%s*=", "")), 0, "DataService never assigns the count itself")
+	expect.eq(select(2, string.gsub(code, "Profile%.countSuccessfulRaid%(", "")), 0, "never the un-keyed count")
+end
+
 -- Gear (P2.10)
 
 tests["gear ids are the five P2.10 items and are frozen"] = function()
