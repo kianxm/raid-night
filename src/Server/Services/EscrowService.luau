@@ -62,9 +62,13 @@
 	Studio test profiles (DataService.loadTestProfile, decision D-019) have no load to recover
 	from, so DataService refuses to release one while an escrow for it is open here.
 
+	Live loss rules (decision D-031): transferLive creates "Live" records, whose debit takes no
+	critter from a den protected for the day (Escrow.debitDefender). Live steals use this
+	same-server path, on the two profiles loaded here, until P1.1 adds the cross-server one.
+
 	TODO (P1.1, decision D-012): the void assumes only the creating call debits. Debits delivered
-	by ProfileStore message (or applied to an offline profile) will race it, and EscrowRecord has
-	no `kind`. Read the TODO in Shared/Escrow.luau before adding any async transport.
+	by ProfileStore message (or applied to an offline profile) will race it. Read the TODO in
+	Shared/Escrow.luau before adding any async transport.
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -81,7 +85,7 @@ type EscrowRecord = Types.EscrowRecord
 type EscrowOpenIndex = Types.EscrowOpenIndex
 type PlayerProfile = Types.PlayerProfile
 
-export type TransferKind = "Live" | "Async"
+export type TransferKind = Types.TransferKind
 export type TransferStatus = "Committed" | "InFlight" | "Refused"
 
 local STORE_NAME = "EscrowRecords"
@@ -469,8 +473,17 @@ local function startOrResume(
 		return "Refused", "glowRequested must be a finite number >= 0"
 	end
 	local now = os.time()
-	local record =
-		Escrow.create(raidId, raiderUserId, defenderUserId, critterUid, math.floor(glowRequested), isRevenge, now)
+	-- A "Live" record: its debit applies the live loss rules (Escrow.debitDefender, D-031).
+	local record = Escrow.create(
+		raidId,
+		raiderUserId,
+		defenderUserId,
+		critterUid,
+		math.floor(glowRequested),
+		isRevenge,
+		now,
+		"Live"
+	)
 	-- This call's own create (decideCreate). A retry while this server awaits one for the raid
 	-- reuses the first call's nonce, so a create that landed with its response lost stays its own.
 	local awaiting = retry[raidId]

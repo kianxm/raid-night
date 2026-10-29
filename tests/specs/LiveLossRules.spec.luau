@@ -4,6 +4,7 @@
 local expect = require("../lib/expect")
 local fixtures = require("../lib/fixtures")
 local RaidRules = require("../../src/Shared/RaidRules")
+local Escrow = require("../../src/Shared/Escrow")
 local Economy = require("../../src/Shared/Economy")
 local Config = require("../../src/Shared/Config")
 local Types = require("../../src/Shared/Types")
@@ -43,15 +44,17 @@ end
 
 local raids = 0
 
--- A live steal landing on the defender, as the escrow debit applies it: value the loss while
--- the critter is still in the den, take it, then the usual incoming consequences.
-local function steal(owner: PlayerProfile, raiderUserId: number, uid: string, now: number)
+-- A live steal landing on the defender: the escrow debit of a "Live" record (no Glow, D-015).
+local function debit(owner: PlayerProfile, raiderUserId: number, uid: string, now: number): Types.AppliedTransfer
 	raids += 1
-	local critter = owner.critters[uid]
-	assert(critter and critter.placement == "Pad", `{uid} is not on a pad`)
-	RaidRules.recordLiveLoss(owner, critter, now)
-	owner.critters[uid] = nil
-	RaidRules.recordIncoming(owner, `raid-{raids}`, raiderUserId, critter.speciesId, 0, false, now)
+	local record = Escrow.create(`raid-{raids}`, raiderUserId, owner.userId, uid, 0, false, now, "Live")
+	return Escrow.debitDefender(owner, record, now)
+end
+
+-- A debit that must take the critter.
+local function steal(owner: PlayerProfile, raiderUserId: number, uid: string, now: number)
+	local applied = debit(owner, raiderUserId, uid, now)
+	expect.eq(applied.critter and applied.critter.uid, uid, `the debit took {uid}`)
 end
 
 -- Four Rare foxes (25 Glow/s each) on pads 1-4: 100 Glow/s.
@@ -115,7 +118,7 @@ tests["recordLiveLoss refuses a critter that already left the den"] = function()
 	expect.eq(owner.liveLossBaseRate, nil, "nothing recorded")
 end
 
-tests["protection starts at exactly protectionLossShare of the base and blocks every later grab"] = function()
+tests["protection starts at exactly protectionLossShare of the base and blocks later grabs and debits"] = function()
 	local owner = foxDen()
 	expect.truthy((canGrab(owner, 1, 1, NOW)))
 	steal(owner, 1, "fox1", NOW)
@@ -128,6 +131,11 @@ tests["protection starts at exactly protectionLossShare of the base and blocks e
 	local _, reason = canGrab(owner, 4, 3, later + 3600, later)
 	expect.eq(reason, Reason.LiveProtected, "a fresh raider, long after the safety window")
 	expect.eq(select(2, canGrab(owner, 4, 3, DAY_START + DAY - 1, later)), Reason.LiveProtected, "all day")
+	-- A grab that slipped through anyway (checked before the line was crossed) takes nothing.
+	local slipped = debit(owner, 4, "fox3", later + 3600)
+	expect.eq(slipped.critter, nil, "the debit refuses too")
+	expect.truthy(owner.critters.fox3, "fox3 stays home")
+	expect.eq(owner.liveLossRateToday, 50, "nothing more lost")
 end
 
 tests["a new UTC day lifts protection; the next loss measures a new base"] = function()

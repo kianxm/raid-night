@@ -7,6 +7,9 @@
 	  - duplicate deliveries (the same escrow driven twice)
 	  - defenders moving the targeted critter into the vault mid-raid
 	  - concurrent raids on the same defender
+	  - pile-ons: a crowd of raiders taking turns on one den in the same hour, each for a critter
+	    of its own, so dens reach live protection and the async count cap (decision D-031)
+	  - Live and Async records mixed on the same defenders: each kind has its own daily loss rule
 	  - players leaving after a crashed transfer and staying away 5 to 12 days, so open escrows
 	    outlive the 7-day appliedTransfers retention
 	  - on every join: prune appliedTransfers against the player's open-escrow index, then
@@ -28,10 +31,15 @@
 	forward-only rule (Escrow.canReplace) on every write; records and open indexes are written
 	through the same pure rules as EscrowService (Escrow.decideCreate, Escrow.indexAdd).
 
+	On every save of a profile that gains a debit, it checks the daily loss rule for the record's
+	kind (Escrow invariant 4, decision D-031): a Live debit takes nothing from a den that was
+	already protected, and records exactly the stolen critter's Glow/s; an Async debit takes
+	nothing once the defender lost Config.Limits.maxLossesPerDay critters that day.
+
 	After every sweep and at the end, it checks:
 	  1. every critter uid exists in exactly one place
 	  2. Glow is conserved
-	  3. no defender ever exceeds the daily loss cap
+	  3. a den's live losses today pass the protection line by at most its last loss
 	  4. both sides of every committed escrow agree; a voided escrow moved nothing
 ]]
 
@@ -44,10 +52,12 @@ local RaidRules = require("../../src/Shared/RaidRules")
 local Matchmaking = require("../../src/Shared/Matchmaking")
 local Config = require("../../src/Shared/Config")
 local CritterCatalog = require("../../src/Shared/CritterCatalog")
+local Economy = require("../../src/Shared/Economy")
 
 type PlayerProfile = Types.PlayerProfile
 type EscrowRecord = Types.EscrowRecord
 type EscrowOpenIndex = Types.EscrowOpenIndex
+type AppliedTransfer = Types.AppliedTransfer
 
 local START = 1_800_000_000
 local HOUR = 3600
@@ -62,6 +72,9 @@ local CONCURRENT_CHANCE = 0.1
 local LEAVE_CHANCE = 0.1 -- per party, after a transfer that did not finish
 local STALE_CHANCE = 0.3 -- per drive: a stale server tries to recover the raid first
 local RETRY_CHANCE = 0.5 -- per live call left in flight: the caller retries it with the same nonce
+local ASYNC_CHANCE = 0.3 -- per record: an Async record (count cap) instead of a Live one (value rule)
+local PILE_ON_CHANCE = 0.1 -- per raid round: a crowd takes turns on the same den
+local PILE_ON_MAX = 6 -- extra raiders in a pile-on, at most
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -110,12 +123,58 @@ local function newWorld(seed: number)
 		before = {} :: { [string]: PlayerProfile }, -- each raid's defender as saved before it began
 		store = (nil :: any) :: Escrow.Store,
 		now = START,
+		lastLiveLoss = {} :: { [number]: number }, -- Glow/s of each den's latest live loss
+		-- How often each daily loss rule was met, so a run proves it exercised them.
+		stats = { liveTaken = 0, liveRefused = 0, protectionReached = 0, asyncTaken = 0, asyncCapped = 0 },
 	}
 
 	-- A server can load or save only a profile it holds. Touching an away player's profile is a
 	-- bug (recovery ignored presence), not an injected failure, so it fails the run.
 	local function held(userId: number)
 		assert(world.now >= awayUntil[userId], `touched the profile of away player {userId}`)
+	end
+
+	-- Escrow invariant 4 (decision D-031), on every save. `before` is the saved profile the debit's
+	-- working copy was loaded from: nothing else saves that profile in between.
+	local function checkNewDebit(before: PlayerProfile, after: PlayerProfile, raidId: string, applied: AppliedTransfer)
+		local r = records[raidId]
+		local target = if r.critterUid then before.critters[r.critterUid] else nil
+		local onPad = target ~= nil and target.placement == "Pad"
+		local stats = world.stats
+		if Escrow.kindOf(r) == "Live" then
+			local wasProtected = RaidRules.liveProtected(before, applied.at)
+			if applied.critter then
+				assert(not wasProtected, `{raidId}: a live debit took a critter from a protected den`)
+				local today = before.lossDay == RaidRules.dayIndex(applied.at)
+				local lostBefore = if today then before.liveLossRateToday or 0 else 0
+				local value = Economy.critterRate(applied.critter, before.rebirths)
+				expect.eq(after.liveLossRateToday, lostBefore + value, `{raidId}: live loss recorded at its Glow/s`)
+				world.lastLiveLoss[after.userId] = value
+				stats.liveTaken += 1
+				if RaidRules.liveProtected(after, applied.at) then
+					stats.protectionReached += 1
+				end
+			elseif wasProtected and onPad then
+				stats.liveRefused += 1
+			end
+		else
+			local atCap = RaidRules.lossesToday(before, applied.at) >= Config.Limits.maxLossesPerDay
+			if applied.critter then
+				assert(not atCap, `{raidId}: an async debit took a critter at the daily cap`)
+				stats.asyncTaken += 1
+			elseif atCap and onPad then
+				stats.asyncCapped += 1
+			end
+		end
+	end
+
+	local function checkSave(profile: PlayerProfile)
+		local before = profiles[profile.userId]
+		for raidId, applied in profile.appliedTransfers do
+			if applied.role == "Debit" and before.appliedTransfers[raidId] == nil then
+				checkNewDebit(before, profile, raidId, applied)
+			end
+		end
 	end
 
 	world.store = {
@@ -136,10 +195,12 @@ local function newWorld(seed: number)
 		end,
 		saveProfile = function(profile)
 			held(profile.userId)
+			checkSave(profile)
 			profiles[profile.userId] = deepCopy(profile)
 		end,
 		saveProfileWithoutEntry = function(profile, raidId)
 			held(profile.userId)
+			checkSave(profile)
 			-- This store's sessions are never stale, so the proof passes; it must never pass while
 			-- a debit for the raid is saved (voiding then would strand the loot).
 			assert(profile.appliedTransfers[raidId] == nil, `void proof for {raidId} with a debit in hand`)
@@ -189,11 +250,21 @@ local function checkInvariants(world, expectedUids: number, expectedGlow: number
 		count += 1
 	end
 
+	local today = RaidRules.dayIndex(world.now)
 	for userId, p in world.profiles do
 		for uid in p.critters do
 			place(uid, `profile {userId}`)
 		end
-		expect.truthy(p.lossesToday <= Config.Limits.maxLossesPerDay, `{label}: loss cap exceeded for {userId}`)
+		-- Today's live losses pass the protection line by at most the steal that crossed it.
+		local base, lost = p.liveLossBaseRate, p.liveLossRateToday
+		if p.lossDay == today and base and lost then
+			local beforeLast = lost - world.lastLiveLoss[userId]
+			local line = Config.LiveRaid.protectionLossShare * base
+			expect.truthy(
+				beforeLast < line,
+				`{label}: {userId} lost {beforeLast} Glow/s past {line} before the last steal`
+			)
+		end
 	end
 	for raidId, r in world.records do
 		local flight = inFlight(world, r)
@@ -380,21 +451,33 @@ local function runSimulation(seed: number)
 				end
 			end
 
-			local raiders = { raiderId }
+			local raids = { { raider = raiderId, grabbed = grabbed } }
 			if rng.chance(CONCURRENT_CHANCE) then
 				local second = pickOnline(defenderId) -- a second raider hits the same den at once
 				if second and second ~= raiderId then
-					table.insert(raiders, second)
+					table.insert(raids, { raider = second, grabbed = grabbed })
+				end
+			end
+			if #pads > 0 and rng.chance(PILE_ON_CHANCE) then
+				-- A crowd takes turns on the den, each for a critter of its own (from the same stale
+				-- snapshot): enough losses in one day to reach live protection or the async cap.
+				for _ = 1, rng.int(2, PILE_ON_MAX) do
+					local extra = pickOnline(defenderId)
+					if extra then
+						table.insert(raids, { raider = extra, grabbed = pads[rng.int(1, #pads)] })
+					end
 				end
 			end
 
-			for n, thisRaider in raiders do
+			for n, raid in raids do
+				local thisRaider = raid.raider
 				if not (online(thisRaider) and online(defenderId)) then
 					continue -- the server refuses a live transfer unless both are loaded there
 				end
-				local raidId = if n == 1 then `raid-{i}` else `raid-{i}-b`
+				local raidId = if n == 1 then `raid-{i}` else `raid-{i}-{n}`
 				local loot = RaidRules.lootGlow(snapshot, false)
-				local record = Escrow.create(raidId, thisRaider, defenderId, grabbed, loot, false, world.now)
+				local kind: Types.TransferKind = if rng.chance(ASYNC_CHANCE) then "Async" else "Live"
+				local record = Escrow.create(raidId, thisRaider, defenderId, raid.grabbed, loot, false, world.now, kind)
 				record.createNonce = `call-{raidId}`
 				world.before[raidId] = deepCopy(world.profiles[defenderId])
 				-- Index both parties before the record exists, as EscrowService does.
@@ -486,13 +569,13 @@ local function runSimulation(seed: number)
 	for userId = 1, PLAYERS do
 		expect.eq(next(world.index[userId]), nil, `open index of {userId} not empty`)
 	end
-	return committed, voided, protected, staleRefused, retried
+	return committed, voided, protected, staleRefused, retried, world.stats
 end
 
 local tests = {}
 
 tests["1,000 raids with crashes, duplicates, races and long absences never duplicate or lose anything"] = function()
-	local committed, voided, protected, staleRefused, retried = runSimulation(1)
+	local committed, voided, protected, staleRefused, retried, stats = runSimulation(1)
 	expect.truthy(committed >= RAIDS * 0.8, `expected most escrows to commit, got {committed}`)
 	expect.truthy(voided > 0, "the void path was exercised")
 	-- Without this the simulation would not prove that pruning skips open raids.
@@ -500,6 +583,11 @@ tests["1,000 raids with crashes, duplicates, races and long absences never dupli
 	-- Without this it would not prove the void proof stops a stale server.
 	expect.truthy(staleRefused > 0, "a stale server met a Pending record whose debit was saved")
 	expect.truthy(retried > 0, "a live call left in flight was retried with its kept nonce")
+	-- Without these it would not prove invariant 4 for each kind (decision D-031).
+	expect.truthy(stats.protectionReached > 0, "a live steal crossed a den's protection line")
+	expect.truthy(stats.liveRefused > 0, "a live debit met a protected den and took nothing")
+	expect.truthy(stats.asyncCapped > 0, "an async debit met the daily count cap and took nothing")
+	expect.truthy(stats.liveTaken > 0 and stats.asyncTaken > 0, "both kinds stole critters")
 end
 
 tests["the same holds across 5 more random seeds"] = function()

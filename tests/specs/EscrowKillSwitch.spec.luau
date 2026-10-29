@@ -97,13 +97,15 @@ tests["recovery finishes records crashed at every stage with every switch off"] 
 	for i, case in stuck do
 		fixtures.give(defender, fixtures.critter(case.uid, "crescent_fox", "Pad", i))
 	end
+	-- A big earner, so three live losses stay under the protection line (decision D-031).
+	fixtures.give(defender, fixtures.critter("king", "king_bandit", "Pad", #stuck + 1))
 	defender.stored = 1000
 	profiles[1], profiles[2] = raider, defender
 	local glowBefore = raider.glow + raider.stored + defender.glow + defender.stored
 
 	-- Start each while switches are on, then crash it at a different point.
 	for _, case in stuck do
-		store.saveRecord(Escrow.create(case.raidId, 1, 2, case.uid, 100, false, NOW))
+		store.saveRecord(Escrow.create(case.raidId, 1, 2, case.uid, 100, false, NOW, "Live"))
 		local ok = pcall(Escrow.advance, case.raidId, store, NOW, function(name: string)
 			if name == case.after then
 				error("simulated crash after " .. name)

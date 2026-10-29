@@ -191,7 +191,7 @@ tests["the untradeable flag survives an escrow transfer"] = function()
 	local rescued = fixtures.give(defender, fixtures.critter("rescued", "crescent_fox", "Pad", 1))
 	rescued.untradeable = true
 	local profiles = { [1] = raider, [2] = defender }
-	local records = { ["raid-1"] = Escrow.create("raid-1", 1, 2, "rescued", 0, false, NOW) }
+	local records = { ["raid-1"] = Escrow.create("raid-1", 1, 2, "rescued", 0, false, NOW, "Live") }
 
 	local record = Escrow.advance("raid-1", memoryStore(profiles, records), NOW)
 
