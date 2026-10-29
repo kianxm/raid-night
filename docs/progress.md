@@ -56,7 +56,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
 | P1.8 | economy | P1.7 | Blocked | #96 (stacked on #95) | 1 | Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
 | P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); reviewer APPROVED (no Glow bonus on live revenge, retries keep identical args). Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
-| P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit), preview/phase1 | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Dry run: all 17 PRs merge in order into `preview/phase1` (a6ad68f, no PR), 5 conflicts resolved, 340 tests + EscrowSimulation green, lint/format/types clean. P1.10c: preview scripts hand-synced into the open edit place (27 scripts), A + B1 passed, then Studio MCP play control wedged after the first forced stop; recovery check, rest of the pass and the soak not run; Studio restored to integration, nothing saved (D-055). Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
+| P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit), preview/phase1 | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Dry run: all 17 PRs merge in order into `preview/phase1` (a6ad68f, no PR), 5 conflicts resolved, 340 tests + EscrowSimulation green, lint/format/types clean. P1.10c: preview scripts hand-synced into the open edit place (27 scripts), A + B1 passed, then Studio MCP play control wedged after the first forced stop; Studio restored, nothing saved (D-055). Retry after Studio recovered: P1.1 forced-shutdown recovery PASS (p11-sd-1 committed once, glow 474 on record and both appliedTransfers); A, B1, B5, D (matchmaking), E (live revenge), F core (#106 escape/shield/revenge token/loss/pair, Shielded refusal, revenge raid ~27.5% Glow, #109 Outgoing log + token spent), G (replays #99/#107) passed; no game bugs. Not run: B2-B4, C, #101 exploit/guard/trap/timeout steps, H (UI), parts of F/G/I, and the soak (DataStore mode only accepts a real loaded raider; test raiders refused) | Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
 
 ## Setup notes
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
@@ -98,7 +98,8 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 - Studio MCP wedged ("Start play hasn't finished yet" for 30+ min after a forced stop): restart Studio
   or the MCP plugin before the next Studio run.
-- Test data left in the Studio DataStore (D-055): EscrowRecords `p11-sd-1` is Pending with raider =
+- Test data (D-055, updated): `p11-sd-1` is now Committed: Kian's account 11086525754 gained test
+  critter `seed-1-1` and 474 Glow (133018 → 133492); keep or remove it. Earlier note: `p11-sd-1` was Pending with raider =
   Kian's real account 11086525754 and test defender -1 already debited of critter `seed-1-1` (Glow 0).
   On preview/Phase 1 code the recovery sweep commits it once into 11086525754 (that is the pending
   forced-shutdown check: expect exactly one seed-1-1). On today's integration code an old recovery may
@@ -180,6 +181,7 @@ dropped based on real play.
 - An empty Async debit still counts a pair slot on the defender's side (data #109; pre-existing; fairness).
 - While a revenge transfer is InFlight the lock is released and the token still exists, so a second revenge raid on the same token is possible (bounded by the pair limit; refuse tokens named by an open escrow) (reviewer #109; small). RaidRules.recordOutgoing doc comment is stale vs D-053 (raid; tiny).
 - A credit still in flight doesn't count toward the raider's pair limit yet (data #109; small).
+- Soak tooling: DataStore mode refuses test raiders ("raider must be loaded in this server"), so a forced-shutdown soak needs a real account; add a Studio-only test-raider load (data; small). Seeded test stored jumps 1000 → ~36900 on first raid from an old storedUpdatedAt (kit text stale).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 - Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
 - Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).
