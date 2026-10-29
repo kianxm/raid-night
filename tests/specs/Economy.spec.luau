@@ -709,4 +709,143 @@ tests["next egg odds switch with the rescue rule"] = function()
 	expect.eq(owner.tiers[#owner.tiers].tier, "Rare")
 end
 
+-- P0.12: Robux-linked Glow multipliers (D-030) ---------------------------------------------------
+
+local NONE = { vip = false, lanternNight = false }
+local VIP = { vip = true, lanternNight = false }
+local LANTERN = { vip = false, lanternNight = true }
+local BOTH = { vip = true, lanternNight = true }
+
+tests["glow boosts never apply to a restricted player"] = function()
+	for _, boosts in { NONE, VIP, LANTERN, BOTH } do
+		expect.eq(Economy.glowBoostFactor(boosts, true, true), 1, "restricted")
+	end
+end
+
+tests["glow boosts fail closed while the policy is unknown"] = function()
+	for _, boosts in { NONE, VIP, LANTERN, BOTH } do
+		expect.eq(Economy.glowBoostFactor(boosts, nil, true), 1, "unknown policy counts as restricted")
+	end
+end
+
+tests["glow boosts are off while purchases are switched off"] = function()
+	for _, boosts in { NONE, VIP, LANTERN, BOTH } do
+		expect.eq(Economy.glowBoostFactor(boosts, false, false), 1, "kill switch")
+		expect.eq(Economy.glowBoostFactor(boosts, true, false), 1, "kill switch and restricted")
+	end
+end
+
+tests["glow boosts stack additively for an unrestricted player"] = function()
+	local vipBonus = Config.Boosts.vipGlowBonus
+	local lanternBonus = Config.Boosts.lanternNightGlowBonus
+	expect.eq(Economy.glowBoostFactor(NONE, false, true), 1, "no boosts")
+	expect.eq(Economy.glowBoostFactor(VIP, false, true), 1 + vipBonus, "VIP (1.5x at launch values)")
+	expect.eq(Economy.glowBoostFactor(LANTERN, false, true), 1 + lanternBonus, "Lantern Night (1.5x)")
+	expect.eq(Economy.glowBoostFactor(BOTH, false, true), 1 + vipBonus + lanternBonus, "both (2.0x)")
+	if vipBonus > 0 and lanternBonus > 0 then
+		local multiplied = (1 + vipBonus) * (1 + lanternBonus)
+		expect.truthy(Economy.glowBoostFactor(BOTH, false, true) < multiplied, "added, not multiplied")
+	end
+end
+
+tests["glow boosts at the launch values"] = function()
+	-- Pins D-030's launch numbers; update with the Config.Boosts values if they are retuned.
+	expect.eq(Economy.glowBoostFactor(VIP, false, true), 1.5)
+	expect.eq(Economy.glowBoostFactor(LANTERN, false, true), 1.5)
+	expect.eq(Economy.glowBoostFactor(BOTH, false, true), 2.0)
+end
+
+tests["accrue with a factor multiplies what is earned over the window"] = function()
+	local plain = fixtures.veteran(1, NOW)
+	fixtures.give(plain, fixtures.critter("a", "crumb_rat")) -- 3/s
+	local boosted = fixtures.veteran(2, NOW)
+	fixtures.give(boosted, fixtures.critter("a", "crumb_rat"))
+	expect.eq(Economy.accrue(plain, NOW + 100), 300, "factor defaults to 1")
+	expect.eq(Economy.accrue(boosted, NOW + 100, 2), 600, "factor 2 doubles it")
+	expect.eq(boosted.stored, 2 * plain.stored, "stored doubled")
+end
+
+tests["collect passes its factor to accrue"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse")) -- 1/s
+	expect.eq(Economy.collect(p, NOW + 10, 1.5), 15, "banked at 1.5x")
+	expect.eq(p.glow, 15)
+end
+
+tests["the storage cap ignores the factor"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse")) -- 1/s
+	local cap = Economy.storageCapSeconds(p.denLevel)
+	expect.eq(Economy.storageCap(p), cap, "cap is the unboosted rate x cap seconds")
+
+	-- Boosted, storage fills twice as fast but no deeper.
+	Economy.accrue(p, NOW + cap / 2 - 10, 2)
+	expect.eq(p.stored, cap - 20, "just under the cap")
+	Economy.accrue(p, NOW + cap, 2)
+	expect.eq(p.stored, cap, "clamped at the unboosted cap")
+	expect.eq(Economy.storageCap(p), cap, "boosting never raised the cap")
+
+	-- The boost ends: stored is not above the cap, so nothing has to be clawed back.
+	Economy.accrue(p, NOW + 2 * cap)
+	expect.eq(p.stored, cap, "still exactly at the cap")
+	expect.eq(Economy.storageFillShare(p), 1)
+end
+
+tests["a boost composes with mutation, placement and rebirth"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse")) -- 1/s
+	p.rebirths = 1 -- 1.5x at launch values
+	local rebirth = Economy.rebirthMultiplier(1)
+	expect.eq(Economy.accrue(p, NOW + 100, 1.5), 100 * 1 * rebirth * 1.5, "base x rebirth x factor")
+	expect.eq(p.stored, 225, "1 x 1.5 x 1.5 x 100 s at launch values")
+
+	local q = fixtures.veteran(2, NOW)
+	local c = fixtures.give(q, fixtures.critter("v", "dusk_mouse", "Vault"))
+	c.mutation = "Shiny"
+	q.rebirths = 1
+	local expected = 1 * Config.Mutations.Shiny * Config.Income.vaultMultiplier * rebirth * 2
+	expect.near(Economy.accrue(q, NOW + 1, 2), expected, 1e-12, "base x mutation x placement x rebirth x factor")
+end
+
+tests["a bad factor falls back to 1"] = function()
+	for _, bad in { -1, 0 / 0, math.huge } do
+		local p = fixtures.veteran(1, NOW)
+		fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
+		expect.eq(Economy.accrue(p, NOW + 10, bad), 10, `factor {bad}`)
+	end
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
+	expect.eq(Economy.accrue(p, NOW + 10, 0), 0, "0 is a valid factor: earns nothing")
+end
+
+tests["timing rule: accrue at the old factor before Lantern Night starts and ends"] = function()
+	local factorOn = Economy.glowBoostFactor(LANTERN, false, true)
+	local start, finish = NOW + 100, NOW + 100 + Config.Boosts.lanternNightSeconds
+
+	-- Following the rule: accrue at 1 when it starts, at the boost when it ends.
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse")) -- 1/s
+	Economy.accrue(p, start, 1)
+	Economy.accrue(p, finish, factorOn)
+	Economy.accrue(p, finish + 50, 1)
+	local expected = 100 + Config.Boosts.lanternNightSeconds * factorOn + 50
+	expect.eq(p.stored, expected, "only the Lantern Night window is boosted")
+
+	-- Breaking it: one late accrue at the new factor boosts the 100 s before the start too.
+	local q = fixtures.veteran(2, NOW)
+	fixtures.give(q, fixtures.critter("a", "dusk_mouse"))
+	Economy.accrue(q, start + 10, factorOn)
+	expect.eq(q.stored, 110 * factorOn, "why the rule exists: earlier time got boosted")
+end
+
+tests["timing rule: a boosted accrue first makes internal factor-1 accrues a no-op"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse")) -- 1/s
+	Economy.accrue(p, NOW + 100, 2)
+	local ok = Economy.place(p, "a", "Vault", nil, 6, NOW + 100)
+	expect.truthy(ok)
+	expect.eq(p.stored, 200, "place's own accrue added nothing at factor 1")
+	expect.eq(Economy.collect(p, NOW + 100), 200, "nor did collect's")
+end
+
 return tests

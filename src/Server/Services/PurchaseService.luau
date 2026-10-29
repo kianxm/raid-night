@@ -29,8 +29,16 @@
 	  - NO paid randomness at launch (eggs and luck boosts bought with Robux are paid random
 	    items). Phase 2 adds them with an odds panel and PolicyService checks.
 	  - No randomness in any launch product (D-029).
-	  - Lantern Night ships only after a reviewer policy audit and PolicyService checks (D-029
-	    open policy check: a Robux-bought earning boost while Glow buys random eggs).
+	  - Robux-linked Glow multipliers (D-030: VIP's +50% Glow and Lantern Night) never apply to a
+	    player whose PolicyService info has ArePaidRandomItemsRestricted. Fail closed: until the
+	    policy result arrives, or if it can't be read, the player counts as restricted. They are
+	    also off while Config.Flags.purchases is false. Economy.glowBoostFactor encodes all three
+	    (pure, tested); Economy.accrue applies it. VIP keeps its non-Glow perks for restricted
+	    players. Both products ship only after the P2.8 reviewer policy audit and PolicyService
+	    check.
+	  - The restriction flag, VIP ownership and Lantern Night state come only from the server
+	    (PolicyService, MarketplaceService, the server's Lantern Night timer), never from a client
+	    request. Accrue at the OLD factor before any of them changes (Economy header).
 	  - Never sell the return of a stolen critter.
 	  - ProcessReceipt is idempotent: store receipt ids on the profile; grant once; only return
 	    PurchaseGranted after the profile change is saved.
@@ -43,8 +51,10 @@
 	TODO (P2.8, Lantern Night):
 	  [ ] Stacking rule: a second purchase while a boost is active extends its end time; it never
 	      multiplies (+50% stays +50%)
-	  [ ] Server-wide multiplier applied in Economy.accrue via a passed-in factor (keeps
-	      Economy pure; no clock or server state inside Shared)
+	  [x] Server-wide multiplier applied in Economy.accrue via a passed-in factor (P0.12:
+	      Economy.glowBoostFactor + accrue's `factor`; no clock or server state inside Shared)
+	  [ ] One server helper computes each player's factor; every accrue of an online player
+	      (IncomeService, EscrowService, Matchmaking) passes it, or accrues with it first
 	  [ ] Announcement text goes through the text filter if it includes player-provided text
 	      (display names don't need filtering)
 ]]

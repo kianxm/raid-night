@@ -7,6 +7,22 @@
 	den's income rate (placing, moving, removing critters; upgrading the den). Accrual uses the
 	current rate for the whole elapsed period, so changing the rate first would pay the new rate
 	for time earned at the old one.
+
+	Robux-linked Glow multipliers (decision D-030). `glowBoostFactor` turns a player's boosts (VIP,
+	an active Lantern Night in their server) into one factor; `accrue(profile, now, factor)` applies
+	it. Earned = base x mutation x placement x rebirth x factor, so a boost multiplies the
+	rebirth-adjusted rate. The storage cap never uses the factor (cap = denRate x
+	storageCapSeconds): a boost fills storage faster, never deeper, so a boost ending can never
+	leave stored Glow above the cap.
+
+	Timing rule: treat the factor like the rate. ALWAYS accrue at the OLD factor before the factor
+	changes: Lantern Night starting or ending, VIP ownership becoming known (or bought mid-session),
+	the PolicyService result arriving, and the player joining or leaving a server with an active
+	Lantern Night. Accrual pays the factor it is given for the whole elapsed period, so a late
+	accrue at the new factor would boost (or un-boost) time already earned. Functions here that
+	accrue internally (collect without a factor, place, autoPlace, upgradeDen, buyEgg) use factor
+	1, so a server running a boost accrues with the factor first; their internal accrue is then a
+	no-op (no time has passed).
 ]]
 
 local Types = require("./Types")
@@ -77,9 +93,49 @@ function Economy.padCount(denLevel: number): number
 	return math.min(30, 6 + math.floor((denLevel - 1) / 2))
 end
 
--- Moves income earned since `storedUpdatedAt` into `stored`, up to the storage cap.
--- Never removes Glow that is already stored, even if the cap shrank. Returns Glow added.
-function Economy.accrue(profile: PlayerProfile, now: number): number
+export type GlowBoosts = {
+	vip: boolean, -- owns the VIP pass (server checks MarketplaceService)
+	lanternNight: boolean, -- a Lantern Night is active in this player's server (server timer)
+}
+
+--[[
+	The Glow factor for a player's Robux-linked boosts (decision D-030). Bonuses from
+	Config.Boosts stack additively: 1 + VIP bonus + Lantern Night bonus (2.0x, not 1.5 x 1.5).
+	Returns 1 (no boost) when:
+	  - `paidRandomRestricted` (PolicyService ArePaidRandomItemsRestricted) is true, or nil:
+	    fail closed, an unknown policy counts as restricted;
+	  - `purchasesEnabled` is false (callers pass Config.Flags.purchases, the kill switch).
+	Every input must come from the server (PolicyService, MarketplaceService, the server's
+	Lantern Night timer), never from a client request.
+]]
+function Economy.glowBoostFactor(boosts: GlowBoosts, paidRandomRestricted: boolean?, purchasesEnabled: boolean): number
+	if paidRandomRestricted ~= false or purchasesEnabled ~= true then
+		return 1
+	end
+	local factor = 1
+	if boosts.vip == true then
+		factor += Config.Boosts.vipGlowBonus
+	end
+	if boosts.lanternNight == true then
+		factor += Config.Boosts.lanternNightGlowBonus
+	end
+	return factor
+end
+
+-- A factor accrue can use: a finite number >= 0, otherwise 1, so a bad value never removes
+-- Glow or fills storage instantly.
+local function validFactor(factor: number?): number
+	if type(factor) == "number" and factor >= 0 and factor < math.huge then
+		return factor
+	end
+	return 1
+end
+
+-- Moves income earned since `storedUpdatedAt` into `stored`, up to the storage cap. `factor`
+-- (default 1, from glowBoostFactor) multiplies what is earned but not the cap, which stays at
+-- the unboosted denRate x storageCapSeconds. Never removes Glow that is already stored, even if
+-- the cap shrank. Returns Glow added. Follow the header's timing rule when passing a factor.
+function Economy.accrue(profile: PlayerProfile, now: number, factor: number?): number
 	local elapsed = now - profile.storedUpdatedAt
 	if elapsed <= 0 then
 		return 0
@@ -88,15 +144,16 @@ function Economy.accrue(profile: PlayerProfile, now: number): number
 	local capAmount = rate * Economy.storageCapSeconds(profile.denLevel)
 	local before = profile.stored
 	if before < capAmount then
-		profile.stored = math.min(capAmount, before + rate * elapsed)
+		profile.stored = math.min(capAmount, before + rate * validFactor(factor) * elapsed)
 	end
 	profile.storedUpdatedAt = now
 	return profile.stored - before
 end
 
--- Banks whole Glow from storage into the safe wallet. Returns the amount banked.
-function Economy.collect(profile: PlayerProfile, now: number): number
-	Economy.accrue(profile, now)
+-- Banks whole Glow from storage into the safe wallet, accruing first at `factor` (default 1).
+-- Returns the amount banked.
+function Economy.collect(profile: PlayerProfile, now: number, factor: number?): number
+	Economy.accrue(profile, now, factor)
 	local amount = math.floor(profile.stored)
 	profile.stored -= amount
 	profile.glow += amount
@@ -219,7 +276,8 @@ function Economy.speciesOdds(tier: Tier): { SpeciesChance }
 	return odds
 end
 
--- Storage cap in Glow (not seconds) at the den's current rate and level.
+-- Storage cap in Glow (not seconds) at the den's current unboosted rate and level. Boosts
+-- (glowBoostFactor) never raise it.
 function Economy.storageCap(profile: PlayerProfile): number
 	return Economy.denRate(profile) * Economy.storageCapSeconds(profile.denLevel)
 end
