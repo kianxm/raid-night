@@ -126,8 +126,14 @@ export type PlayerProfile = {
 	-- Raid safety state
 	shieldUntil: number,
 	lossDay: number, -- UTC day index the daily counters belong to
-	lossesToday: number, -- critters lost today (capped by Config.Limits.maxLossesPerDay)
-	pairRaidsToday: { [string]: number }, -- other userId (as string) -> raids between you today
+	-- Critters lost today, live and async. Async raids stop at Config.Limits.maxLossesPerDay; live
+	-- steals use the value rule below instead (decision D-031).
+	lossesToday: number,
+	pairRaidsToday: { [string]: number }, -- other userId (as string) -> raids and live steals between you today
+	-- Live loss rules (decision D-031). Both belong to lossDay and go back to nil when the day rolls
+	-- (RaidRules.resetDailyIfNeeded). Missing = no live loss today, so no migration.
+	liveLossBaseRate: number?, -- the den's Glow/s just before its first live loss today
+	liveLossRateToday: number?, -- Glow/s of the critters lost to live steals today, summed
 
 	-- Raid history and idempotency
 	raidLog: { RaidLogEntry },
@@ -176,6 +182,10 @@ export type MatchEntry = {
 -- Voided: cancelled before any debit (cheat detected, raid invalid). Terminal.
 export type EscrowState = "Pending" | "Debited" | "Committed" | "Voided"
 
+-- Live: a steal between two players in one server (EscrowService.transferLive). Async: a raid on
+-- an offline den (Phase 1). The kind decides which daily loss rule the debit applies (D-031).
+export type TransferKind = "Live" | "Async"
+
 -- [persisted, separate key per raidId] The record that makes a cross-profile transfer safe.
 export type EscrowRecord = {
 	raidId: string,
@@ -193,6 +203,9 @@ export type EscrowRecord = {
 	-- recognises its own create when the write landed but the response was lost. Missing on
 	-- records written before it existed; no migration (they are simply never "ours").
 	createNonce: string?,
+	-- Set at create and never changed (Escrow.canReplace). Missing = "Live": every record written
+	-- before it existed is a Phase 0 live steal, so no migration (decision D-031).
+	kind: TransferKind?,
 }
 
 -- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.

@@ -36,6 +36,7 @@ function Profile.new(userId: number, now: number): PlayerProfile
 		lossDay = RaidRules.dayIndex(now),
 		lossesToday = 0,
 		pairRaidsToday = {},
+		-- liveLossBaseRate, liveLossRateToday: absent until the day's first live loss (D-031)
 
 		raidLog = {},
 		revengeTokens = {},

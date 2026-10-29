@@ -50,7 +50,9 @@ local Config = {
 	},
 
 	Limits = {
-		maxLossesPerDay = 3, -- critters a player can lose per UTC day
+		-- Critters a player can lose to ASYNC raids per UTC day (every loss counts toward it). Live
+		-- steals use LiveRaid's value-based protection instead (decision D-031).
+		maxLossesPerDay = 3,
 		maxRaidsPerPairPerDay = 2, -- raids between the same two players per UTC day, revenge included
 	},
 
@@ -76,6 +78,14 @@ local Config = {
 		-- Studs from the raider's root part to the pad centre: how close a raider must be to start
 		-- a grab, and to stay for the whole hold (decision D-018).
 		grabRange = 10,
+		-- Live loss rules (decision D-031). The next three are launch guesses; tuned in Phase 3 (P3.9).
+		-- After a live loss nobody can grab from that den for this long (RaidService memory).
+		postLossSafetySeconds = 60,
+		-- Live steals between the same two players per UTC day (the shared pairRaidsToday count).
+		maxStealsPerPairPerDay = 2,
+		-- Once today's live losses reach this share of the den's Glow/s, measured just before its
+		-- first live loss of the day, the den is protected from live steals until the UTC day ends.
+		protectionLossShare = 0.5,
 	},
 
 	Income = {

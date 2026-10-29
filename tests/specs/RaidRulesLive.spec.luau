@@ -189,37 +189,46 @@ tests["a critter already carried or in escrow is busy"] = function()
 	expect.eq(reason, Reason.CritterBusy)
 end
 
-tests["owners at today's loss cap cannot be robbed; yesterday's losses do not count"] = function()
+tests["the daily count cap no longer limits live grabs (D-031)"] = function()
 	local g = grab()
 	local owner = g.ownerProfile :: any
-	owner.lossesToday = Config.Limits.maxLossesPerDay
-	local _, reason = RaidRules.canGrabLive(g)
-	expect.eq(reason, Reason.DefenderLossCap)
-	owner.lossDay = RaidRules.dayIndex(NOW) - 1
-	expect.truthy((RaidRules.canGrabLive(g)))
-	expect.eq(owner.lossesToday, Config.Limits.maxLossesPerDay, "the check never writes the profile")
+	owner.lossesToday = Config.Limits.maxLossesPerDay + 5
+	expect.truthy((RaidRules.canGrabLive(g)), "only the value rule protects a den from live steals")
+	expect.eq(owner.lossesToday, Config.Limits.maxLossesPerDay + 5, "the check never writes the profile")
 end
 
-tests["steals still in flight count against the owner's loss cap"] = function()
-	local g = grab({ inFlightForOwner = 1 })
-	local owner = g.ownerProfile :: any
-	owner.lossesToday = Config.Limits.maxLossesPerDay - 1
+tests["while a carry from the den is under way, nobody else can grab there"] = function()
+	local g = grab({ inFlightForOwner = 1, raiderUserId = 3 })
 	local _, reason = RaidRules.canGrabLive(g)
-	expect.eq(reason, Reason.DefenderLossCap, "the last allowed loss is already being carried")
+	expect.eq(reason, Reason.PostLossSafety, "another raider is carrying one of its critters")
 	g.inFlightForOwner = 0
 	expect.truthy((RaidRules.canGrabLive(g)))
+end
+
+tests["after a live loss the den is safe for postLossSafetySeconds"] = function()
+	expect.eq(Live.postLossSafetySeconds, 60, "Kian's launch value (D-031)")
+	expect.eq(RaidRules.liveGrabReadyAt(NOW), NOW + Live.postLossSafetySeconds)
+	local g = grab({ lastLiveLossAt = NOW - Live.postLossSafetySeconds + 1 })
+	expect.eq(select(2, RaidRules.canGrabLive(g)), Reason.PostLossSafety, "59 s after the loss")
+	g.lastLiveLossAt = NOW - Live.postLossSafetySeconds
+	expect.truthy((RaidRules.canGrabLive(g)), "60 s after the loss")
+	g.lastLiveLossAt = nil
+	expect.truthy((RaidRules.canGrabLive(g)), "no loss this session")
+	g.lastLiveLossAt = 0 / 0
+	expect.eq(select(2, RaidRules.canGrabLive(g)), Reason.PostLossSafety, "NaN is refused")
 end
 
 tests["the same-pair daily limit applies to live grabs, in-flight steals included"] = function()
 	local g = grab()
 	local owner = g.ownerProfile :: any
-	owner.pairRaidsToday["1"] = Config.Limits.maxRaidsPerPairPerDay
+	expect.eq(Live.maxStealsPerPairPerDay, 2, "Kian's launch value (D-031)")
+	owner.pairRaidsToday["1"] = Live.maxStealsPerPairPerDay
 	local _, reason = RaidRules.canGrabLive(g)
 	expect.eq(reason, Reason.PairLimit)
 	owner.lossDay = RaidRules.dayIndex(NOW) - 1
 	expect.truthy((RaidRules.canGrabLive(g)), "yesterday's pair count does not count")
 	owner.lossDay = RaidRules.dayIndex(NOW)
-	owner.pairRaidsToday["1"] = Config.Limits.maxRaidsPerPairPerDay - 1
+	owner.pairRaidsToday["1"] = Live.maxStealsPerPairPerDay - 1
 	expect.truthy((RaidRules.canGrabLive(g)))
 	g.inFlightForPair = 1
 	expect.eq(select(2, RaidRules.canGrabLive(g)), Reason.PairLimit)

@@ -81,7 +81,17 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 1. A critter uid exists in exactly one place: one profile, or in flight for one raid.
 2. Glow is conserved.
 3. Repeating any step changes nothing after the first success.
-4. No defender loses more than `Config.Limits.maxLossesPerDay` critters per UTC day.
+4. Daily loss limits hold at the debit, by the record's `kind` (decision D-031):
+   - Live: no live debit takes a critter from a den that is already protected
+     (`RaidRules.liveProtected`). The debit that crosses the threshold lands, so today's live
+     losses never pass it by more than one critter's rate.
+   - Async: no async debit takes a critter once the defender has lost
+     `Config.Limits.maxLossesPerDay` critters that UTC day (live losses count toward it too).
+
+`EscrowRecord.kind` (`"Live"` or `"Async"`) is set when the record is created and never changes
+(`Escrow.canReplace`). Missing means `"Live"`: every record written before the field existed
+is a Phase 0 live steal, so it needed no migration. `EscrowService.transferLive` creates
+`"Live"` records.
 
 Only the call that creates a record, and its same-server retries while the server awaits them
 (kept `createNonce`), debits the defender (`Escrow.advance`). That call sets
@@ -106,15 +116,16 @@ call's own, and the steal continues (`Escrow.advance`) instead of being voided.
 
 Phase 1 (P1.1, decision D-012): the void rule assumes only the creating call debits. A debit
 delivered by ProfileStore message, or applied to an offline profile, could land after a void and
-strand the loot, and `EscrowRecord` has no `kind` field to tell live from async. Both must be
-solved before any async transport ships.
+strand the loot. This must be solved before any async transport ships. Recovery can now tell
+live from async by `EscrowRecord.kind` (D-031).
 
 `appliedTransfers` entries are pruned after `Config.Escrow.appliedTransferRetentionSeconds`, but
 only by EscrowService after reading the player's `Open_` index, and never for a raidId still
 listed there. `Profile.prepare` does not prune them.
 
-If you change `Escrow.luau`, `RaidRules.recordIncoming` or anything in `appliedTransfers`, the
-simulation must still pass, and the `reviewer` agent must sign off.
+If you change `Escrow.luau`, `RaidRules.recordIncoming`, `RaidRules.recordLiveLoss`,
+`RaidRules.liveProtected` or anything in `appliedTransfers`, the simulation must still pass, and
+the `reviewer` agent must sign off.
 
 ## Kill switches
 
@@ -170,6 +181,11 @@ Tuning lives in `Config.LiveRaid`:
 | `tagRange` | 6 | Studs: how close the owner must be to tag a raider |
 | `grabHoldSeconds` | 1 | How long a raider holds the grab to pick a critter up |
 | `grabRange` | 10 | Studs from the raider's root part to the pad centre: how close a raider must be to start a grab and to keep holding it (D-018) |
+| `postLossSafetySeconds` | 60 | After a live loss, nobody can grab from that den this long (D-031) |
+| `maxStealsPerPairPerDay` | 2 | Live steals between the same two players per UTC day (D-031) |
+| `protectionLossShare` | 0.5 | Share of the den's Glow/s that, once lost to live steals today, protects it for the rest of the UTC day (D-031) |
+
+The last three are Kian's launch values, tuned in Phase 3 from live data (P3.9).
 
 `Net.Requests.Lockdown` is `() -> boolean` (true if a Lockdown started), limited by
 `Net.Limits.Lockdown` (3 per 10 s). Lockdown rules:
@@ -185,14 +201,74 @@ Tuning lives in `Config.LiveRaid`:
 - Duration and cooldown are enforced server-side from the server's own state. The client only
   asks; `LockdownUntil` and `LockdownReadyAt` below are for display.
 
+## Live loss rules
+
+Decision D-031 (Kian), scheduled as P0.5g (data), P0.5h (raid), P0.5i (ui). These rules apply
+to live steals only, and they replace the daily count cap for them. Async raids keep
+`Config.Limits.maxLossesPerDay` until Phase 1. `lossesToday` still counts every loss, live and
+async, for the raid log and the async cap. Values live in `Config.LiveRaid` (table above).
+
+1. **Post-loss safety.** After a live loss, nobody can grab from that den for
+   `postLossSafetySeconds` (60 s). The timer is server memory in RaidService and is never
+   persisted: live steals happen within one server. A grab is also refused while any carry from
+   that den is under way (carried, or in escrow and not settled), so a crowd grabbing together
+   cannot beat the timer or the protection check.
+2. **Same-pair limit.** A raider can make at most `maxStealsPerPairPerDay` (2) live steals per
+   UTC day from the same owner, counting the owner's shared `pairRaidsToday` entry for that
+   raider and any of their steals still in flight.
+3. **Value-based daily protection.** Live losses are measured in Glow per second. A loss is the
+   stolen critter's `Economy.critterRate` at the debit, counting its mutation, the defender's
+   rebirths, and where it sat before the steal. The base is `Economy.denRate(defender)` just
+   before the day's first live loss lands, with the stolen critter still in the den. Once
+   today's live losses reach `protectionLossShare` (50%) of that base, the den is protected
+   from live steals for the rest of the UTC day. The steal that crosses the line lands, and
+   nothing after it does. The base never changes during the day, even if the den does.
+   Stealing a few Commons from a rich den never protects it, while losing its best critter
+   does at once.
+4. **Escrow.** Live steals keep moving critters through `Escrow.luau`, on the two profiles
+   loaded in one server, via `EscrowService.transferLive`. They switch to the cross-server
+   path when P1.1 adds it. The rules are checked when the grab starts and again at the debit,
+   where a `"Live"` record takes no critter from a protected den.
+
+The state is stored on the profile as two optional `PlayerProfile` fields:
+
+| Field | Meaning |
+| --- | --- |
+| `liveLossBaseRate: number?` | The den's Glow/s just before its first live loss today |
+| `liveLossRateToday: number?` | The summed Glow/s of the critters lost to live steals today |
+
+Both belong to `lossDay` and are set back to nil when the day rolls
+(`RaidRules.resetDailyIfNeeded`, which runs on load and before every debit). Missing means
+there has been no live loss today, so there is no migration and no `SCHEMA_VERSION` bump.
+`Profile.spec` checks that an old save loads unprotected.
+
+The pure rules live in `RaidRules`, and the server always decides:
+
+- `liveProtected(profile, now)` is read-only. It is true when the profile's `lossDay` is today and
+  `liveLossRateToday >= protectionLossShare * liveLossBaseRate`. A NaN counts as protected.
+- `recordLiveLoss(defender, critter, now)` is called by `Escrow.debitDefender` for a Live debit,
+  before the critter leaves the profile. It sets the base on the day's first loss and adds the
+  critter's rate. It errors if the critter is already gone.
+- `liveGrabReadyAt(lastLiveLossAt)` returns `lastLiveLossAt + postLossSafetySeconds`, on
+  whatever clock the input uses.
+- `canGrabLive` no longer checks `maxLossesPerDay`. After `CritterBusy` it refuses with
+  `LiveProtected`, then `PairLimit`, then `PostLossSafety`: when `inFlightForOwner > 0`, or
+  when `now < liveGrabReadyAt(lastLiveLossAt)`, which also refuses a NaN. `lastLiveLossAt` is a
+  new optional `LiveGrab` input on the same clock as `now`; nil means no loss this server
+  session.
+
+RaidService (P0.5h) shows the state with the den attributes `LiveProtected` and
+`LiveGrabReadyAt` (see Replicated attributes). They are for display only: the server decides
+from the profile and its own timer.
+
 ## Replicated attributes
 
 Attributes the server sets on Instances so clients can draw state without a remote. All are
 server-written and display-only:
 
 - The server keeps the authoritative state in its own tables. It never reads `CarryingUid`,
-  `CarryingSpecies`, `LockdownUntil` or `LockdownReadyAt`, and no gameplay or data decision
-  ever comes from an attribute.
+  `CarryingSpecies`, `LockdownUntil`, `LockdownReadyAt`, `LiveProtected` or `LiveGrabReadyAt`,
+  and no gameplay or data decision ever comes from an attribute.
 - Clients must never be trusted for them. A client can change an attribute locally; the change
   does not replicate and must never matter.
 - Times are server time from `workspace:GetServerTimeNow()`, so every client reads one clock.
@@ -206,6 +282,8 @@ server-written and display-only:
 | Den Model | `OwnerUserId` | number | Owner's userId; 0 when unowned |
 | Den Model | `LockdownUntil` | number | When the current Lockdown ends; absent or past = none active |
 | Den Model | `LockdownReadyAt` | number | When the owner can start the next Lockdown; absent or past = ready |
+| Den Model | `LiveProtected` | boolean | `RaidRules.liveProtected` for the owner today: no live steals until the UTC day ends (D-031); absent = false |
+| Den Model | `LiveGrabReadyAt` | number | When grabs reopen after the den's last live loss (`RaidRules.liveGrabReadyAt`, D-031); absent or past = open |
 | Pad Part | `PadIndex` | number | The pad's number |
 | Critter Model | `CritterUid`, `SpeciesId`, `Tier` | string | Which critter this model draws |
 | Critter Model | `PadIndex`, `OwnerUserId` | number | Where it sits and whose it is |
