@@ -28,6 +28,9 @@
 	  onProfileReleasing(fn)  fn(userId, profile) right before the final save; must not yield
 	  markRaidLogSeen(userId, now)  sets the loaded profile's raidLogSeenAt to the server's now
 	                          (Profile.markRaidLogSeen: forward only). No-op if not loaded here
+	  advanceOnboarding(userId, stepId)  a server event completed onboarding step stepId (a
+	                          "Server" step of Profile.ONBOARDING_STEPS): forward only, pushes
+	                          OnboardingChanged. Never yields. No-op if not loaded here (C6b)
 	  saveNow(userId, confirm)  saves now and yields until a save whose written data passes
 	                          confirm(savedData) lands: (true) or (false, reason). Bounded: 3 tries
 	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
@@ -74,6 +77,10 @@
 	profile and drops the oldest, and MessageAsync retries forever, so sendMessage runs it on its
 	own thread and waits a bounded time. Messages are wake-ups, never the only record of anything:
 	EscrowService's records and recovery stay the source of truth.
+
+	Remotes (C6b; ReplicatedStorage.Remotes, named as in Shared/Net.luau; see "Settings and
+	onboarding" below): GetSettings, SaveSettings, GetOnboarding, AckOnboarding (RemoteFunctions)
+	and the OnboardingChanged push.
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -86,6 +93,8 @@ local ServerStorage = game:GetService("ServerStorage")
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore) :: any
 local Profile = require(ReplicatedStorage.Shared.Profile)
 local Types = require(ReplicatedStorage.Shared.Types)
+local Net = require(ReplicatedStorage.Shared.Net)
+local RateLimit = require(ReplicatedStorage.Shared.RateLimit)
 local Economy = require(ReplicatedStorage.Shared.Economy) -- Studio test-session seed only
 local CritterCatalog = require(ReplicatedStorage.Shared.CritterCatalog) -- Studio test-session seed only
 
@@ -116,6 +125,10 @@ local MEMORY_SWITCH = "StudioMemoryProfiles"
 local TEST_SESSION_SWITCH = "StudioTestSessions"
 local TEST_SEED_DEFAULT = 3 -- critters a DataTestHook "seed" adds when no count is given
 
+-- GetSettings and GetOnboarding wait this long for a joining player's profile, polling.
+local PROFILE_WAIT_SECONDS = 20
+local PROFILE_POLL_SECONDS = 0.5
+
 local DataService = {}
 
 -- A loaded session and the Player object it was loaded for. Removal ends a session only if it
@@ -135,6 +148,7 @@ local testSessions: { [number]: Session } = {}
 local testLoading: { [number]: true } = {}
 local testSessionListeners: { (number, PlayerProfile) -> () } = {}
 local installTestHook: () -> () -- Studio only; defined with the test sessions at the end
+local installRequests: () -> () -- the settings and onboarding remotes; defined with their handlers
 local messageListeners: { [string]: (number, any) -> () } = {}
 local rawProfiles: DataStore? = nil -- the profiles DataStore itself, for updateOffline only
 local memoryOnly = false -- Studio memory switch on: every profile is in ProfileStore's mock store
@@ -300,6 +314,8 @@ function DataService.start()
 		warn(`[DataService] ProfileStore critical state: {isCritical}`)
 	end)
 
+	installRequests() -- before any load, so a joining client finds the remotes
+
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
 	for _, player in Players:GetPlayers() do
@@ -384,6 +400,216 @@ function DataService.markRaidLogSeen(userId: number, now: number): boolean
 		return false
 	end
 	return Profile.markRaidLogSeen(profile, now)
+end
+
+--[[
+	Settings and onboarding (C6b: P2.5, P2.6). Remotes in ReplicatedStorage.Remotes, named as in
+	Shared/Net.luau, made by start() before any profile loads:
+	  GetSettings   (RemoteFunction) () -> Net.Settings?: Profile.settingsOf, defaults filled in
+	  SaveSettings  (RemoteFunction) (settings) -> boolean: Profile.cleanSettings checks the
+	                untrusted table; all three settings are replaced
+	  GetOnboarding (RemoteFunction) () -> Net.OnboardingStatus? (Profile.onboardingStatus)
+	  AckOnboarding (RemoteFunction) (stepId) -> boolean: "Client" steps only, and only the next
+	                one (Profile.acknowledgeOnboarding)
+	  OnboardingChanged (RemoteEvent push) (Net.OnboardingStatus) after every step the player
+	                completes, by a server event (advanceOnboarding) or an AckOnboarding
+	Every request counts against its Net.Limits entry per player (RateLimit, on os.clock()). The two
+	reads wait up to PROFILE_WAIT_SECONDS for a joining player's profile, one wait per read per
+	player. Every time saved is the server's os.time(). Nothing here forces a save: settings and
+	onboarding are not critical, so they ride the next autosave or the final save on leave (never
+	saveNow, which costs a DataStore write and can wait half a minute).
+
+	SaveSettings over its limit is not dropped. The latest valid request is kept (one per player,
+	newest wins) and applied when the limit's window reopens, or by the onProfileReleasing listener
+	right before the final save if the player leaves first, so the player's last change lands. So a
+	player's settings change at most Net.Limits.SaveSettings + 1 times per window.
+]]
+local requestWindows: { [Player]: RateLimit.State } = setmetatable({}, { __mode = "k" }) :: any
+local waitingReads: { [Player]: { [string]: true } } = setmetatable({}, { __mode = "k" }) :: any
+local deferredSettings: { [number]: Net.Settings } = {} -- userId -> latest request over the limit
+local settingsFlushes: { [number]: true } = {} -- userId -> a deferred apply is scheduled
+local onboardingChanged: RemoteEvent? = nil
+
+-- Counts one request; true when it is within `limit` for this player.
+local function take(player: Player, name: string, limit: number): boolean
+	local state = requestWindows[player]
+	if state == nil then
+		state = {}
+		requestWindows[player] = state
+	end
+	return RateLimit.take(state, name, limit, os.clock())
+end
+
+-- The player's profile, waiting up to PROFILE_WAIT_SECONDS for it to load (a client asks as it
+-- starts, usually before its profile is ready). nil when it did not load in time, the player left,
+-- the server is closing, or this read is already waiting for this player.
+local function awaitProfile(player: Player, name: string): PlayerProfile?
+	local waiting = waitingReads[player]
+	if waiting == nil then
+		waiting = {}
+		waitingReads[player] = waiting
+	end
+	if waiting[name] then
+		return nil
+	end
+	waiting[name] = true
+	local ok, profile = pcall(function(): PlayerProfile?
+		local deadline = os.clock() + PROFILE_WAIT_SECONDS
+		local found = DataService.getProfile(player.UserId)
+		while found == nil and not isGone(player) and not closing and os.clock() < deadline do
+			task.wait(PROFILE_POLL_SECONDS)
+			found = DataService.getProfile(player.UserId)
+		end
+		return found
+	end)
+	waiting[name] = nil
+	return if ok and not isGone(player) then profile else nil
+end
+
+-- Tells the player their onboarding moved. Never yields, never errors (the step is already saved
+-- in the live profile; a lost push only delays the client until its next GetOnboarding).
+local function pushOnboarding(userId: number, profile: PlayerProfile)
+	local remote = onboardingChanged
+	local player = Players:GetPlayerByUserId(userId)
+	if remote == nil or player == nil or isGone(player) then
+		return
+	end
+	local ok, err = pcall(remote.FireClient, remote, player, Profile.onboardingStatus(profile))
+	if not ok then
+		warn(`[DataService] OnboardingChanged to {userId} failed: {err}`)
+	end
+end
+
+-- Applies (and forgets) the player's deferred SaveSettings request, if any. Pure and no yield, so
+-- it is also the onProfileReleasing listener that lands it before the final save.
+local function applyDeferredSettings(userId: number, profile: PlayerProfile?)
+	local settings = deferredSettings[userId]
+	deferredSettings[userId] = nil
+	if settings ~= nil and profile ~= nil then
+		Profile.applySettings(profile, settings)
+	end
+end
+
+local function onGetSettings(player: Player): Net.Settings?
+	if not take(player, Net.Requests.GetSettings, Net.Limits.GetSettings) then
+		return nil
+	end
+	local profile = awaitProfile(player, Net.Requests.GetSettings)
+	return if profile then Profile.settingsOf(profile) else nil
+end
+
+local function onSaveSettings(player: Player, request: any): boolean
+	local userId = player.UserId
+	local within = take(player, Net.Requests.SaveSettings, Net.Limits.SaveSettings)
+	local settings = Profile.cleanSettings(request)
+	local profile = DataService.getProfile(userId)
+	if settings == nil or profile == nil then
+		return false
+	end
+	if within then
+		deferredSettings[userId] = nil -- this request is newer than any kept one
+		return Profile.applySettings(profile, settings)
+	end
+	-- Over the limit: keep only the latest, applied once the window reopens (or on leave).
+	deferredSettings[userId] = settings
+	if not settingsFlushes[userId] then
+		settingsFlushes[userId] = true
+		local state = requestWindows[player]
+		local delay = if state then RateLimit.reopensIn(state, Net.Requests.SaveSettings, os.clock()) else 0
+		task.delay(delay, function()
+			settingsFlushes[userId] = nil
+			applyDeferredSettings(userId, DataService.getProfile(userId))
+		end)
+	end
+	return true
+end
+
+local function onGetOnboarding(player: Player): Net.OnboardingStatus?
+	if not take(player, Net.Requests.GetOnboarding, Net.Limits.GetOnboarding) then
+		return nil
+	end
+	local profile = awaitProfile(player, Net.Requests.GetOnboarding)
+	return if profile then Profile.onboardingStatus(profile) else nil
+end
+
+local function onAckOnboarding(player: Player, stepId: any): boolean
+	if not take(player, Net.Requests.AckOnboarding, Net.Limits.AckOnboarding) then
+		return false
+	end
+	local userId = player.UserId
+	local profile = DataService.getProfile(userId)
+	if profile == nil then
+		return false
+	end
+	local outcome = Profile.acknowledgeOnboarding(profile, stepId, os.time())
+	if outcome == "Advanced" then
+		pushOnboarding(userId, profile)
+	end
+	return outcome ~= "Refused"
+end
+
+--[[
+	For server services only (IncomeService, RaidService), never with anything a client sent: the
+	player did the real thing that onboarding step `stepId` (a "Server" step of
+	Profile.ONBOARDING_STEPS, such as "collect") asks for. Moves their onboarding forward to it at
+	the server's os.time() (Profile.advanceOnboardingTo: forward only, may jump over earlier steps,
+	never once onboarding is over, which every save from before onboarding is), then pushes
+	OnboardingChanged. Call it after the event succeeded; calling it again, or for a step already
+	passed, changes nothing. It never yields or saves, and does nothing when the profile is not
+	loaded in this server. Returns whether it wrote.
+]]
+function DataService.advanceOnboarding(userId: number, stepId: string): boolean
+	local profile = DataService.getProfile(userId)
+	if profile == nil or not Profile.advanceOnboardingTo(profile, stepId, os.time()) then
+		return false
+	end
+	pushOnboarding(userId, profile)
+	return true
+end
+
+-- Wraps a handler so an error never reaches the client: it is logged and `failValue` returned.
+local function guarded(name: string, failValue: any, handler: (Player, ...any) -> any): (Player, ...any) -> any
+	return function(player: Player, ...: any): any
+		local ok, result = pcall(handler, player, ...)
+		if not ok then
+			warn(`[DataService] {name} failed for {player.UserId}: {result}`)
+			return failValue
+		end
+		return result
+	end
+end
+
+function installRequests()
+	local existing = ReplicatedStorage:FindFirstChild("Remotes")
+	local folder: Instance
+	if existing and existing:IsA("Folder") then
+		folder = existing
+	else
+		folder = Instance.new("Folder")
+		folder.Name = "Remotes"
+		folder.Parent = ReplicatedStorage
+	end
+	local function remote(className: string, name: string): Instance
+		local found = folder:FindFirstChild(name)
+		if found and found.ClassName == className then
+			return found
+		end
+		local created = Instance.new(className :: any)
+		created.Name = name
+		created.Parent = folder
+		return created
+	end
+	local handlers: { [string]: (Player, ...any) -> any } = {
+		[Net.Requests.GetSettings] = guarded(Net.Requests.GetSettings, nil, onGetSettings),
+		[Net.Requests.SaveSettings] = guarded(Net.Requests.SaveSettings, false, onSaveSettings),
+		[Net.Requests.GetOnboarding] = guarded(Net.Requests.GetOnboarding, nil, onGetOnboarding),
+		[Net.Requests.AckOnboarding] = guarded(Net.Requests.AckOnboarding, false, onAckOnboarding),
+	}
+	for name, handler in handlers do
+		(remote("RemoteFunction", name) :: RemoteFunction).OnServerInvoke = handler
+	end
+	onboardingChanged = remote("RemoteEvent", Net.Pushes.OnboardingChanged) :: RemoteEvent
+	DataService.onProfileReleasing(applyDeferredSettings)
 end
 
 -- One save request. "saved": a save landed whose written data passes `confirm`. "lost": the

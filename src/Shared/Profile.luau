@@ -14,6 +14,7 @@
 local Types = require("./Types")
 local Config = require("./Config")
 local RaidRules = require("./RaidRules")
+local Net = require("./Net")
 
 type PlayerProfile = Types.PlayerProfile
 type GearId = Types.GearId
@@ -174,16 +175,14 @@ end
 
 -- Settings (P2.5) ---------------------------------------------------------------------------------
 
-export type ResolvedSettings = {
-	musicVolume: number,
-	sfxVolume: number,
-	reducedMotion: boolean,
-}
+-- Every setting with its default filled in: GetSettings' answer and SaveSettings' request.
+export type ResolvedSettings = Net.Settings
 
--- What a missing setting means. A volume scales the audio mix: 1 plays it as mixed.
+-- What a missing setting means. A volume scales the audio mix (1 plays it as mixed). The client
+-- starts from the same values before GetSettings answers (ui's SettingsState).
 Profile.SETTINGS_DEFAULTS = table.freeze({
-	musicVolume = 1,
-	sfxVolume = 1,
+	musicVolume = 0.6,
+	sfxVolume = 0.8,
 	reducedMotion = false,
 }) :: ResolvedSettings
 
@@ -212,53 +211,93 @@ function Profile.settingsOf(profile: PlayerProfile): ResolvedSettings
 end
 
 --[[
-	Applies a settings change the client asked for. `request` is untrusted: a table holding any of
-	musicVolume (number), sfxVolume (number) and reducedMotion (boolean), and nothing else. Volumes
-	must be finite; they are clamped to 0..1 and rounded to 0.01. Any other key, a wrong type or a
-	NaN or infinite volume refuses the whole request. Keys left out keep their saved value. Returns
-	whether anything changed.
+	Checks a SaveSettings request, which is untrusted (it comes from the client). It must be a table
+	holding all three settings: musicVolume and sfxVolume finite numbers, reducedMotion a boolean.
+	Volumes are clamped to 0..1 and rounded to 0.01. Any other key is ignored and never read, so a
+	huge table costs nothing. Returns the cleaned settings as a new table, or nil to refuse the whole
+	request: not a table, a field missing or of the wrong type, or a NaN or infinite volume.
 ]]
-function Profile.applySettings(profile: PlayerProfile, request: any): boolean
+function Profile.cleanSettings(request: any): ResolvedSettings?
 	if type(request) ~= "table" then
+		return nil
+	end
+	-- rawget: only the request's own fields count, whatever the table is.
+	local musicVolume = cleanVolume(rawget(request, "musicVolume"))
+	local sfxVolume = cleanVolume(rawget(request, "sfxVolume"))
+	local reducedMotion = rawget(request, "reducedMotion")
+	if musicVolume == nil or sfxVolume == nil or type(reducedMotion) ~= "boolean" then
+		return nil
+	end
+	return { musicVolume = musicVolume, sfxVolume = sfxVolume, reducedMotion = reducedMotion }
+end
+
+-- Saves a SaveSettings request on the profile, replacing all three settings with the cleaned
+-- values (cleanSettings). Refuses, writing nothing, whatever cleanSettings refuses. Returns whether
+-- it accepted (and so wrote) the request, true also when the values were already saved.
+function Profile.applySettings(profile: PlayerProfile, request: any): boolean
+	local settings = Profile.cleanSettings(request)
+	if settings == nil then
 		return false
 	end
-	local changes: { [string]: number | boolean } = {}
-	for key, value in next, request do
-		if key == "musicVolume" or key == "sfxVolume" then
-			local volume = cleanVolume(value)
-			if volume == nil then
-				return false
-			end
-			changes[key] = volume
-		elseif key == "reducedMotion" and type(value) == "boolean" then
-			changes[key] = value
-		else
-			return false
-		end
-	end
-	local saved: any = profile.settings
-	if type(saved) ~= "table" then
-		saved = {}
-	end
-	local wrote = false
-	for key, value in changes do
-		if saved[key] ~= value then
-			saved[key] = value
-			wrote = true
-		end
-	end
-	if wrote then
-		profile.settings = saved
-	end
-	return wrote
+	profile.settings = {
+		musicVolume = settings.musicVolume,
+		sfxVolume = settings.sfxVolume,
+		reducedMotion = settings.reducedMotion,
+	}
+	return true
 end
 
 -- Onboarding (P2.6, playbook Appendix C) -----------------------------------------------------------
 
--- Appendix C steps 1-5 are the player's: hatch, place and collect, second egg, first steal, home.
--- Step 6's 30-minute shield needs no saved state (it counts from createdAt), and step 7 (the
--- notification opt-in) is not part of onboarding.
-Profile.ONBOARDING_LAST_STEP = 5
+-- Who decides a step is done. "Server": a server service saw the real thing happen
+-- (DataService.advanceOnboarding). "Client": a purely client-side acknowledgement, such as
+-- dismissing a tip (Net.Requests.AckOnboarding), accepted only as the very next step.
+export type OnboardingStepKind = "Server" | "Client"
+
+export type OnboardingStep = {
+	id: string, -- stable: the server, the client and analytics name steps by id
+	appendix: number, -- the Appendix C line it belongs to
+	by: OnboardingStepKind,
+}
+
+--[[
+	The onboarding steps, in order. Appendix C lines 1-5 are the player's: hatch, place and collect,
+	a second egg, a guided first steal, home with a one-line raid log explanation. Line 6's
+	30-minute shield needs no saved state (it counts from createdAt; raid's P2.6r), and line 7 (the
+	notification opt-in) is not part of onboarding.
+
+	OnboardingState.step saves how many of these are done, so this list is persisted meaning: once
+	shipped, never reorder or remove a step or change an id; a new step goes at the end.
+]]
+local ONBOARDING_STEPS: { OnboardingStep } = {
+	{ id = "hatch", appendix = 1, by = "Server" }, -- the free first egg hatched
+	{ id = "place", appendix = 2, by = "Server" }, -- the player put a critter on a pad
+	{ id = "collect", appendix = 2, by = "Server" }, -- the player banked den Glow
+	{ id = "buyEgg", appendix = 3, by = "Server" }, -- the player bought an egg with Glow
+	{ id = "stealHome", appendix = 4, by = "Server" }, -- got a stolen critter home (lines 4-5)
+	{ id = "raidLogTip", appendix = 5, by = "Client" }, -- dismissed the one-line raid log explanation
+}
+for _, step in ONBOARDING_STEPS do
+	table.freeze(step)
+end
+Profile.ONBOARDING_STEPS = table.freeze(ONBOARDING_STEPS)
+
+-- Steps done when onboarding is finished: OnboardingState.step runs 0 (none) to this.
+Profile.ONBOARDING_LAST_STEP = #ONBOARDING_STEPS
+
+local ONBOARDING_INDEX: { [string]: number } = {}
+for index, step in ONBOARDING_STEPS do
+	ONBOARDING_INDEX[step.id] = index
+end
+
+-- The position (1-based) of the step with id `stepId` in ONBOARDING_STEPS, or nil for anything
+-- that is not a step id.
+function Profile.onboardingStepIndex(stepId: any): number?
+	if type(stepId) ~= "string" then
+		return nil
+	end
+	return ONBOARDING_INDEX[stepId]
+end
 
 -- The saved state when it is usable: a table whose step is a whole number 0..ONBOARDING_LAST_STEP.
 local function onboardingState(profile: PlayerProfile): Types.OnboardingState?
@@ -279,7 +318,7 @@ function Profile.isOnboardingComplete(profile: PlayerProfile): boolean
 	return state == nil or state.completedAt ~= nil or state.step >= Profile.ONBOARDING_LAST_STEP
 end
 
--- The last step completed, for resuming and for analytics. ONBOARDING_LAST_STEP when there is no
+-- How many steps are done, for resuming and for analytics. ONBOARDING_LAST_STEP when there is no
 -- usable state (a save from before onboarding).
 function Profile.onboardingStep(profile: PlayerProfile): number
 	local state = onboardingState(profile)
@@ -287,10 +326,12 @@ function Profile.onboardingStep(profile: PlayerProfile): number
 end
 
 --[[
-	Records that the player completed onboarding step `step`. Forward only, and a step may be jumped
-	over. Reaching ONBOARDING_LAST_STEP finishes onboarding at `now`. Refuses, writing nothing, once
-	onboarding is over, for a step that is not a whole number above the current one and at most
-	ONBOARDING_LAST_STEP, or for a NaN or infinite `now`. Returns whether it wrote.
+	Records that the player completed onboarding step number `step` (a position in
+	ONBOARDING_STEPS). Forward only, and a step may be jumped over. Reaching ONBOARDING_LAST_STEP
+	finishes onboarding at `now`. Refuses, writing nothing, once onboarding is over, for a step that
+	is not a whole number above the current one and at most ONBOARDING_LAST_STEP, or for a NaN or
+	infinite `now`. Returns whether it wrote. Services use DataService.advanceOnboarding (by id),
+	never this: it does not check who may complete the step.
 ]]
 function Profile.advanceOnboarding(profile: PlayerProfile, step: number, now: number): boolean
 	if not isFinite(now) or not isWhole(step) or Profile.isOnboardingComplete(profile) then
@@ -316,6 +357,57 @@ function Profile.completeOnboarding(profile: PlayerProfile, now: number): boolea
 	local state = onboardingState(profile) :: Types.OnboardingState
 	state.completedAt = now
 	return true
+end
+
+--[[
+	A server event: the player did what "Server" step `stepId` asks for (the server saw it happen).
+	Moves onboarding forward to that step, jumping over any before it, since the player is past
+	them. Refuses, writing nothing, an id that is not a "Server" step, a step the player is already
+	at or past, once onboarding is over (old saves included), or a NaN or infinite `now`. Returns
+	whether it wrote.
+]]
+function Profile.advanceOnboardingTo(profile: PlayerProfile, stepId: string, now: number): boolean
+	local index = Profile.onboardingStepIndex(stepId)
+	if index == nil or ONBOARDING_STEPS[index].by ~= "Server" then
+		return false
+	end
+	return Profile.advanceOnboarding(profile, index, now)
+end
+
+-- AckOnboarding's outcome. "Advanced": recorded now. "AlreadyDone": the step is behind the player
+-- (or onboarding is over), nothing written. "Refused": not allowed, nothing written.
+export type OnboardingAck = "Advanced" | "AlreadyDone" | "Refused"
+
+--[[
+	A client acknowledgement (Net.Requests.AckOnboarding): `stepId` is untrusted. Accepted only for
+	a "Client" step that is exactly the next one, so the client can never skip ahead or complete a
+	step the server decides. A step already behind the player, or any client step once onboarding
+	is over (old saves included), is "AlreadyDone": a repeat is harmless. `now` is the server's.
+]]
+function Profile.acknowledgeOnboarding(profile: PlayerProfile, stepId: any, now: number): OnboardingAck
+	local index = Profile.onboardingStepIndex(stepId)
+	if index == nil or ONBOARDING_STEPS[index].by ~= "Client" then
+		return "Refused"
+	end
+	if Profile.isOnboardingComplete(profile) or index <= Profile.onboardingStep(profile) then
+		return "AlreadyDone"
+	end
+	if index ~= Profile.onboardingStep(profile) + 1 then
+		return "Refused"
+	end
+	return if Profile.advanceOnboarding(profile, index, now) then "Advanced" else "Refused"
+end
+
+-- What the client is told (GetOnboarding, the OnboardingChanged push). A new table every call.
+function Profile.onboardingStatus(profile: PlayerProfile): Net.OnboardingStatus
+	local step = Profile.onboardingStep(profile)
+	local complete = Profile.isOnboardingComplete(profile)
+	local nextStep = if complete then nil else ONBOARDING_STEPS[step + 1]
+	return {
+		step = step,
+		nextStepId = if nextStep then nextStep.id else nil,
+		complete = complete,
+	}
 end
 
 -- Successful raids (P2.7 opt-in timing, P2.9 analytics) ----------------------------------------------

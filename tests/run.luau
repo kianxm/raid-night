@@ -115,6 +115,24 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "Settings",
+		load = function()
+			return require("./specs/Settings.spec")
+		end,
+	},
+	{
+		name = "Onboarding",
+		load = function()
+			return require("./specs/Onboarding.spec")
+		end,
+	},
+	{
+		name = "RateLimit",
+		load = function()
+			return require("./specs/RateLimit.spec")
+		end,
+	},
+	{
 		name = "Escrow",
 		load = function()
 			return require("./specs/Escrow.spec")
