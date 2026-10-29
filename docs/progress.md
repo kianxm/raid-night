@@ -181,7 +181,8 @@ dropped based on real play.
 - An empty Async debit still counts a pair slot on the defender's side (data #109; pre-existing; fairness).
 - While a revenge transfer is InFlight the lock is released and the token still exists, so a second revenge raid on the same token is possible (bounded by the pair limit; refuse tokens named by an open escrow) (reviewer #109; small). RaidRules.recordOutgoing doc comment is stale vs D-053 (raid; tiny).
 - A credit still in flight doesn't count toward the raider's pair limit yet (data #109; small).
-- Soak tooling: DataStore mode refuses test raiders ("raider must be loaded in this server"), so a forced-shutdown soak needs a real account; add a Studio-only test-raider load (data; small). Seeded test stored jumps 1000 → ~36900 on first raid from an old storedUpdatedAt (kit text stale).
+- Soak tooling: Studio test sessions added in #112 (D-056); docs/playtests/phase1.md part 3 should switch the soak to `DataTestHook` load/seed/release with test ids only (integration; small). Seeded test stored jumps 1000 → ~36900 on first raid from an old storedUpdatedAt (kit text stale).
+- releaseTestSession can report "saved" from an autosave already in flight (reviewer #112; cosmetic). ReplayStore SetAsync passes raw {raider, defender} ids; apply the accounts filter if a test id can reach it (raid; tiny).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 - Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
 - Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).
