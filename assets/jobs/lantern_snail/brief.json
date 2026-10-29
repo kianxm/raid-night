@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: shell flickers, the snail lets out a long sigh",
+    "stolen": "gotcha pose when stolen: a quick sleepy gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "lantern_snail",
-  "idleAnimation": "shell flickers, the snail lets out a long sigh",
   "look": "chubby snail whose shell is a little glowing paper lantern",
   "name": "Lantern Snail",
   "notes": "",
@@ -16,6 +20,7 @@
     "#E9846A",
     "#2A2140"
   ],
+  "personality": "sleepy",
   "status": "prompts-ready",
   "tier": "Common"
 }

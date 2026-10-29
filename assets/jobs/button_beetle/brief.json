@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: flips onto its back and spins like a coin",
+    "stolen": "gotcha pose when stolen: a quick bubbly gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "button_beetle",
-  "idleAnimation": "flips onto its back and spins like a coin",
   "look": "small beetle whose shell is a big shiny four-hole sewing button",
   "name": "Button Beetle",
   "notes": "",
@@ -16,6 +20,7 @@
     "#A33B5E",
     "#1F1424"
   ],
+  "personality": "bubbly",
   "status": "prompts-ready",
   "tier": "Common"
 }

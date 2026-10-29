@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: lets out a tiny howl and its mane ripples like the northern lights",
+    "stolen": "gotcha pose when stolen: a quick proud gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 3,
     "texture": 1024,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "aurora_pup",
-  "idleAnimation": "lets out a tiny howl and its mane ripples like the northern lights",
   "look": "wolf pup with a flowing mane made of green and violet aurora light",
   "name": "Aurora Pup",
   "notes": "",
@@ -16,6 +20,7 @@
     "#B47BFF",
     "#0E1428"
   ],
+  "personality": "proud",
   "status": "prompts-ready",
   "tier": "Epic"
 }

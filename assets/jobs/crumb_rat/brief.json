@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: nibbles the crumb, drops it, does a double take, scoops it back up",
+    "stolen": "gotcha pose when stolen: a quick cheerful gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "crumb_rat",
-  "idleAnimation": "nibbles the crumb, drops it, panics, picks it back up",
   "look": "scruffy brown rat hugging a cracker crumb bigger than its head",
   "name": "Crumb Rat",
   "notes": "",
@@ -16,6 +20,7 @@
     "#8A6A4A",
     "#231B17"
   ],
+  "personality": "cheerful",
   "status": "prompts-ready",
   "tier": "Common"
 }

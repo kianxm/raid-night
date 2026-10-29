@@ -479,3 +479,18 @@ tradeable.
   false. The `reviewer` checks for this on every trading or gifting PR.
 - Raids are not trades: escrow moves an untradeable critter like any other, and the flag survives
   the transfer (tested in `Profile.spec`).
+
+## Critter personality
+
+`CritterSpecies.personality: string` (decision D-038) is one or two lowercase words (each word
+letters, optionally one hyphen inside), such as
+`"smug"`, naming the one expression a critter's art shows. It is static design data in
+`Data/Critters.luau`, never persisted, so adding it needed no migration. The asset pipeline turns
+it into the expression line of every prompt (`tools/assets/build_prompts.luau`); game code may
+show it as flavor text but must not branch on it.
+
+`CritterCatalog.validate()` enforces the style bible: every species has one, at most
+`CritterCatalog.MAX_SHARED_PERSONALITY` (6) species share one, and none uses a word in
+`CritterCatalog.FORBIDDEN_PERSONALITY_WORDS` (sad, crying, injured, frightened and similar).
+The same words are refused in `idle`, which feeds the den idle animation. `validate(list?)` takes
+an optional species list so tests can check that it rejects bad data.

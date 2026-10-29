@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: blinks slowly and a few stars fall from its wings",
+    "stolen": "gotcha pose when stolen: a quick all-knowing gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 4,
     "texture": 1024,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": true,
   "id": "nebula_owl",
-  "idleAnimation": "blinks slowly and a few stars fall from its wings",
   "look": "large owl whose wings hold a swirling galaxy",
   "name": "Nebula Owl",
   "notes": "",
@@ -16,6 +20,7 @@
     "#4FD6FF",
     "#090618"
   ],
+  "personality": "all-knowing",
   "status": "prompts-ready",
   "tier": "Mythic"
 }

@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: drums on the lid with its paws",
+    "stolen": "gotcha pose when stolen: a quick brave gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "lid_raccoon",
-  "idleAnimation": "drums on the lid with its paws",
   "look": "tiny raccoon holding a trash can lid like a shield",
   "name": "Lid Raccoon",
   "notes": "",
@@ -16,6 +20,7 @@
     "#6E6E78",
     "#1C1C24"
   ],
+  "personality": "brave",
   "status": "prompts-ready",
   "tier": "Uncommon"
 }

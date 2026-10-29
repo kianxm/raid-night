@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: the moon lure dims, the angler shakes it like a flashlight until it flares back on",
+    "stolen": "gotcha pose when stolen: a quick sly gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 3.5,
     "texture": 1024,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": true,
   "id": "abyss_angler",
-  "idleAnimation": "the moon lure dims, the angler panics, then it flares back on",
   "look": "floating deep-sea anglerfish whose lure is a tiny full moon",
   "name": "Abyss Angler",
   "notes": "",
@@ -16,6 +20,7 @@
     "#2B5F7A",
     "#070D18"
   ],
+  "personality": "sly",
   "status": "prompts-ready",
   "tier": "Legendary"
 }

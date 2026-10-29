@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: thumps its foot and a thunderclap rolls out",
+    "stolen": "gotcha pose when stolen: a quick daring gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 3.5,
     "texture": 1024,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": true,
   "id": "storm_hare",
-  "idleAnimation": "thumps its foot and a thunderclap rolls out",
   "look": "silver hare with lightning-bolt ears riding a small thundercloud",
   "name": "Storm Hare",
   "notes": "",
@@ -16,6 +20,7 @@
     "#FFE45C",
     "#141B33"
   ],
+  "personality": "daring",
   "status": "prompts-ready",
   "tier": "Legendary"
 }
