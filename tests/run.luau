@@ -79,6 +79,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "NotificationRules",
+		load = function()
+			return require("./specs/NotificationRules.spec")
+		end,
+	},
+	{
 		name = "Plots",
 		load = function()
 			return require("./specs/Plots.spec")
