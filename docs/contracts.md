@@ -21,6 +21,7 @@ sections for what you touch. Update this page in the same commit as any contract
 | Snapshot per user | `DenSnapshot` | SnapshotService | Never includes vault critters. DataStore `DenSnapshots`, key `Snapshot_<userId>` |
 | Escrow per raidId | `EscrowRecord` | EscrowService | Write-once create, then state moves forward only |
 | Open escrows per user | `EscrowOpenIndex` | EscrowService | Both raider and defender; added before the record, removed once terminal |
+| Replay per raidId | `Replay.encode` string in a record | ReplayStore (raid) | DataStore `RaidReplays`; 7-day lifetime; see Replays |
 
 Profile storage: ProfileStore store `PlayerProfiles`, key `Player_<userId>` (`DataService.luau`).
 
@@ -293,6 +294,46 @@ The last three are Kian's launch values, tuned in Phase 3 from live data (P3.9).
   the next one). A den is locked at most 45 s in every 165 s.
 - Duration and cooldown are enforced server-side from the server's own state. The client only
   asks; `LockdownUntil` and `LockdownReadyAt` below are for display.
+
+## Replays
+
+Raid replays (`src/Shared/Replay.luau`, pure; `src/Server/Raid/ReplayStore.luau`). A replay never
+affects a raid's result: saving runs on its own thread, inside `pcall`, and a failure only warns.
+
+Format version 1, `"R1.<frames>.<events>"`, printable URL-safe base64 plus `~` and `.`:
+
+- One raider track at `Replay.HZ` (5) frames per second; frame `i` is `startedAt + i / 5`.
+  Positions are relative to the pocket den origin, quantized to `Replay.QUANTUM` (0.5 studs), so
+  every decoded position is within 0.25 studs of the recorded one, with no drift.
+- Frames are zigzag varints of the delta from the previous frame (the first from the origin);
+  `dy` is written only when non-zero, and `~n` is n frames standing still. A missed server tick
+  is interpolated, so the frame index is always time.
+- Events: kind `Grab`, `Drop`, `Tag`, `Trap`, `Escape` or `Timeout`, with a frame index and an
+  optional arg (`[%w_]`, at most 32 characters: species id, trap kind, guard id).
+- Bounded: at most `Replay.MAX_FRAMES` (1000) frames and 64 events. A 3-minute raid is about
+  1.8 KB. `Replay.decode` returns nil for anything malformed and never errors.
+- A new format bumps `Replay.VERSION` and the prefix. Decoders keep reading every older version
+  still inside the 7-day lifetime.
+
+Storage: DataStore `RaidReplays` (the profiles' mode, D-019: in memory under `Memory`).
+
+| Key | Value |
+| --- | --- |
+| `Replay_<raidId>` | `{ v, raidId, raiderUserId, defenderUserId, startedAt, savedAt, data }`, saved with both userIds as the key's user ids |
+| `Index_<raiderUserId>` | `{ [raidId]: savedAt }` of that raider's replays |
+
+- Lifetime: served for 7 days (`Replay.LIFETIME_SECONDS`) after `savedAt`, refused after.
+- Cleanup is a lazy per-raider sweep. Each save updates the raider's index first
+  (`Replay.indexAfterSave`: drops expired entries and the oldest past 64), then writes the replay,
+  then deletes the dropped replays. A failed index write skips the replay, so every stored
+  replay is indexed. An expired replay found on a read is deleted too.
+- raidId must pass `Replay.isRaidId` (`[%w_-]`, at most `Config.Escrow.maxRaidIdLength`).
+
+`Net.Requests.GetReplay` is `(raidId) -> Net.ReplayPayload?` (`{ raidId, version, raiderUserId,
+defenderUserId, startedAt, data }`), limited by `Net.Limits.GetReplay` (3 per 10 s) and one call
+at a time per player. Only the raider and the defender named in the stored record (written by the
+server from its own raid state) get it; anything else, including a missing, expired or unsaved
+replay, returns nil. The client decodes `data` with `Replay.decode`.
 
 ## Live loss rules
 
