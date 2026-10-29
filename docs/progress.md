@@ -88,7 +88,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.5d | ui | P2.5, C6b, P2.8c | Todo | | 0 | ui handoffs: settings/onboarding wiring, shop offers, Lantern Night announcement, critter idle animator, odds chip 6 tiers, gear HUD (GetGear/UseGear, GearUsed fx, gear shop). Settings: never SaveSettings before GetSettings has answered (reviewer #126) |
 | P2.7b | notifications | P2.7, P2.9 | In progress | agent/notifications/P2.7b → preview/phase2 | 1 | track → AnalyticsService.trackNotification (+ notification_sent Throttled); dedupe onLoss by raidId; header says onLoss may run on the defender server (reviewer #128) |
 | P2.9b | data | P2.9, C6b | In progress | agent/data/P2.9b → preview/phase2 | 1 | Analytics derives onboarding steps from Profile (fixes the preview failure); onboarding_step event; live DenRaided sink |
-| P2.12a | integration | — | In progress | preview/phase2 (0ec815d) | 1 | Built from #118-#128 + #87/#122: 526 pass, 1 fail (Analytics vs 6-step onboarding → P2.9b); EscrowSimulation green, lint/format/types clean. 4 conflicts resolved (tests/run.luau, IncomeService, contracts.md, DataService header). Folding in #130 |
+| P2.12a | integration | — | In progress | preview/phase2 (25d29c2) | 1 | + #130: 537 pass, 1 known fail. Built from #118-#128 + #87/#122: 526 pass, 1 fail (Analytics vs 6-step onboarding → P2.9b); EscrowSimulation green, lint/format/types clean. 4 conflicts resolved (tests/run.luau, IncomeService, contracts.md, DataService header). |
 | P2.12 | integration | all | Todo | | 0 | Closed-test build + kit; access setup is Kian's |
 
 ## Setup notes
