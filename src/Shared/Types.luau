@@ -165,6 +165,9 @@ export type DenSnapshot = {
 	storedGlow: number, -- `stored` accrued at snapshot time
 	shieldUntil: number,
 	protectedUntil: number, -- new-player protection end
+	-- userIds the owner blocked on Roblox, as their client last reported (Net.Requests.ReportBlocked).
+	-- Missing = blocks nobody (snapshots saved before it existed, or no report yet); no migration.
+	blockedUserIds: { number }?,
 }
 
 -- [MemoryStore, not persisted] One entry in a matchmaking pool.
