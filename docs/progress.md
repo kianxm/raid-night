@@ -9,12 +9,12 @@ Current phase: 0 · Last updated: 2026-10-28 (evening)
 | P0.1 | integration | — | Done | #1 | 1 | CI green (tests, StyLua, selene, luau-analyze via rokit). Baseline StyLua diffs fixed |
 | P0.2 | raid | — | Done | #3, #4 | 1 | 107 parts, 48 lights. Studio (1 client): own den + sign, respawn, walkable border, leave clears den. Multi-client spawn/reassign verified by Lune tests only; 3-client Studio check pending (Kian) |
 | P0.3 | data | — | Done | #2 | 1 | Reviewer APPROVED. Studio: survives rejoin on real DataStore, fresh-save stamping, flags. Not verified: 2-player leave, session-steal kick (needs 2 servers) |
-| P0.3a | data | P0.3b | In progress | agent/data/P0.3a | 1 | PR #2 leftovers S3, S4, S6-S8 + #11 re-review suggestions 1-7 (D-012). Reviewer pass |
+| P0.3a | data | P0.3b | In progress | agent/data/P0.3a | 1 | PR #2 leftovers S3, S4, S6-S8 + #11 re-review suggestions 1-7 (D-012). + C1 review doc fixes. Reviewer pass |
 | P0.3b | data | P0.3 | Done | #11 | 2 | Reviewer APPROVED after fix round (B1-B3; mutation runs reproduce dupe/loss on old code). 96 tests. saveNow, transferLive, escrow DataStore + recovery, kill-switch semantics (D-002). Server code not yet run in Studio (2-player plan deferred) |
 | P0.4 | economy | P0.3 | Done | #9, #10 | 1 | Studio (1 client) passed steps 1-8: egg, collect math, pads/overflow, swaps, 15 bad payloads refused, rate limit, upgrade costs. Rejoin persistence and 2-client checks being rerun. Note: Inventory is uncapped (balance item) |
-| C1 | data | — | In review | #22 | 1 | 92 tests, 221 lines. Cooldown counts from the end (D-011). Reviewer running |
-| P0.4b | economy | C1 | Todo | | 0 | eggMaxTier from Config; rescue egg rolls Common-only from its own table, sets `untradeable`; accrue before the rescue check (uncollected Glow counts) |
-| P0.5 | raid | P0.2, P0.4, P0.3b, C1, P0.4b | Todo | | 0 | P0.3b added: live steals are cross-profile moves (golden rule 4) |
+| C1 | data | — | Done | #22 | 1 | Reviewer APPROVED. 102 tests on integration. Doc follow-ups folded into P0.3a |
+| P0.4b | economy | C1 | Todo | | 0 | eggMaxTier from Config; rescue egg rolls Common-only from its own table, sets `untradeable`; accrue before the rescue check (uncollected Glow counts); replace the IncomeService attribute read with a uid→model table |
+| P0.5 | raid | P0.2, P0.4, P0.3b, C1 | In progress | agent/raid/P0.5 | 1 | No longer waits on P0.4b (D-014). Critter only, no Glow (D-015). Lockdown blocks revenge too (D-013). Studio-only single-client test hook (D-010) |
 | P0.6 | ui | P0.4 | Done | #12, #17 | 1 | #17 fixed the top-bar overlap (issue #15); Studio recheck with P0.6b. Client only; not run in Studio yet (phone emulator check in the P0.8 session). Lockdown button disabled until the remote exists |
 | P0.6b | ui | C1 | Todo | | 0 | Swap the `LOCKDOWN_REMOTE` constant for `Net.Requests.Lockdown` |
 | P0.7 | assets | — | Done | #5 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible). Stage 1 follow-up: `tools/assets/generate.sh` STYLE_REFS still lists ref-03/ref-04, which do not exist |
@@ -46,7 +46,9 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 
 ## Blocked (needs Kian)
 
-- None right now.
+- Not urgent (Phase 2 planning): the design lists "Glow packs" for Robux. If Glow can be bought
+  with Robux, Glow eggs become paid random items (odds on screen, PolicyService), which clashes
+  with CLAUDE.md rule 6. Keep Glow non-purchasable, or plan the odds UI? (reviewer on #22)
 
 ## Deferred to the end-of-phase session (Kian, 2026-10-28)
 
