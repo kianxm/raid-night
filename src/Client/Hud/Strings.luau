@@ -144,7 +144,7 @@ local Strings = {
 	denSelected = "{name} selected",
 
 	-- Settings
-	menuSettings = "Gear",
+	menuSettings = "Options",
 	settingsTitle = "Settings",
 	settingsMusic = "Music",
 	settingsSfx = "Sound effects",
@@ -152,6 +152,8 @@ local Strings = {
 	settingsOn = "On",
 	settingsOff = "Off",
 	settingsPercent = "{pct}%",
+
+	portalRefresh = "Refresh",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string

@@ -1,16 +1,14 @@
 --!strict
 --[[
 	SettingsController (owner: ui agent): music volume, SFX volume and reduced motion.
-	Settings apply locally the moment they change (SettingsState).
-
-	STUB: saving them with the profile needs two server remotes that are not in Net.luau yet.
-	Until the data agent adds them, the calls below find no remote and do nothing, so settings
-	last for the session. Proposed contract (hand-off in the P2.5c PR):
-	  GetSettings  () -> { musicVolume: number, sfxVolume: number, reducedMotion: boolean }?
-	  SaveSettings (settings) -> boolean   -- server clamps 0..1, requires a boolean, ignores extras
+	Settings apply locally the moment they change (SettingsState). They load with GetSettings
+	(retried with backoff while it answers nil) and save with SaveSettings. Nothing is saved
+	before GetSettings has answered, so a slow load can never overwrite the saved values with
+	defaults; changes made in the meantime stay local and are saved right after the load.
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Client = script.Parent.Parent
@@ -19,10 +17,10 @@ local Strings = require(Client:WaitForChild("Hud"):WaitForChild("Strings"))
 local SettingsState = require(Client:WaitForChild("Hud"):WaitForChild("SettingsState"))
 local Request = require(Client:WaitForChild("Request"))
 local MenuController = require(script.Parent:WaitForChild("MenuController")) :: any
+local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net")) :: any
 
-local STUB_GET = "GetSettings" -- not in Net.luau yet
-local STUB_SAVE = "SaveSettings" -- not in Net.luau yet
 local SAVE_DELAY = 1.5
+local SAVE_RETRIES = 3
 
 local SettingsController = {}
 
@@ -104,13 +102,34 @@ local function sliderCard(body: Instance, order: number, title: string, color: C
 end
 
 function SettingsController.start()
+	local loaded = false -- GetSettings has answered; until then nothing is saved
+	local touched: { [string]: boolean } = {} -- fields the player changed before the load
 	local saveToken = 0
-	local function scheduleSave()
+
+	local function trySave(token: number, retries: number)
+		Request.invoke(Net.Requests.SaveSettings, function(ok, saved)
+			if token ~= saveToken then
+				return -- a newer change has its own save queued
+			end
+			if not (ok and saved == true) and retries > 0 then
+				task.delay(SAVE_DELAY * 2, function()
+					if token == saveToken then
+						trySave(token, retries - 1)
+					end
+				end)
+			end
+		end, SettingsState.get())
+	end
+	local function scheduleSave(field: string)
+		if not loaded then
+			touched[field] = true
+			return
+		end
 		saveToken += 1
 		local token = saveToken
 		task.delay(SAVE_DELAY, function()
 			if token == saveToken then
-				Request.invoke(STUB_SAVE, function() end, SettingsState.get())
+				trySave(token, SAVE_RETRIES)
 			end
 		end)
 	end
@@ -161,14 +180,32 @@ function SettingsController.start()
 		end,
 	})
 
-	-- Load the saved settings if the server offers them (see STUB note above).
+	-- Load the saved settings; nil (profile not ready, or a missing remote) retries with backoff.
 	task.spawn(function()
 		Players.LocalPlayer:WaitForChild("PlayerGui")
-		Request.invoke(STUB_GET, function(ok, saved)
-			if ok and type(saved) == "table" then
-				SettingsState.set(saved)
+		local attempt = 0
+		while not loaded do
+			Request.invoke(Net.Requests.GetSettings, function(ok, saved)
+				if ok and type(saved) == "table" then
+					SettingsState.set(SettingsState.mergeLoaded(saved, SettingsState.get(), touched))
+					loaded = true
+				end
+			end)
+			-- Request.invoke answers on its own thread; wait for it, or for the answer to be nil.
+			local waited = 0
+			while not loaded and waited < 25 and Request.isBusy(Net.Requests.GetSettings) do
+				task.wait(0.25)
+				waited += 0.25
 			end
-		end)
+			if not loaded then
+				attempt += 1
+				task.wait(SettingsState.retryDelay(attempt))
+			end
+		end
+		if next(touched) ~= nil then
+			touched = {}
+			scheduleSave("reducedMotion") -- save what the player chose while the load was pending
+		end
 	end)
 end
 

@@ -56,13 +56,17 @@ export type ColumnLayout = {
 	gap: number,
 	reserve: number,
 	compact: boolean,
+	chipText: number, -- odds chip text size
 }
 
 HudMath.COLUMN_TOP_MARGIN = 8
 
 local COLUMN_LAYOUTS: { ColumnLayout } = {
-	{ name = "full", button = 58, chip = 54, gap = 8, reserve = 150, compact = false },
-	{ name = "compact", button = 46, chip = 36, gap = 6, reserve = 120, compact = true },
+	-- The odds chip lists up to 6 tiers (Common to Mythic): full = a title + 6 lines, compact = 3
+	-- rows of two tiers, tight = the same in 11 px text for the shortest phone screens.
+	{ name = "full", button = 58, chip = 132, gap = 8, reserve = 150, compact = false, chipText = 14 },
+	{ name = "compact", button = 46, chip = 50, gap = 6, reserve = 120, compact = true, chipText = 12 },
+	{ name = "tight", button = 44, chip = 44, gap = 4, reserve = 100, compact = true, chipText = 11 },
 }
 
 function HudMath.columnHeight(layout: ColumnLayout): number
@@ -77,6 +81,16 @@ function HudMath.columnLayout(height: number): ColumnLayout
 		end
 	end
 	return COLUMN_LAYOUTS[#COLUMN_LAYOUTS]
+end
+
+-- Odds chip text for compact layouts: entries ("C 55%") packed `perRow` to a line, so six tiers
+-- take three short lines instead of one that truncates.
+function HudMath.chipRows(entries: { string }, perRow: number): string
+	local rows: { string } = {}
+	for i = 1, #entries, perRow do
+		table.insert(rows, table.concat(entries, "  ", i, math.min(i + perRow - 1, #entries)))
+	end
+	return table.concat(rows, "\n")
 end
 
 -- Top edge of the column from the top of the usable area (negative = overflows).

@@ -34,4 +34,22 @@ tests["volumeFor scales the cue by its slider"] = function()
 	expect.eq(SettingsState.volumeFor("sfx", 1, s), 0, "muted sfx")
 end
 
+tests["retry delay backs off to a 30 s ceiling"] = function()
+	expect.eq(SettingsState.retryDelay(1), 2, "first")
+	expect.eq(SettingsState.retryDelay(3), 8, "third")
+	expect.eq(SettingsState.retryDelay(5), 30, "capped")
+	expect.eq(SettingsState.retryDelay(40), 30, "stays capped")
+	expect.eq(SettingsState.retryDelay(0), 2, "bad attempt")
+end
+
+tests["a late load keeps what the player already touched"] = function()
+	local saved = { musicVolume = 0.2, sfxVolume = 0.3, reducedMotion = true }
+	local local_ = { musicVolume = 0.9, sfxVolume = 0.8, reducedMotion = false }
+	local merged = SettingsState.mergeLoaded(saved, local_, { musicVolume = true })
+	expect.eq(merged.musicVolume, 0.9, "touched keeps local")
+	expect.eq(merged.sfxVolume, 0.3, "untouched takes saved")
+	expect.eq(merged.reducedMotion, true, "untouched takes saved")
+	expect.eq(SettingsState.mergeLoaded(nil, local_, {}).sfxVolume, 0.8, "bad payload keeps local")
+end
+
 return tests

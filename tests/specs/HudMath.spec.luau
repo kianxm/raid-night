@@ -59,23 +59,46 @@ tests["actions column fits phone landscape and portrait (#54)"] = function()
 	-- 852x393 landscape minus 36 px top bar = 357 usable.
 	local land = HudMath.columnLayout(357)
 	expect.eq(land.name, "compact", "landscape layout")
-	expect.eq(HudMath.columnHeight(land), 192, "landscape column height")
-	expect.eq(HudMath.columnTop(357, land), 45, "landscape top")
+	expect.eq(HudMath.columnHeight(land), 206, "landscape column height")
+	expect.eq(HudMath.columnTop(357, land), 31, "landscape top")
 	expect.truthy(HudMath.columnTop(357, land) >= HudMath.COLUMN_TOP_MARGIN, "clear of top bar")
 	-- Portrait (~393x852, ~760 usable) and default Studio (854) get the roomy layout.
 	for _, h in { 760, 854 } do
 		local layout = HudMath.columnLayout(h)
 		expect.eq(layout.name, "full", `full at {h}`)
-		expect.eq(HudMath.columnHeight(layout), 252, "full height")
+		expect.eq(HudMath.columnHeight(layout), 330, "full height")
 		expect.truthy(HudMath.columnTop(h, layout) >= HudMath.COLUMN_TOP_MARGIN, `fits at {h}`)
 	end
-	-- Every height from 320 up fits (compact floor needs 320).
-	for h = 320, 900 do
+	-- Every height from 300 up fits (the tight floor needs 296).
+	for h = 300, 900 do
 		local layout = HudMath.columnLayout(h)
 		expect.truthy(HudMath.columnTop(h, layout) >= HudMath.COLUMN_TOP_MARGIN, `fits at {h}`)
 	end
 	-- Buttons stay thumb-sized and text readable.
 	expect.truthy(land.button >= 44, "compact button >= 44")
+	for h = 300, 900 do
+		expect.truthy(HudMath.columnLayout(h).button >= 44, `thumb-sized at {h}`)
+	end
+end
+
+tests["six-tier odds chip fits its layout's chip height"] = function()
+	local labels = HudMath.percentLabels(chancesFor(Config.Economy.eggMaxTier))
+	local entries = {}
+	for i, tier in { "C", "U", "R", "E", "L", "M" } do
+		entries[i] = `{tier} {labels[i]}`
+	end
+	local text = HudMath.chipRows(entries, 2)
+	local rows = #string.split(text, "\n")
+	expect.eq(rows, 3, "three rows")
+	for _, name in { "compact", "tight" } do
+		local layout = HudMath.columnLayout(name == "compact" and 357 or 300)
+		expect.eq(layout.name, name, "layout")
+		expect.truthy(rows * layout.chipText * 1.2 <= layout.chip, `{name} chip holds 3 rows`)
+	end
+	-- Full layout: title + 6 lines, line height ~1.2 x text size, 12 px padding.
+	local full = HudMath.columnLayout(854)
+	expect.truthy(7 * full.chipText * 1.2 + 12 <= full.chip, "full chip holds title + 6 lines")
+	expect.eq(HudMath.chipRows({ "a", "b", "c" }, 2), "a  b\nc", "odd count")
 end
 
 tests["rescue rule needs no critters and low Glow"] = function()

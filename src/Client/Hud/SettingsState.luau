@@ -1,9 +1,8 @@
 --!strict
 --[[
 	SettingsState (owner: ui agent): the player's client settings (music volume, SFX volume,
-	reduced motion) as plain data. Applied locally at once; saving them to the profile needs a
-	server remote that does not exist yet (see SettingsController). No Roblox services, so Lune
-	can test it.
+	reduced motion) as plain data. Applied locally at once; SettingsController loads and saves
+	them with GetSettings / SaveSettings. No Roblox services, so Lune can test it.
 ]]
 
 local SettingsState = {}
@@ -59,6 +58,23 @@ end
 
 function SettingsState.onChanged(fn: (Settings) -> ())
 	table.insert(listeners, fn)
+end
+
+-- GetSettings retry wait in seconds after `attempt` failures (1-based): 2, 4, 8, 16, then 30.
+-- GetSettings allows 3 calls per 10 s, so this stays well inside the limit.
+function SettingsState.retryDelay(attempt: number): number
+	return math.min(30, 2 ^ math.max(1, math.floor(attempt)))
+end
+
+-- What to apply when the server's saved settings arrive late: every field the player has not
+-- touched since login takes the saved value; touched fields keep the player's local choice.
+function SettingsState.mergeLoaded(saved: any, mine: Settings, touched: { [string]: boolean }): Settings
+	local fromServer = SettingsState.sanitize(saved, mine)
+	local out = table.clone(fromServer)
+	for field in touched do
+		(out :: any)[field] = (mine :: any)[field]
+	end
+	return out
 end
 
 -- Final volume for a cue: its own base volume scaled by the matching slider.

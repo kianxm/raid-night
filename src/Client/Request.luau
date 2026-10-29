@@ -11,6 +11,10 @@ local Request = {}
 
 local busy: { [string]: boolean } = {}
 
+function Request.isBusy(name: string): boolean
+	return busy[name] == true
+end
+
 -- Calls `onResult(ok, result)` once the server answers. ok is false when the remote is missing,
 -- busy, or errored.
 function Request.invoke(name: string, onResult: (boolean, any) -> (), ...: any)

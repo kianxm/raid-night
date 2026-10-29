@@ -61,12 +61,14 @@ function RaidApi.nameFor(userId: number): string
 	return nameCache[userId]
 end
 
-function RaidApi.getTargets(): { any }
+-- Each real call counts as a Raid Portal open in analytics (P2.8m), so callers ask only when the
+-- portal opens or the player taps Refresh (`fresh` skips the short cache). Never poll.
+function RaidApi.getTargets(fresh: boolean?): { any }
 	if USE_MOCK then
 		return RaidMock.getTargets()
 	end
 	local cache = targetsCache
-	if cache and os.clock() - cache.at < TARGETS_TTL then
+	if cache and not fresh and os.clock() - cache.at < TARGETS_TTL then
 		return table.clone(cache.list)
 	end
 	local result = invoke(Net.Requests.GetRaidTargets)
