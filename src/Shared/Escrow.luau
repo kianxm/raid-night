@@ -24,7 +24,8 @@
 
 	Transport today (Phase 0; server layer, not this module):
 	  - Only same-server live transfers exist. EscrowService.transferLive runs `advance` with both
-	    profiles loaded in its own server. Only the call that creates a record ever debits.
+	    profiles loaded in its own server. Only the call that creates a record ever debits, and
+	    its same-server retries while that server awaits them (they keep its createNonce).
 	  - Recovery (`recover`) runs on either party's load and on a timer. It never debits afresh:
 	    a Pending record settles from the defender's saved debit, or is voided once a confirmed
 	    save proves this server still holds the defender's session and no debit was saved.
@@ -366,10 +367,10 @@ end
 
 --[[
 	The live path: drives a record to a terminal state, one single-key write at a time, debiting
-	the defender if that has not happened yet. Only the call that created the record uses it;
-	later paths use `recover`, which never debits afresh. Idempotent. `checkpoint`, if given, is
-	called before the defender's first save and after every save; the simulation injects crashes
-	there.
+	the defender if that has not happened yet. Only the call that created the record uses it
+	(and its same-server retries, which keep its createNonce); later paths use `recover`, which
+	never debits afresh. Idempotent. `checkpoint`, if given, is called before the defender's
+	first save and after every save; the simulation injects crashes there.
 ]]
 function Escrow.advance(raidId: string, store: Store, now: number, checkpoint: ((string) -> ())?): EscrowRecord?
 	local function check(name: string)
