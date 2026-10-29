@@ -46,6 +46,20 @@ Studio-only memory and test profiles (decision D-019, details in `DataService.lu
   never saved, and `saveNow` on it confirms at once. `releaseTestProfile(userId)` works like a
   leave (`onProfileReleasing` runs), and it refuses while an escrow for that id is still open,
   or when EscrowService has not registered its release guard (fail closed).
+- **Test sessions** (P1.10d). `DataService.loadTestSession(userId)` starts a real ProfileStore
+  session on `Player_<userId>` for a test id (`Profile.isTestUserId`), held by this server and
+  saved like a player's, so escrow credits, saves, recovers and sweeps it exactly as a player
+  loaded here; it has no Player, den or client. Allowed only when `RunService:IsStudio()`, the
+  boolean ServerStorage attribute `StudioTestSessions` is `true` (read on each call) and
+  `persistence()` is `"DataStore"`; anything else errors before anything is held (Memory mode
+  uses test profiles instead, so the two never meet). `releaseTestSession(userId)` is a leave
+  (no escrow guard; recovery finishes an open transfer on the next load) and waits up to 10 s
+  for the final save; ProfileStore's BindToClose releases it on stop. Its saves are real: delete
+  the `Player_<testId>` (and their `Escrow_`/`Open_`) keys in the Data Stores manager after a
+  soak. `ServerStorage.DataTestHook` (Studio only, same switch and id checks) wraps it:
+  `"load"`, `"seed"` (Common critters on free pads plus stored Glow, then a confirmed save),
+  `"show"` and `"release"`. Soak and test raids use test ids against test ids only; never a
+  test id against a real account in DataStore mode (it would really move that player's critter).
 - **Escrow playtest switches** (P1.1, ServerStorage attributes, read only when
   `RunService:IsStudio()`): `StudioAsyncRaids = true` makes `EscrowService.canStartTransfer`
   count `asyncRaids` as on (the master `raids` switch still applies), and
@@ -68,7 +82,9 @@ still exist, but nothing reads them. The same applies to `EscrowRecords` and its
 where a rename would strand every transfer in flight.
 
 Escrow storage: DataStore `EscrowRecords`. Every write stores the userIds the key is about
-(both parties for a record, the owner for an index; decision D-008, for erasure tooling).
+(both parties for a record, the owner for an index; decision D-008, for erasure tooling). Only
+accounts are named: a negative id (a Studio test id or Local Server player) is left off, as
+ProfileStore does, so a live write names exactly its parties.
 
 - `Escrow_<raidId>`: the `EscrowRecord`. raidId is at most `Config.Escrow.maxRaidIdLength` (43)
   characters, so the key fits DataStore's 50. Forward-only is enforced by `Escrow.canReplace`

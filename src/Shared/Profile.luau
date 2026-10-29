@@ -98,8 +98,9 @@ end
 --[[
 	Studio test ids (decision D-019): whole numbers at or below TEST_USER_ID_MAX. No Roblox account
 	has one, and they stay clear of Studio's Local Server test players (Player1 is -1, Player2 is
-	-2, ...). DataService holds a test profile only in Studio with memory persistence, so a test id
-	never reaches a DataStore.
+	-2, ...). DataService holds a test profile only in Studio with memory persistence. A test id
+	reaches the place's DataStores only through a Studio test session (DataService.loadTestSession,
+	D-056), behind Studio, the StudioTestSessions switch and DataStore persistence.
 ]]
 Profile.TEST_USER_ID_MAX = -1_000_000
 
