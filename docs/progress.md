@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 0 · Last updated: 2026-10-28
+Current phase: 0 · Last updated: 2026-10-28 (evening)
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -9,12 +9,12 @@ Current phase: 0 · Last updated: 2026-10-28
 | P0.1 | integration | — | Done | #1 | 1 | CI green (tests, StyLua, selene, luau-analyze via rokit). Baseline StyLua diffs fixed |
 | P0.2 | raid | — | Done | #3, #4 | 1 | 107 parts, 48 lights. Studio (1 client): own den + sign, respawn, walkable border, leave clears den. Multi-client spawn/reassign verified by Lune tests only; 3-client Studio check pending (Kian) |
 | P0.3 | data | — | Done | #2 | 1 | Reviewer APPROVED. Studio: survives rejoin on real DataStore, fresh-save stamping, flags. Not verified: 2-player leave, session-steal kick (needs 2 servers) |
-| P0.3a | data | P0.3 | Todo | | 0 | Reviewer follow-ups on #2: S1 fail-closed flag check, S3 stamp only true templates, S4 session/Player guard, S6-S8 docs |
-| P0.3b | data | P0.3 | Todo | | 0 | Reviewer S5: DataService save-now-and-confirm + same-server Escrow.Store so P0.5 live steals go through Escrow durably. Prerequisite for P0.5 |
-| P0.4 | economy | P0.3 | Todo | | 0 | |
+| P0.3a | data | P0.3b | Todo | | 0 | Reviewer follow-ups on #2: S3 stamp only true templates, S4 session/Player guard, S6-S8 docs. S1 moved into P0.3b (same file). Runs after P0.3b to avoid DataService conflicts |
+| P0.3b | data | P0.3 | In progress | agent/data/P0.3b | 1 | Reviewer S5 + S1 + S2 (enforce flag inside the entry point): DataService save-now-and-confirm + same-server Escrow.Store so P0.5 live steals go through Escrow durably. Prerequisite for P0.5 |
+| P0.4 | economy | P0.3 | In progress | agent/economy/P0.4 | 1 | |
 | P0.5 | raid | P0.2, P0.4, P0.3b | Todo | | 0 | P0.3b added: live steals are cross-profile moves (golden rule 4) |
 | P0.6 | ui | P0.4 | Todo | | 0 | |
-| P0.7 | assets | — | In review | agent/assets/P0.7 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible) |
+| P0.7 | assets | — | Done | #5 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible). Stage 1 follow-up: `tools/assets/generate.sh` STYLE_REFS still lists ref-03/ref-04, which do not exist |
 | P0.8 | integration | P0.5, P0.6 | Todo | | 0 | |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
@@ -45,6 +45,10 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 - Multi-client check (Studio MCP can't start Test > Clients and Servers): run a 3-player Local
   Server once. Each player in a different den with their name on the sign; Player2 leaving doesn't
   affect Player1; a new join gets the freed den with empty pads. Also folded into P0.8.
+- Flag semantics (reviewer S2 on #2, not urgent): should `raids` be a master switch, so offline
+  raids need both `raids` and `asyncRaids`? Today `raids=false, asyncRaids=true` still allows
+  offline raids. Changes `docs/contracts.md` Kill switches, so it needs your approval. Matters
+  from Phase 1 (async raids are off until then).
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
@@ -53,3 +57,4 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 
 ## Gate history
 - G0: cleared 2026-10-27 (Kian, in chat)
+- Style lock: cleared 2026-10-28 (Kian picked ref-01 + ref-02; body plan follows the animal)
