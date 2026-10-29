@@ -55,7 +55,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.6 | ui | P1.3, P1.5 | In review | #102 | 1 | Stacked on #100, contains #92 and #94 (D-044). Real remotes, revenge + join-server flow, block list via GetCore (D-051). 290 tests, CI green. UI: no review. Studio plan and the two-account loop wait (Kian) |
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
 | P1.8 | economy | P1.7 | Blocked | #96 (stacked on #95) | 1 | Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
-| P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); in review. Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
+| P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); reviewer APPROVED (no Glow bonus on live revenge, retries keep identical args). Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit) | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
 
 ## Setup notes
@@ -163,6 +163,7 @@ dropped based on real play.
 - Client RaidMath helpers (hintKey, failKey, outcomeKey) have no unit tests (tests/ is outside ui's lane; small).
 - markRaidLogSeen could take os.time() itself instead of a passed `now`; a fast server clock leaves a future value (display only) (reviewer #103; tiny).
 - Live revenge doesn't spend the revenge token on commit: needs optional revengeRaidId on transferLive / Escrow.create / the record, spent at the raider credit (data), then a one-line raid change (raid #105, D-052; small-medium). RaidEnd has no revenge flag for a "Revenge!" screen (ui; optional).
+- Live revenge: asyncRaids flipped off between the escape re-read and transferLive refuses the carry instead of a plain steal (fails safe); getLiveRevenge per hold step could be cached (reviewer #105; tiny).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 - Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
 - Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).
