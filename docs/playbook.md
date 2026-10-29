@@ -120,6 +120,8 @@ turns the reversal into tasks.
 
 - You never read source files, diffs or full test/lint output. You read only
   `docs/progress.md`, `docs/decisions-log.md`, `docs/orchestrator-handoff.md` and agent reports.
+  Exception: when deciding a contract change, or when agent reports conflict, you may read the
+  specific diff or file involved, and only that.
 - Checks are delegated: loop step 3 goes to the `integration` agent (pass/fail per check, at most
   5 lines on any failure).
 - Every agent report is capped at 15 lines: status, PR link, checks result, decisions it needs,
