@@ -545,6 +545,15 @@ economy's (below).
   is **not served yet**. Its cost is `GearRules.upgradeCost(gearId, level)` (level 0 = buying it).
 - Cooldowns and async charges are server memory, per player, cleared on leaving. Gear works only
   while `raids` is on (RaidService's `Escrow.canStartTransfer(Config.Flags, "Live", false)`).
+- Gear kill switches (D-068), inside `Config.Gear`, not `Config.Flags`, checked by
+  `GearRules.canUse` (`GearRules.switchedOn`) right after the id. Missing reads as on; anything
+  but `true` or missing is off. Off refuses new `UseGear` calls with `SwitchedOff` and changes
+  nothing else (running effects finish, `GetGear` still answers, held lockpick passes stay).
+
+  | Switch | Turns off | Default |
+  | --- | --- | --- |
+  | `Config.Gear.enabled` | Every gear item | `true` |
+  | `Config.Gear.items.lockpick.enabled` | The lockpick only (it narrows D-013; Kian decides at the gate) | `true` |
 
 | Item | Live (shared world) | Async (pocket) |
 | --- | --- | --- |
@@ -554,7 +563,7 @@ economy's (below).
 | `speedCoil` | Walk speed x (1 + `speedBonus`) for `seconds`. A carrier is never sped past the normal walk speed. The carry speed checks allow the coil until `coilGraceSeconds` after it ends | Same |
 | `lockpick` | Stand outside a locked-down den, within `range` of its border, for `pickSeconds`; moving more than `moveTolerance`, the owner within tagRange or the Lockdown ending breaks it. Done: that Lockdown lets you in (`Lockdown.grantPass`) | Refused (`LiveOnly`): a pocket has no Lockdown, and the offline owner cannot answer it |
 
-`Config.Gear`: `maxLevel` (5), `upgradeCostGrowth` (1.8: level L costs `price` x 1.8^(L-1)),
+`Config.Gear`: `enabled` (true), `maxLevel` (5), `upgradeCostGrowth` (1.8: level L costs `price` x 1.8^(L-1)),
 `coilGraceSeconds` (0.5) and `items.<gearId>` with `price`, `cooldownSeconds`, `asyncCharges`
 (floored; 0 for the lockpick) and the effect sizes above. A key with a `<key>PerLevel` partner is
 `key + perLevel x (level - 1)` (`GearRules.value`, level clamped to 1..maxLevel). Every effect is

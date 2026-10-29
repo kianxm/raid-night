@@ -63,7 +63,8 @@ GearRules.Reason = table.freeze({
 	AlreadyInside = "AlreadyInside", -- lockpick: you are inside that den already
 	AlreadyPicked = "AlreadyPicked", -- lockpick: you already hold this Lockdown's pass
 	NotReady = "NotReady", -- no character, no loaded profile
-	SwitchedOff = "SwitchedOff", -- raids are switched off (Config.Flags.raids)
+	-- Config.Flags.raids, Config.Gear.enabled or the item's own switch (lockpick) is off
+	SwitchedOff = "SwitchedOff",
 	RateLimited = "RateLimited",
 	-- A pick that stops before it is done
 	Moved = "Moved",
@@ -141,13 +142,30 @@ export type Use = {
 	carrying: boolean,
 	trapped: boolean, -- a trap's slow is on (async)
 	picking: boolean, -- a lockpick is under way
+	gear: any?, -- the Config.Gear to read the kill switches from; nil = Config.Gear (tests pass one)
 }
+
+--[[
+	Gear kill switches (D-068), read from `gear` (Config.Gear, or a table of the same shape):
+	`enabled` turns all gear off, `items.<id>.enabled` (the lockpick's) one item. A switch that is
+	missing reads as on, `true` is on, and anything else (false, or a corrupt overlay value) is off.
+]]
+function GearRules.switchedOn(gear: any, gearId: GearId): boolean
+	if type(gear) ~= "table" or (gear.enabled ~= nil and gear.enabled ~= true) then
+		return false
+	end
+	local item = if type(gear.items) == "table" then gear.items[gearId] else nil
+	return not (type(item) == "table" and item.enabled ~= nil and item.enabled ~= true)
+end
 
 -- May this gear be used now? First match wins, so the UI shows the reason that matters.
 function GearRules.canUse(u: Use): (boolean, string?)
 	local id = u.gearId
 	if not GearRules.isGearId(id) then
 		return false, GearRules.Reason.BadRequest
+	end
+	if not GearRules.switchedOn(u.gear or G, id) then
+		return false, GearRules.Reason.SwitchedOff
 	end
 	if not (finite(u.level) and u.level >= 1) then
 		return false, GearRules.Reason.NotOwned

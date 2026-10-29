@@ -189,6 +189,32 @@ tests["grapple and lockpick need free hands; grapple and coil are refused while 
 	refused(use({ picking = true }), Reason.Busy, "nothing else while picking")
 end
 
+-- Kill switches (D-068) -------------------------------------------------------------------------
+
+-- A Config.Gear stand-in with the switches set (Config itself is frozen).
+local function gearConfig(enabled: any, lockpickEnabled: any): any
+	return { enabled = enabled, items = { lockpick = { enabled = lockpickEnabled } } }
+end
+
+tests["Config.Gear.enabled = false refuses every gear use (SwitchedOff); launch default is on"] = function()
+	expect.eq(G.enabled, true, "launch default")
+	for _, id in Profile.GEAR_IDS do
+		refused(use({ gearId = id, gear = gearConfig(false, true) }), Reason.SwitchedOff, `{id} with gear off`)
+		expect.truthy((GearRules.canUse(use({ gearId = id, gear = gearConfig(true, true) }))), `{id} with gear on`)
+	end
+	refused(use({ gear = gearConfig("yes", true) }), Reason.SwitchedOff, "a corrupt switch is off")
+	refused(use({ gearId = "jetpack", gear = gearConfig(false, true) }), Reason.BadRequest, "ids are checked first")
+end
+
+tests["Config.Gear.items.lockpick.enabled = false refuses the lockpick only; launch default is on"] = function()
+	expect.eq(G.items.lockpick.enabled, true, "launch default")
+	refused(use({ gearId = "lockpick", gear = gearConfig(true, false) }), Reason.SwitchedOff, "lockpick off")
+	for _, id in { "grapple", "smoke", "decoy", "speedCoil" } do
+		expect.truthy((GearRules.canUse(use({ gearId = id, gear = gearConfig(true, false) }))), `{id} unaffected`)
+	end
+	expect.truthy(GearRules.switchedOn({ items = {} }, "lockpick"), "a missing switch reads as on")
+end
+
 -- Grapple ---------------------------------------------------------------------------------------
 
 local ORIGIN = { x = 0, y = 3, z = 0 }

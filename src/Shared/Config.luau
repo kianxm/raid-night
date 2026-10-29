@@ -155,6 +155,9 @@ local Config = {
 	-- Every effect runs on the server (Raid/Gear.luau); the rules are pure, in GearRules. Prices
 	-- and effect sizes are launch guesses: economy tunes prices, raid tunes effects.
 	Gear = {
+		-- Kill switch for all gear (D-068). false: every UseGear is refused (SwitchedOff); effects
+		-- already running finish, and nothing else changes.
+		enabled = true,
 		maxLevel = 5,
 		upgradeCostGrowth = 1.8, -- reaching level L costs price x upgradeCostGrowth^(L - 1)
 		-- After a speed coil ends, the carry speed checks still allow its speed this long: the
@@ -205,6 +208,9 @@ local Config = {
 				speedBonusPerLevel = 0.04,
 			},
 			lockpick = { -- live raids only (GearRules.LIVE_ONLY)
+				-- Kill switch for the lockpick alone (D-068): picking a Lockdown narrows D-013, so it
+				-- ships switchable. false: UseGear("lockpick") is refused (SwitchedOff).
+				enabled = true,
 				price = 5000,
 				cooldownSeconds = 90,
 				cooldownSecondsPerLevel = -5,
