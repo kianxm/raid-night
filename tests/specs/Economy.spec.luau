@@ -229,6 +229,85 @@ tests["placement rejects bad pads, foreign uids, full vaults and guards"] = func
 	expect.truthy(Economy.place(p, "v", "Vault", nil, 6, later), "re-placing in the vault is fine")
 end
 
+-- P0.4c: a placement never moves a carried (locked) critter, directly or as a swap -------------
+
+local function lockedSet(...: string): (string) -> boolean
+	local set = {}
+	for _, uid in { ... } do
+		set[uid] = true
+	end
+	return function(uid: string): boolean
+		return set[uid] == true
+	end
+end
+
+local function expectSpot(p: Types.PlayerProfile, uid: string, placement: string, padIndex: number?)
+	expect.eq(p.critters[uid].placement, placement, `{uid} placement`)
+	expect.eq(p.critters[uid].padIndex, padIndex, `{uid} padIndex`)
+end
+
+tests["placing onto a pad whose occupant is locked is refused and changes nothing"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1)) -- being carried
+	fixtures.give(p, fixtures.critter("pad", "crumb_rat", "Pad", 2))
+	fixtures.give(p, fixtures.critter("inv", "crumb_rat", "Inventory"))
+	fixtures.give(p, fixtures.critter("vault", "crumb_rat", "Vault"))
+	local locked = lockedSet("x")
+	local later = NOW + 10
+	for _, mover in { "inv", "vault", "pad" } do
+		local ok, reason = Economy.place(p, mover, "Pad", 1, 6, later, locked)
+		expect.falsy(ok, `{mover} onto the carried critter's pad`)
+		expect.eq(reason, "pad is busy")
+	end
+	expectSpot(p, "x", "Pad", 1)
+	expectSpot(p, "pad", "Pad", 2)
+	expectSpot(p, "inv", "Inventory", nil)
+	expectSpot(p, "vault", "Vault", nil)
+	expect.eq(p.stored, 0, "refused moves do not accrue")
+	expect.eq(p.storedUpdatedAt, NOW, "refused moves do not accrue")
+end
+
+tests["moving a locked critter itself is refused"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1))
+	fixtures.give(p, fixtures.critter("pad", "crumb_rat", "Pad", 2))
+	local locked = lockedSet("x")
+	local later = NOW + 10
+	for _, target in { { "Pad", 3 }, { "Pad", 2 }, { "Pad", 1 }, { "Vault" }, { "Inventory" } } :: { { any } } do
+		local ok, reason = Economy.place(p, "x", target[1], target[2], 6, later, locked)
+		expect.falsy(ok, `x to {target[1]} {target[2]}`)
+		expect.eq(reason, "critter is busy")
+	end
+	expectSpot(p, "x", "Pad", 1)
+	expectSpot(p, "pad", "Pad", 2)
+	expect.eq(p.storedUpdatedAt, NOW, "refused moves do not accrue")
+end
+
+tests["placement still works around a locked critter"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1)) -- being carried
+	fixtures.give(p, fixtures.critter("a", "crumb_rat", "Pad", 2))
+	fixtures.give(p, fixtures.critter("b", "crumb_rat", "Inventory"))
+	local locked = lockedSet("x")
+	expect.truthy(Economy.place(p, "b", "Pad", 3, 6, NOW, locked), "free pad")
+	expectSpot(p, "b", "Pad", 3)
+	expect.truthy(Economy.place(p, "b", "Pad", 2, 6, NOW, locked), "unlocked occupant swaps")
+	expectSpot(p, "b", "Pad", 2)
+	expectSpot(p, "a", "Pad", 3)
+	expect.truthy(Economy.place(p, "a", "Vault", nil, 6, NOW, locked), "to the vault")
+	expectSpot(p, "x", "Pad", 1)
+end
+
+tests["once the lock lifts the pad can be swapped again"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1))
+	fixtures.give(p, fixtures.critter("b", "crumb_rat", "Inventory"))
+	expect.falsy(Economy.place(p, "b", "Pad", 1, 6, NOW, lockedSet("x")))
+	expect.truthy(Economy.place(p, "b", "Pad", 1, 6, NOW, lockedSet()))
+	expectSpot(p, "b", "Pad", 1)
+	expectSpot(p, "x", "Inventory", nil)
+end
+
 tests["upgrading spends banked Glow and accrues at the old level first"] = function()
 	local p = fixtures.veteran(1, NOW)
 	p.denLevel = 1
@@ -300,6 +379,83 @@ tests["eggs go to Inventory once every usable pad is taken"] = function()
 		end
 	end
 	expect.eq(Economy.firstFreePad(p, 6), nil)
+end
+
+-- P0.4b: rescue-egg guards (decisions D-004, D-005) ----------------------------------------------
+
+local Profile = require("../../src/Shared/Profile")
+
+local function eggUpTo(uid: string, maxTier: Types.Tier, tierRoll: number, speciesRoll: number): Economy.EggRoll
+	local roll = egg(uid, tierRoll, speciesRoll)
+	roll.maxTier = maxTier
+	return roll
+end
+
+tests["a rescue egg hatches Common only, whatever eggMaxTier allows"] = function()
+	for i = 0, 19 do
+		local p = fixtures.veteran(1, NOW)
+		p.denLevel = 1
+		local roll = (i + 0.5) / 20
+		local critter = Economy.buyEgg(p, NOW, eggUpTo(`r{i}`, "Mythic", 0.9999, roll)) :: Types.Critter
+		expect.eq(tierOf(critter.speciesId), "Common", `rescue egg with species roll {roll}`)
+	end
+end
+
+tests["a paid egg still rolls up to eggMaxTier"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 1))
+	p.glow = Economy.eggPrice(1) * 2
+	local mythic = Economy.buyEgg(p, NOW, eggUpTo("m", "Mythic", 0.9999, 0)) :: Types.Critter
+	expect.eq(tierOf(mythic.speciesId), "Mythic", "uncapped top roll")
+	local capped = Economy.buyEgg(p, NOW, eggUpTo("u", "Uncommon", 0.9999, 0)) :: Types.Critter
+	expect.eq(tierOf(capped.speciesId), "Uncommon", "capped top roll")
+end
+
+tests["a rescue critter is untradeable and a paid one is not flagged"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	local rescued = Economy.buyEgg(p, NOW, egg("rescued")) :: Types.Critter
+	expect.eq(rescued.untradeable, true, "rescue flag")
+	expect.falsy(Profile.isTradeable(rescued, NOW + 10 * 86400), "never tradeable")
+
+	p.glow = Economy.eggPrice(1)
+	local paid = Economy.buyEgg(p, NOW, egg("paid")) :: Types.Critter
+	expect.eq(paid.untradeable, nil, "paid eggs carry no flag")
+	expect.truthy(Profile.isTradeable(paid, NOW), "paid critter is tradeable")
+end
+
+tests["stored Glow counts as affordable, so it never buys a free egg"] = function()
+	local price = Economy.eggPrice(1)
+
+	-- Glow already in storage, nothing banked: the player must collect, not get a free egg.
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	p.stored = price
+	expect.falsy(Economy.isRescueEgg(p))
+	expect.eq(Economy.eggCost(p), price)
+	expect.eq(Economy.denState(p).stored, price, "DenState shows the Glow the cost is judged against")
+	local critter, reason = Economy.buyEgg(p, NOW + 5, egg("x"))
+	expect.eq(critter, nil, "no free egg")
+	expect.eq(reason, "not enough Glow")
+	expect.eq(next(p.critters), nil, "nothing hatched")
+	expect.eq(p.stored, price, "nothing spent")
+	Economy.collect(p, NOW + 5)
+	expect.truthy(Economy.buyEgg(p, NOW + 5, egg("x")), "buys once collected")
+	expect.eq(p.glow, 0, "paid full price")
+
+	-- Stale accrual timestamp: buyEgg accrues first and still judges banked + stored.
+	local stale = fixtures.veteran(2, NOW)
+	stale.denLevel = 1
+	stale.stored = price - 1
+	stale.glow = 1
+	stale.storedUpdatedAt = NOW - 86400
+	expect.falsy(Economy.buyEgg(stale, NOW, egg("y")), "banked + stored reaches the price")
+	expect.eq(stale.storedUpdatedAt, NOW, "accrued before judging")
+	expect.eq(stale.glow, 1, "nothing spent")
+	stale.glow = 0
+	expect.truthy(Economy.buyEgg(stale, NOW, egg("y")), "one Glow short is a rescue")
+	expect.eq(stale.stored, price - 1, "a rescue egg leaves stored Glow alone")
 end
 
 tests["DenState reflects the profile with a stable, copied critter list"] = function()

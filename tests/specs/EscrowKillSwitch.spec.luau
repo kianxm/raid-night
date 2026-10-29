@@ -7,9 +7,9 @@
 	  - Switches stop NEW transfers only. Records already in Pending or Debited always finish.
 ]]
 
-local fs = require("@lune/fs")
 local expect = require("../lib/expect")
 local fixtures = require("../lib/fixtures")
+local source = require("../lib/source")
 local Types = require("../../src/Shared/Types")
 local Escrow = require("../../src/Shared/Escrow")
 
@@ -80,13 +80,19 @@ tests["recovery finishes records crashed at every stage with every switch off"] 
 		saveProfile = function(profile)
 			profiles[profile.userId] = deepCopy(profile)
 		end,
+		saveProfileWithoutEntry = function(profile, raidId)
+			assert(profiles[profile.userId].appliedTransfers[raidId] == nil, "void proof with a saved debit")
+			profiles[profile.userId] = deepCopy(profile)
+		end,
 	}
 
 	local raider, defender = fixtures.veteran(1, NOW), fixtures.veteran(2, NOW)
+	-- `after`: the crash point; `state`: the record it leaves; `final`: where recovery takes it.
 	local stuck = {
-		{ raidId = "stuck-pending", uid = "fox", after = "savedDefender", state = "Pending" },
-		{ raidId = "stuck-debited", uid = "owl", after = "savedRecordDebited", state = "Debited" },
-		{ raidId = "stuck-credited", uid = "elk", after = "savedRaider", state = "Debited" },
+		{ raidId = "stuck-unsaved", uid = "bat", after = "debitedUnsaved", state = "Pending", final = "Voided" },
+		{ raidId = "stuck-pending", uid = "fox", after = "savedDefender", state = "Pending", final = "Committed" },
+		{ raidId = "stuck-debited", uid = "owl", after = "savedRecordDebited", state = "Debited", final = "Committed" },
+		{ raidId = "stuck-credited", uid = "elk", after = "savedRaider", state = "Debited", final = "Committed" },
 	}
 	for i, case in stuck do
 		fixtures.give(defender, fixtures.critter(case.uid, "crescent_fox", "Pad", i))
@@ -112,34 +118,28 @@ tests["recovery finishes records crashed at every stage with every switch off"] 
 	for _, kind in { "Live", "Async" } do
 		expect.falsy(Escrow.canStartTransfer(off, kind), `{kind} refused while off`)
 	end
-	-- ...but recovery takes no flags at all, and finishes every one.
+	-- ...but recovery takes no flags at all, and finishes every one, the void path included.
 	local function everyone(_userId: number): boolean
 		return true
 	end
 	for _, case in stuck do
 		local record = Escrow.recover(case.raidId, store, NOW + 60, everyone)
-		expect.eq(record and record.state, "Committed", case.raidId)
+		expect.eq(record and record.state, case.final, case.raidId)
 	end
 
 	-- Invariants: each uid in exactly one place, Glow conserved, nothing credited twice.
 	for _, case in stuck do
-		expect.eq(profiles[2].critters[case.uid], nil, `defender no longer has {case.uid}`)
-		expect.truthy(profiles[1].critters[case.uid], `raider has {case.uid}`)
+		local stolen = case.final == "Committed"
+		expect.eq(profiles[2].critters[case.uid] == nil, stolen, `defender has {case.uid} only if voided`)
+		expect.eq(profiles[1].critters[case.uid] ~= nil, stolen, `raider has {case.uid} only if committed`)
 	end
 	local glowAfter = profiles[1].glow + profiles[1].stored + profiles[2].glow + profiles[2].stored
 	expect.eq(glowAfter, glowBefore, "Glow conserved")
 	expect.eq(profiles[1].glow - raider.glow, 300, "raider got each raid's Glow exactly once")
 end
 
--- Strips comments so the guard looks at code only.
-local function codeOnly(source: string): string
-	source = string.gsub(source, "%-%-%[(=*)%[.-%]%1%]", "")
-	source = string.gsub(source, "%-%-[^\n]*", "")
-	return source
-end
-
 tests["EscrowService reads Config.Flags only inside canStartTransfer"] = function()
-	local code = codeOnly(fs.readFile("src/Server/Services/EscrowService.luau"))
+	local code = source.codeOnly(source.read("src/Server/Services/EscrowService.luau"))
 	local first, last = string.find(code, "function EscrowService%.canStartTransfer.-\nend\n")
 	expect.truthy(first and last, "canStartTransfer found")
 	local inside = string.sub(code, first :: number, last :: number)
