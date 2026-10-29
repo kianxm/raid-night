@@ -5,6 +5,7 @@ local fixtures = require("../lib/fixtures")
 local RaidRules = require("../../src/Shared/RaidRules")
 local Config = require("../../src/Shared/Config")
 local Plots = require("../../src/Shared/Plots")
+local Escrow = require("../../src/Shared/Escrow")
 
 local NOW = 1_800_000_000
 local Reason = RaidRules.Reason
@@ -470,6 +471,43 @@ tests["raiders already inside may stay and leave; leaving and coming back is blo
 	expect.falsy(RaidRules.entryBlocked(l, t, false, false, true, true), "inside at the last sample")
 	expect.falsy(RaidRules.entryBlocked(l, t, false, false, true, false), "walking out")
 	expect.truthy(RaidRules.entryBlocked(l, t + 1, false, false, false, true), "walking back in")
+end
+
+-- Live revenge (P1.9b) ---------------------------------------------------------------------------
+
+tests["a live grab is a revenge only against the revenge target's own den"] = function()
+	local revenge: RaidRules.LiveRevenge = { raidId = "r1", targetUserId = 2 }
+	expect.eq(RaidRules.liveRevengeAgainst(revenge, 2), "r1", "the target's den")
+	expect.eq(RaidRules.liveRevengeAgainst(revenge, 3), nil, "someone else's den is a plain steal")
+	expect.eq(RaidRules.liveRevengeAgainst(revenge, nil), nil, "an empty den")
+	expect.eq(RaidRules.liveRevengeAgainst(nil, 2), nil, "no active revenge")
+	expect.eq(RaidRules.liveRevengeAgainst({ raidId = "", targetUserId = 2 }, 2), nil, "no token id")
+end
+
+tests["a revenge carry stays a revenge at the escape only while the same revenge is active"] = function()
+	local same: RaidRules.LiveRevenge = { raidId = "r1", targetUserId = 2 }
+	expect.eq(RaidRules.liveRevengeAtEscape("r1", same, 2), "r1", "still active")
+	expect.eq(RaidRules.liveRevengeAtEscape("r1", nil, 2), nil, "lapsed during the carry: plain steal")
+	expect.eq(
+		RaidRules.liveRevengeAtEscape("r1", { raidId = "r2", targetUserId = 2 }, 2),
+		nil,
+		"another token is not the one the carry started with"
+	)
+	expect.eq(RaidRules.liveRevengeAtEscape("r1", { raidId = "r1", targetUserId = 3 }, 2), nil, "another target")
+	expect.eq(RaidRules.liveRevengeAtEscape(nil, same, 2), nil, "a plain carry never becomes a revenge")
+end
+
+tests["revenge changes nothing at the grab but the kill switch (D-013, D-031)"] = function()
+	local revengeFlags = Escrow.canStartTransfer({ raids = true, asyncRaids = false }, "Live", true)
+	expect.falsy(revengeFlags, "live revenge needs asyncRaids")
+	expect.truthy((Escrow.canStartTransfer({ raids = true, asyncRaids = true }, "Live", true)), "both on")
+	expect.falsy((Escrow.canStartTransfer({ raids = false, asyncRaids = true }, "Live", true)), "raids off")
+	local ok, reason = RaidRules.canGrabLive(grab({ flagsAllow = revengeFlags }))
+	expect.falsy(ok)
+	expect.eq(reason, Reason.SwitchedOff)
+	ok, reason = RaidRules.canGrabLive(grab({ lockdownBlocked = true }))
+	expect.falsy(ok, "Lockdown blocks a revenge raider too")
+	expect.eq(reason, Reason.LockdownActive)
 end
 
 return tests

@@ -39,6 +39,13 @@
 	          with server-tracked arguments (glowRequested 0, D-015; liveBaseRate, D-034).
 	          "InFlight" is retried with the identical arguments after 2, 5 and 10 s (never past
 	          20 s); then the lock clears and both dens are refreshed.
+	  Revenge (P1.9b) A grab on the den of the player's active live revenge target
+	          (MatchmakingService.getLiveRevenge: server state only, re-verified each call) is a
+	          revenge transfer: the kill switch also needs `asyncRaids`, everything else is the
+	          same live steal (Lockdown still blocks, D-013; live loss rules unchanged). Re-read
+	          at the escape (RaidRules.liveRevengeAtEscape); transferLive gets isRevenge true only
+	          if that revenge is still active then, else the carry escapes as a plain live steal.
+	          Nothing here spends the token; a dropped carry never reaches escrow at all.
 	  End     Every carry ends with Net.Pushes.RaidEnded to the raider (decision D-020):
 	            raidId ""             dropped before the escape; escaped = false
 	            raidId, escaped true  Committed, and the critter is in the raider's profile
@@ -106,6 +113,7 @@ type Hold = { plot: number, padIndex: number, critterUid: string, startedAt: num
 type Carry = {
 	defenderUserId: number,
 	liveBaseRate: number, -- from the hold; passed unchanged to every transferLive attempt
+	revengeRaidId: string?, -- the live revenge token this carry started under (P1.9b); nil = plain
 	plot: number,
 	padIndex: number,
 	critterUid: string,
@@ -154,6 +162,7 @@ local standIns: { [number]: StandIn } = {} -- plot -> stand-in; stays empty outs
 local beingRaided: RemoteEvent
 local raidEnded: RemoteEvent
 local started = false
+local lastEscape: string? = nil -- the last escape's outcome line, for the Studio status only
 
 local function debugLog(message: string)
 	if RunService:IsStudio() then
@@ -295,21 +304,35 @@ local lockdownBlocks = Lockdown.blocks
 
 -- Grab --------------------------------------------------------------------------------------------
 
--- The kill switch (decision D-002). The only place this service reads Config.Flags.
-local function liveAllowed(): boolean
-	return (Escrow.canStartTransfer(Config.Flags, "Live", false)) -- no live revenge in Phase 0
+-- The kill switch (decision D-002). The only place this service reads Config.Flags. A revenge
+-- also needs `asyncRaids`.
+local function liveAllowed(isRevenge: boolean): boolean
+	return (Escrow.canStartTransfer(Config.Flags, "Live", isRevenge))
 end
 
-local function checkGrab(player: Player, plot: number, padIndex: number): (boolean, string?, Critter?)
+-- The player's active live revenge (P1.9b), from MatchmakingService's server state only. An error
+-- reads as none: the grab is then a plain live steal, which needs no more than a revenge.
+local function liveRevengeOf(player: Player): RaidRules.LiveRevenge?
+	local ok, revenge = pcall(MatchmakingService.getLiveRevenge, player)
+	if not ok then
+		warn(`[RaidService] getLiveRevenge failed for {player.Name}: {revenge}`)
+		return nil
+	end
+	return revenge
+end
+
+-- Also returns the revenge token's raidId when this grab is a revenge on the den's owner.
+local function checkGrab(player: Player, plot: number, padIndex: number): (boolean, string?, Critter?, string?)
 	local ownerUserId, ownerProfile = ownerOf(plot)
+	local revengeRaidId = RaidRules.liveRevengeAgainst(liveRevengeOf(player), ownerUserId)
 	local pad = DenWorldService.getPads(plot)[padIndex]
 	local root = rootOf(player)
 	local forOwner, forPair = 0, 0
 	if ownerUserId then
 		forOwner, forPair = inFlight(ownerUserId, player.UserId)
 	end
-	return RaidRules.canGrabLive({
-		flagsAllow = liveAllowed(),
+	local ok, reason, critter = RaidRules.canGrabLive({
+		flagsAllow = liveAllowed(revengeRaidId ~= nil),
 		raiderUserId = player.UserId,
 		raiderReady = DenWorldService.getPlot(player) ~= nil and DataService.getProfile(player.UserId) ~= nil,
 		ownerUserId = ownerUserId,
@@ -326,6 +349,7 @@ local function checkGrab(player: Player, plot: number, padIndex: number): (boole
 		distance = if pad and root then (root.Position - pad.Position).Magnitude else math.huge,
 		now = os.time(),
 	})
+	return ok, reason, critter, if ok then revengeRaidId else nil
 end
 
 -- Removes the pad's critter model (drawn by IncomeService) while it is carried. Found by where it
@@ -420,7 +444,14 @@ local function drop(player: Player, carry: Carry, why: string)
 	debugLog(`{player.Name} dropped {carry.speciesId} ({why}); back on den {carry.plot} pad {carry.padIndex}`)
 end
 
-local function startCarry(player: Player, plot: number, padIndex: number, critter: Critter, liveBaseRate: number)
+local function startCarry(
+	player: Player,
+	plot: number,
+	padIndex: number,
+	critter: Critter,
+	revengeRaidId: string?,
+	liveBaseRate: number
+)
 	local ownerUserId = ownerOf(plot)
 	local species = CritterCatalog.get(critter.speciesId)
 	local root = rootOf(player)
@@ -436,6 +467,7 @@ local function startCarry(player: Player, plot: number, padIndex: number, critte
 	local carry: Carry = {
 		defenderUserId = ownerUserId,
 		liveBaseRate = liveBaseRate,
+		revengeRaidId = revengeRaidId,
 		plot = plot,
 		padIndex = padIndex,
 		critterUid = critter.uid,
@@ -467,7 +499,8 @@ local function startCarry(player: Player, plot: number, padIndex: number, critte
 		drop(player, carry, "start failed")
 		return
 	end
-	debugLog(`{player.Name} grabbed {species.id} from den {plot} pad {padIndex}`)
+	local tag = if revengeRaidId then ` (revenge {revengeRaidId})` else ""
+	debugLog(`{player.Name} grabbed {species.id} from den {plot} pad {padIndex}{tag}`)
 end
 
 function RaidService.requestGrab(player: Player, plot: any, padIndex: any): (boolean, string?)
@@ -510,13 +543,13 @@ end
 -- whole time (range included).
 local function stepHolds()
 	for player, hold in holds do
-		local ok, reason, critter = checkGrab(player, hold.plot, hold.padIndex)
+		local ok, reason, critter, revengeRaidId = checkGrab(player, hold.plot, hold.padIndex)
 		if not ok or not critter or critter.uid ~= hold.critterUid then
 			holds[player] = nil
 			debugLog(`grab hold cancelled for {player.Name}: {reason or "critter changed"}`)
 		elseif RaidRules.grabHoldDone(hold.startedAt, os.clock()) then
 			holds[player] = nil
-			startCarry(player, hold.plot, hold.padIndex, critter, hold.liveBaseRate)
+			startCarry(player, hold.plot, hold.padIndex, critter, revengeRaidId, hold.liveBaseRate)
 		end
 	end
 end
@@ -547,7 +580,11 @@ local function escape(player: Player, carry: Carry)
 	local critterUid = carry.critterUid
 	local speciesId = carry.speciesId
 	local liveBaseRate = carry.liveBaseRate
-	debugLog(`{player.Name} escaped with {carry.speciesId}; raid {raidId} handed to EscrowService`)
+	-- P1.9b: still a revenge only if the revenge the carry started under is active now.
+	local revengeRaidId = RaidRules.liveRevengeAtEscape(carry.revengeRaidId, liveRevengeOf(player), defenderUserId)
+	local isRevenge = revengeRaidId ~= nil
+	local tag = if revengeRaidId then ` as revenge {revengeRaidId}` else ""
+	debugLog(`{player.Name} escaped with {carry.speciesId}; raid {raidId}{tag} handed to EscrowService`)
 	task.spawn(function()
 		local status, reason = "InFlight", nil
 		local attempts = #ESCAPE_RETRY_DELAYS + 1
@@ -563,7 +600,7 @@ local function escape(player: Player, carry: Carry)
 				defenderUserId,
 				critterUid,
 				LIVE_GLOW,
-				false,
+				isRevenge,
 				liveBaseRate
 			)
 			status, reason = if ok then s else "InFlight", if ok then r else tostring(s)
@@ -573,7 +610,7 @@ local function escape(player: Player, carry: Carry)
 			end
 			task.wait(delay)
 		end
-		local line = `raid {raidId}: transferLive {status}{if reason then ` ({reason})` else ""}`
+		local line = `raid {raidId}{tag}: transferLive {status}{if reason then ` ({reason})` else ""}`
 		local escaped = false
 		-- Before the lock clears, so no grab slips in between (D-031); guarded so it can never
 		-- strand the lock. Given up InFlight counts as a loss too: recovery may still land it.
@@ -603,6 +640,7 @@ local function escape(player: Player, carry: Carry)
 		if not refreshed then
 			warn(`[RaidService] refresh after raid {raidId} failed: {refreshError}`)
 		end
+		lastEscape = `{line}, escaped {escaped}` -- Studio status only
 		if status == "Committed" then
 			debugLog(line)
 		else
@@ -728,7 +766,7 @@ end
 -- Shows a pad's prompt only while raids are on and it holds a critter that can be taken. Display
 -- only: every grab is checked again on the server.
 local function syncPrompts()
-	local on = liveAllowed()
+	local on = liveAllowed(false) -- a revenge needs this and more
 	for plot = 1, Plots.Layout.plotCount do
 		local ownerUserId, ownerProfile = ownerOf(plot)
 		local open = on and ownerUserId ~= nil and ownerProfile ~= nil and not denClosed(ownerUserId, ownerProfile)
@@ -764,9 +802,10 @@ local function describe(): string
 		table.insert(parts, `{player.Name} holding den {hold.plot} pad {hold.padIndex}`)
 	end
 	for player, carry in carries do
+		local revenge = if carry.revengeRaidId then `, revenge {carry.revengeRaidId}` else ""
 		table.insert(
 			parts,
-			`{player.Name} carrying {carry.speciesId} from den {carry.plot} pad {carry.padIndex} (base {carry.liveBaseRate} Glow/s)`
+			`{player.Name} carrying {carry.speciesId} from den {carry.plot} pad {carry.padIndex} (base {carry.liveBaseRate} Glow/s{revenge})`
 		)
 	end
 	local lockCount = 0
@@ -774,6 +813,9 @@ local function describe(): string
 		lockCount += 1
 	end
 	table.insert(parts, `{lockCount} critter lock(s)`)
+	if lastEscape then
+		table.insert(parts, `last escape: {lastEscape}`)
+	end
 	for plot = 1, Plots.Layout.plotCount do
 		if Lockdown.isActive(plot) then
 			table.insert(parts, `den {plot} in Lockdown`)

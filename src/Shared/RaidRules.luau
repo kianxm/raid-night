@@ -468,6 +468,41 @@ function RaidRules.carryStep(s: CarryStep): (CarryOutcome, number, boolean)
 	return "Continue", budget, crossedStreet
 end
 
+-- Live revenge (P1.9b) ----------------------------------------------------------------------------
+
+-- What MatchmakingService.getLiveRevenge returns: server state only, never client data.
+export type LiveRevenge = { raidId: string, targetUserId: number }
+
+--[[
+	A live grab is a revenge transfer only when the grabbing player's active live revenge is
+	against THIS den's owner. Returns the revenge token's raidId, or nil (a plain live steal).
+	Revenge changes nothing at the grab: Lockdown still blocks (D-013) and the live loss rules
+	apply unchanged; only the kill switch also needs `asyncRaids`.
+]]
+function RaidRules.liveRevengeAgainst(revenge: LiveRevenge?, ownerUserId: number?): string?
+	if revenge == nil or ownerUserId == nil or revenge.targetUserId ~= ownerUserId then
+		return nil
+	end
+	if type(revenge.raidId) ~= "string" or revenge.raidId == "" then
+		return nil
+	end
+	return revenge.raidId
+end
+
+--[[
+	At the escape, before the first transferLive call (retries reuse the answer): still a revenge
+	only when the revenge the carry started with is still active, against the same defender. If it
+	lapsed during the carry (token expired or spent, switched off, raider gone) the steal goes on as
+	a plain live steal, which needs no more than the grab already passed. A carry that started
+	plain never becomes a revenge.
+]]
+function RaidRules.liveRevengeAtEscape(grabbed: string?, current: LiveRevenge?, defenderUserId: number): string?
+	if grabbed == nil then
+		return nil
+	end
+	return if RaidRules.liveRevengeAgainst(current, defenderUserId) == grabbed then grabbed else nil
+end
+
 -- Lockdown (decisions D-003, D-011, D-013) ---------------------------------------------------------
 
 function RaidRules.startLockdown(now: number): Lockdown
