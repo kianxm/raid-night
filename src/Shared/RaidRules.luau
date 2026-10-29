@@ -165,10 +165,9 @@ end
 ]]
 
 -- Live-raid tuning Config.LiveRaid does not hold yet. These stay here for Phase 0 and move to
--- Config in the next contract batch (decision D-021). grabRange moves to Config.LiveRaid in P0.5e
--- (decision D-018); until that lands this copy is the one in use.
+-- Config in the next contract batch (decision D-021). The grab range is Config.LiveRaid.grabRange
+-- (decision D-018).
 RaidRules.Live = table.freeze({
-	grabRange = 10, -- studs, raider root part to pad centre, checked for the whole hold
 	-- Movement budget (see carryStep). It refills at moveRefill x the carry walk speed and holds
 	-- at most budgetSeconds of walking plus budgetSlack studs. A carry starts with the slack only,
 	-- so a speed hack fails within a second or two, while a lag freeze of up to budgetSeconds
@@ -278,7 +277,7 @@ function RaidRules.canGrabLive(g: LiveGrab): (boolean, string?, Critter?)
 	if pairRaids >= Config.Limits.maxRaidsPerPairPerDay then
 		return false, RaidRules.Reason.PairLimit, nil
 	end
-	if not (g.distance <= RaidRules.Live.grabRange) then -- also refuses NaN
+	if not (g.distance <= Config.LiveRaid.grabRange) then -- also refuses NaN
 		return false, RaidRules.Reason.OutOfRange, nil
 	end
 	return true, nil, critter

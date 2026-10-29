@@ -3,6 +3,53 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-024 · 2026-10-28 · P0.4c runs as a third agent briefly
+Decision: the ~20-line swap fix (reviewer B2 on #29) runs alongside the raid fix round and
+P0.5e, above Phase 0's parallelism of 2. Why: it gates the #29 merge and is tiny.
+
+### D-023 · 2026-10-28 · Rescue-egg critters stay stealable live
+Context: reviewer on P0.5 (steal → free rescue egg → steal loop). Decision: untradeable means
+no trading or gifting (D-005); live steals may take rescue critters. The loop is capped by
+maxLossesPerDay and the same-pair limit (D-022). Kian may overturn. Reversible: yes.
+
+### D-022 · 2026-10-28 · Same-pair limit and in-flight count for live grabs
+Decision: live grabs refuse when the owner's lossesToday + carries in flight reach the daily
+cap, and when the raider/owner pair is at maxRaidsPerPairPerDay (with in-flight). Shield and
+new-player protection stay async-only in Phase 0; a short live grace for new players moves to
+Phase 2 onboarding (P2.6). Why: stops one player taking all of a victim's losses in minutes
+(principle 4). Reversible: yes.
+
+### D-021 · 2026-10-28 · Movement-budget values stay in RaidRules for Phase 0
+Decision: the carry anti-speed budget parameters live in RaidRules.Live until the next contract
+batch moves them to Config.LiveRaid; grabRange moves now (D-018). Reversible: yes.
+
+### D-020 · 2026-10-28 · Live steals report through RaidEnded
+Decision: when a carry ends, the raider gets Net.Pushes.RaidEnded { raidId (escrow id, or ""
+for a drop), escaped = Committed only, speciesId, glow 0 }. No new remote. Why: the raider
+needs to know if a steal worked; reuses an existing contract. Reversible: yes.
+
+### D-019 (revised 2026-10-28) · Studio-only test profiles, Memory persistence only
+Revision after the reviewer's B4 on #32: test profiles are allowed only when the whole server
+runs in Memory persistence (Studio-only switch to ProfileStore's mock store), with reserved ids
+<= -1_000_000 (Studio's Local Server players use -1, -2, ...). The earlier "escrow in memory for
+negative ids while API access is on" would have saved a real profile pointing at a memory-only
+record. Original entry below.
+
+### D-019 · 2026-10-28 · Studio-only test profiles; test escrow never persists
+Decision: DataService.loadTestProfile/releaseTestProfile work only in Studio and only for
+userId <= 0, in memory; any escrow with a party userId <= 0 keeps its record and index in
+memory, even with Studio API access on. Why: single-client testing of the full steal path
+(D-010) without fake data ever reaching a DataStore (principle 1). Reversible: yes.
+
+### D-018 · 2026-10-28 · Grab range in Config
+Decision: Config.LiveRaid.grabRange = 10 studs (was a RaidRules constant). Why: tuning knobs
+live in Config (principle 5). Reversible: yes.
+
+### D-016 · 2026-10-28 · DenState.eggCost deferred to the Phase 2 UI pass
+Context: economy proposed adding eggCost to Net.DenState so the HUD stops mirroring the rescue
+rule. Decision: defer to P2.5. The client copy is display-only and matches the server after
+P0.4b; a three-lane contract change is not worth it for the Phase 0 gate. Reversible: yes.
+
 ### D-015 · 2026-10-28 · Phase 0 live steals take the critter only
 Decision: transferLive glowRequested = 0 for live steals in Phase 0; stored Glow is only taken by
 async raids (Phase 1). Why: simplest loop for the "is stealing fun" gate. Reversible: yes.
