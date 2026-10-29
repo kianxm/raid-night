@@ -47,7 +47,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) on both. Own Studio run waits for merge (D-044) |
+| P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) APPROVED both; fix round for two loss-adjacent items (D-049). Own Studio run waits for merge (D-044) |
 | P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
 | P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: agent/raid/P1.3a | 1 | Split (D-046): P1.3a = StartRaid, pocket den, traps, guards, timer, grabs (from integration); P1.3b = escrow handoff, shield, revenge token, logs (after P1.1) |
 | P1.4 | raid | P1.3 | In progress | P1.4a: #99 (approved); P1.4b: Todo | 1 | Split (D-046). #99: 3-min raid = 1,768 bytes, ±0.25 stud, reviewer APPROVED (decode fuzzed), 281 tests; GetReplay limit 3 and 7-day index cleanup approved (D-048). P1.4b = hook into raids after P1.3a, using save() not saveNow() |
