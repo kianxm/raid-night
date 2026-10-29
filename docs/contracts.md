@@ -615,10 +615,12 @@ server-written and display-only:
 
 ## Eggs
 
-`Config.Economy.eggMaxTier` (`"Uncommon"` at launch) is the highest tier a bought egg can hatch.
-Tiers up to it keep their `Config.EggOdds` ratios, renormalized to sum to 1
-(`Economy.rollTierUpTo`): Common 0.6875 and Uncommon 0.3125 today, tested in `Config.spec`.
-Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table (from
+`Config.Economy.eggMaxTier` is the highest tier a bought egg can hatch. Tiers up to it keep
+their `Config.EggOdds` ratios, renormalized to sum to 1 (`Economy.rollTierUpTo`). It was
+`"Uncommon"` through Phase 1 (Common 0.6875, Uncommon 0.3125); Phase 2 raised it to `"Mythic"`
+(D-003, P2.4), so a bought egg hatches at the published `EggOdds` weights (Common 55%, Uncommon
+25%, Rare 12%, Epic 6%, Legendary 1.8%, Mythic 0.2%), tested in `Config.spec`. Secret critters are
+event-only and never in `EggOdds`. The rescue egg rolls from its own Common-only table (from
 P0.4b) and ignores `eggMaxTier` (decision D-004).
 
 Glow is earn-only at launch (D-028, amended by D-030): no product ever grants Glow directly.

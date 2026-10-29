@@ -23,10 +23,13 @@
 	Each den also gets a greybox station (Contents/EconomyStation) with ProximityPrompts for
 	Buy Egg, Collect and Upgrade. They run the same code as the remotes, for the owner only.
 
-	Placeholder critters: Contents/Critters/Critter models, one per pad critter, with attributes
-	CritterUid, SpeciesId, Tier, PadIndex, OwnerUserId. PrimaryPart "Body" (colored by tier size),
-	child "Glow" (Neon, the species' first palette color). The attributes are display-only: which
-	model draws which critter is kept in a server table (`drawn`), never read back from them.
+	Pad critters: Contents/Critters/Critter models, one per pad critter, with attributes
+	CritterUid, SpeciesId, Tier, PadIndex, OwnerUserId, built by Server/Economy/CritterView (P2.4):
+	the species' real model once loaded, else the placeholder (PrimaryPart "Body" sized by tier,
+	child "Glow" in the species' first palette color), plus tier glow, particles and the critter's
+	mutation effect. The attributes are display-only: which model draws which critter is kept in a
+	server table (`drawn`), never read back from them. A model is rebuilt when its pad, species,
+	mutation or body source (a real model finishing its load) changes.
 
 	Server API:
 	  refresh(player)               auto-place Inventory critters (D-027), re-push DenState and
@@ -50,19 +53,10 @@ local Net = require(Shared.Net) :: any
 local Plots = require(Shared.Plots) :: any
 local DataService = require(script.Parent.DataService) :: any
 local DenWorldService = require(script.Parent.DenWorldService) :: any
+local CritterView = require(script.Parent.Parent.Economy.CritterView) :: any
 
 local LIMIT_WINDOW_SECONDS = 10
 local MAX_UID_LENGTH = 64
-
-local TIER_SIZE: { [string]: number } = {
-	Common = 1.8,
-	Uncommon = 2.4,
-	Rare = 3,
-	Epic = 3.6,
-	Legendary = 4.4,
-	Mythic = 5.2,
-	Secret = 6,
-}
 
 local random = Random.new()
 local remotes: Folder
@@ -70,8 +64,8 @@ local denChanged: RemoteEvent
 local critterLock: ((number, string) -> boolean)? = nil
 local stations: { [number]: { buy: ProximityPrompt, upgrade: ProximityPrompt } } = {}
 -- The critter models this service built for each player's den: uid -> model and the pad it was
--- drawn on. Cleared on plot release and player leave.
-type Drawn = { model: Model, padIndex: number }
+-- drawn on and its CritterView.lookKey. Cleared on plot release and player leave.
+type Drawn = { model: Model, padIndex: number, look: string }
 local drawn: { [Player]: { plot: number, models: { [string]: Drawn } } } = {}
 local windows: { [Player]: { [string]: { start: number, count: number } } } = {}
 
@@ -124,52 +118,16 @@ local function buildCritter(critter: any, pad: BasePart, ownerUserId: number): M
 	if not species then
 		return nil
 	end
-	local size = TIER_SIZE[species.tier] or 2
-	local model = Instance.new("Model")
-	model.Name = "Critter"
+	local model = CritterView.build(species.id, critter.mutation or "None")
+	if not model then
+		return nil
+	end
 	model:SetAttribute("CritterUid", critter.uid)
 	model:SetAttribute("SpeciesId", species.id)
 	model:SetAttribute("Tier", species.tier)
 	model:SetAttribute("PadIndex", critter.padIndex)
 	model:SetAttribute("OwnerUserId", ownerUserId)
-
-	local body = ghostPart(model, {
-		Name = "Body",
-		Shape = if species.tier == "Uncommon" then Enum.PartType.Block else Enum.PartType.Ball,
-		Size = Vector3.one * size,
-		CFrame = pad.CFrame * CFrame.new(0, pad.Size.Y / 2 + size / 2, 0),
-		Color = Color3.fromHex(species.palette[2] or species.palette[1]),
-		Material = Enum.Material.SmoothPlastic,
-	})
-	body.CanTouch = true
-	body.CanQuery = true
-	ghostPart(model, {
-		Name = "Glow",
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.one * size * 0.45,
-		CFrame = body.CFrame * CFrame.new(0, size * 0.5, 0),
-		Color = Color3.fromHex(species.palette[1]),
-		Material = Enum.Material.Neon,
-		CanTouch = false,
-		CanQuery = false,
-	})
-	model.PrimaryPart = body
-
-	local tag = Instance.new("BillboardGui")
-	tag.Size = UDim2.fromOffset(160, 36)
-	tag.StudsOffset = Vector3.new(0, size + 1, 0)
-	tag.MaxDistance = 45
-	tag.LightInfluence = 0
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.fromHex(species.palette[1])
-	label.TextStrokeTransparency = 0.4
-	label.Text = `{species.name}\n{species.tier}`
-	label.Parent = tag
-	tag.Parent = body
+	model:PivotTo(pad.CFrame * CFrame.new(0, pad.Size.Y / 2, 0))
 	return model
 end
 
@@ -212,7 +170,12 @@ local function renderDen(player: Player, profile: any)
 		local critter = wanted[uid]
 		if isLocked(player.UserId, uid) then
 			tracked[entry.model] = true -- its carrier owns the model for now
-		elseif critter and entry.model.Parent == folder and entry.padIndex == critter.padIndex then
+		elseif
+			critter
+			and entry.model.Parent == folder
+			and entry.padIndex == critter.padIndex
+			and entry.look == CritterView.lookKey(critter.speciesId, critter.mutation or "None")
+		then
 			tracked[entry.model] = true
 			wanted[uid] = nil -- already drawn in the right place
 		else
@@ -231,7 +194,11 @@ local function renderDen(player: Player, profile: any)
 		local model = buildCritter(critter, pads[critter.padIndex], player.UserId)
 		if model then
 			model.Parent = folder
-			state.models[uid] = { model = model, padIndex = critter.padIndex }
+			state.models[uid] = {
+				model = model,
+				padIndex = critter.padIndex,
+				look = CritterView.lookKey(critter.speciesId, critter.mutation or "None"),
+			}
 		end
 	end
 end
@@ -457,6 +424,16 @@ function IncomeService.start()
 	end)
 	DataService.onProfileLoaded(function(player: Player)
 		push(player)
+	end)
+	-- Real critter models load in the background; each one that arrives redraws the dens (the
+	-- placeholders of that species become the real model, via the lookKey check in renderDen).
+	CritterView.prefetch(function()
+		for player in drawn do
+			local profile = DataService.getProfile(player.UserId)
+			if profile then
+				renderDen(player, profile)
+			end
+		end
 	end)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		windows[player] = nil

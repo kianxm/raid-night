@@ -612,10 +612,13 @@ tests["egg tier odds sum to 1, run Common up to the cap, and never pass it"] = f
 			expect.eq(CritterCatalog.tierRank(entry.tier), i, `{maxTier} ordered Common upwards`)
 		end
 	end
+	local capped = Economy.eggTierOdds("Uncommon")
+	expect.eq(#capped, 2, "an Uncommon cap is Common and Uncommon")
+	expect.near(capped[1].chance, 0.55 / 0.8, 1e-12, "Common 0.6875")
+	expect.near(capped[2].chance, 0.25 / 0.8, 1e-12, "Uncommon 0.3125")
 	local launch = Economy.eggTierOdds(Config.Economy.eggMaxTier :: Types.Tier)
-	expect.eq(#launch, 2, "launch egg is Common and Uncommon")
-	expect.near(launch[1].chance, 0.55 / 0.8, 1e-12, "Common 0.6875")
-	expect.near(launch[2].chance, 0.25 / 0.8, 1e-12, "Uncommon 0.3125")
+	expect.eq(#launch, 6, "the Phase 2 egg lists Common to Mythic (D-003)")
+	expect.eq(launch[#launch].tier, "Mythic", "Secret never hatches from an egg")
 	local full = Economy.eggTierOdds("Mythic")
 	for i, entry in Config.EggOdds do
 		expect.near(full[i].chance, entry.weight, 1e-12, `uncapped {entry.tier} is the published weight`)
