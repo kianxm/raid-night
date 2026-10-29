@@ -7,6 +7,7 @@
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Client = script.Parent.Parent
@@ -17,6 +18,7 @@ local Config = require(Shared:WaitForChild("Config")) :: any
 local GearRules = require(Shared:WaitForChild("GearRules")) :: any
 local CritterCatalog = require(Shared:WaitForChild("CritterCatalog")) :: any
 local Ui = require(Client:WaitForChild("Raid"):WaitForChild("Ui"))
+local Theme = Ui.theme
 local Strings = require(Client:WaitForChild("Hud"):WaitForChild("Strings"))
 local HudMath = require(Client:WaitForChild("Hud"):WaitForChild("HudMath"))
 local ShopMath = require(Client:WaitForChild("Hud"):WaitForChild("ShopMath"))
@@ -247,6 +249,23 @@ function ShopController.start()
 		color = Ui.COLOR.gold,
 		title = Strings.shopTitle,
 		build = function(body)
+			-- PC: a wider two-column screen (design: PC Shop); phone keeps the narrow list.
+			if UserInputService.KeyboardEnabled and not UserInputService.TouchEnabled then
+				local modal = body.Parent
+				local cap = modal and modal:FindFirstChildOfClass("UISizeConstraint")
+				if cap then
+					cap.MaxSize = Vector2.new(760, 620)
+				end
+				local list = body:FindFirstChildOfClass("UIListLayout")
+				if list then
+					list:Destroy()
+				end
+				local grid = Instance.new("UIGridLayout")
+				grid.SortOrder = Enum.SortOrder.LayoutOrder
+				grid.CellSize = UDim2.new(0.5, -10, 0, 128)
+				grid.CellPadding = UDim2.fromOffset(Theme.space.s2, Theme.space.s2)
+				grid.Parent = body
+			end
 			local eggTitle, eggNote, eggButton = card(body, "Egg", 1, Ui.COLOR.gold)
 			local upTitle, upNote, upButton = card(body, "Upgrade", 2, Ui.COLOR.glow)
 
