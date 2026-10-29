@@ -102,7 +102,7 @@ merging it (D-058, D-067). Gate report: `docs/gate-report-phase2.md`.
 | P2.13a | ui | — | In review | #151 → preview/phase2 | 1 | 662 tests. Theme.luau (tokens; Fredoka→FredokaOne, Nunito→BuilderSansBold), Raid/Ui delegates to it, den HUD phone + PC hotbar (1-6, Q). Icons for Kian: 7 x 128 px + Glow orb. Not translatable: hard shadows/bevels approximated, tracked caps |
 | P2.13b | ui | P2.13a | In progress | #153 (stacked on #151), round 2 | 2 | Odds panel, hatch popup, shop, Lantern restyled; round 2: PC egg screen (key 1) + PC shop. Needs feature: egg catalog, restock timer, event tokens, shop tabs |
 | P2.13c | ui | P2.13a | In review | #152 (stacked on #151) | 2 | Portal cards, raid HUD, outcome cards, PC keys 1-3/Enter/Esc; Back to den / Raid again wired. Needs feature: Leave raid remote, Share clip, Scout, Reroll, speed bar, traps seen, rank/Glow lost stats |
-| P2.13d | ui | P2.13a | In progress | agent/ui/P2.13d (stacked on #151) | 1 | Raid log, revenge, opt-in; PC raid feed |
+| P2.13d | ui | P2.13a | In review | #154 (stacked on #151) | 1 | Raid log rows, revenge sheet, revenge-closed sheet, opt-in pre-card (Not now = shown false), PC "Recent raids" panel. Needs feature: real report flow (compliance: report button on every raid log entry; today it points to the Roblox menu), earned Glow, shield/loot pills, pair-limit reason |
 | P2.13e | ui | P2.13a | In progress | agent/ui/P2.13e (stacked on #151) | 1 | Live moments, collection, settings, onboarding |
 | P2.12 | integration | all | Done | #137 | 1 | docs/playtests/phase2.md + "Before inviting" checklist. Build freeze + tester access: Kian |
 
@@ -135,6 +135,7 @@ merging it (D-058, D-067). Gate report: `docs/gate-report-phase2.md`.
 - Merges: the permission check refuses `gh pr merge` (D-044/D-058). Land #116 (Phase 1 ledger), then
   preview/phase2 (802513e) into integration, then this ledger PR. See docs/gate-report-phase2.md.
 - Higgsfield credits for P2.1/P2.2/P2.11 generation, and Asset Gate 1 picks (#87).
+- Compliance: the design requires a report button on every raid log entry; no server report flow exists (the button points to Roblox's menu). Decide what a report does (log + block from matching + Roblox report menu?) so it can be built.
 - P2.4t tuning after eggMaxTier → Mythic (#138): pick option 1-4 (see the P2.4t row).
 
 P2.8 product questions (defaults chosen in D-061; confirm or overturn at the gate):
