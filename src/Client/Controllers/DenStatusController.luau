@@ -12,7 +12,11 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
+local UserInputService = game:GetService("UserInputService")
+
 local Hud = script.Parent.Parent:WaitForChild("Hud")
+local Theme = require(script.Parent.Parent:WaitForChild("Ui"):WaitForChild("Theme"))
+local HudLayout = require(Hud:WaitForChild("HudLayout"))
 local Strings = require(Hud:WaitForChild("Strings"))
 local DenStatusMath = require(Hud:WaitForChild("DenStatusMath")) :: any
 
@@ -20,7 +24,7 @@ local DenStatusController = {}
 
 local player = Players.LocalPlayer
 local TICK_SECONDS = 0.25
-local FONT = Enum.Font.GothamBold
+local FONT = Theme.body
 
 type Marker = { den: Instance, gui: BillboardGui, text: TextLabel, shown: string }
 
@@ -33,7 +37,7 @@ local ownDen: Instance? = nil
 local function styleLabel(l: TextLabel)
 	l.BackgroundTransparency = 1
 	l.Font = FONT
-	l.TextColor3 = Color3.fromHex("FFFFFF")
+	l.TextColor3 = Theme.color.ink
 	l.TextScaled = true
 	l.Size = UDim2.fromScale(1, 1)
 end
@@ -45,11 +49,11 @@ local function pill(parent: Instance, color: Color3): TextLabel
 	frame.BackgroundColor3 = color
 	frame.BorderSizePixel = 0
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
+	corner.CornerRadius = UDim.new(0, Theme.radius.md)
 	corner.Parent = frame
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromHex("0B1026")
-	stroke.Thickness = 2
+	stroke.Color = Theme.color.night900
+	stroke.Thickness = Theme.stroke.thin
 	stroke.Parent = frame
 	frame.Parent = parent
 	local text = Instance.new("TextLabel")
@@ -78,12 +82,19 @@ local function buildOwnChip()
 	holder.BackgroundTransparency = 1
 	-- Under the Glow panel (top-left, 74 px tall at y = 8), left edge clear of the thumbstick.
 	-- 200 px wide: the longer text stays about 15 px tall after TextScaled (150 px shrank it to ~12).
-	holder.Position = UDim2.fromOffset(10, 88)
+	if HudLayout.mode(UserInputService.TouchEnabled, UserInputService.KeyboardEnabled) == "desktop" then
+		-- PC: bottom-left, stacked just above the Glow counter.
+		local d = HudLayout.DESKTOP
+		holder.AnchorPoint = Vector2.new(0, 1)
+		holder.Position = UDim2.new(0, d.inset, 1, -(d.inset + d.glowHeight + 8))
+	else
+		holder.Position = UDim2.fromOffset(HudLayout.PHONE.inset, HudLayout.PHONE.chipY)
+	end
 	holder.Size = UDim2.fromOffset(200, 26)
 	holder.Visible = false
 	holder.Parent = gui
 	ownChip = holder
-	ownChipText = pill(holder, Color3.fromHex("2E7D5B"))
+	ownChipText = pill(holder, Theme.color.safe)
 end
 
 local function anchorFor(den: Instance): BasePart?
@@ -107,7 +118,7 @@ local function makeMarker(den: Instance): Marker?
 	gui.MaxDistance = 120
 	gui.Enabled = false
 	gui.Parent = anchor
-	local text = pill(gui, Color3.fromHex("1B1F3B"))
+	local text = pill(gui, Theme.color.panel)
 	return { den = den, gui = gui, text = text, shown = "" }
 end
 

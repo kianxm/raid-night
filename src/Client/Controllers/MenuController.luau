@@ -7,10 +7,12 @@
 ]]
 
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 
 local Client = script.Parent.Parent
 local Ui = require(Client:WaitForChild("Raid"):WaitForChild("Ui"))
 local Strings = require(Client:WaitForChild("Hud"):WaitForChild("Strings"))
+local HudLayout = require(Client:WaitForChild("Hud"):WaitForChild("HudLayout"))
 local Audio = require(Client:WaitForChild("Sound"):WaitForChild("Audio"))
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
@@ -83,13 +85,24 @@ function MenuController.start()
 	strip = Instance.new("Frame")
 	strip.Name = "Strip"
 	strip.BackgroundTransparency = 1
-	strip.Position = UDim2.fromOffset(10, 90) -- under the 74 px Glow panel
-	strip.Size = UDim2.fromOffset(64, 0)
+	-- Phone: a row under the Glow panel and protection chip. PC: top-right, since the hotbar
+	-- already carries Shop, Critters and Defenses and the top-left belongs to Roblox chat.
+	local desktop = HudLayout.mode(UserInputService.TouchEnabled, UserInputService.KeyboardEnabled) == "desktop"
+	if desktop then
+		strip.AnchorPoint = Vector2.new(1, 0)
+		strip.Position = UDim2.new(1, -HudLayout.DESKTOP.inset, 0, 8)
+	else
+		strip.Position = UDim2.fromOffset(HudLayout.PHONE.inset, HudLayout.PHONE.stripY)
+	end
+	strip.Size = UDim2.fromOffset(if desktop then 420 else 300, 0)
 	strip.AutomaticSize = Enum.AutomaticSize.Y
 	strip.Parent = gui
 	local list = Instance.new("UIListLayout")
 	list.SortOrder = Enum.SortOrder.LayoutOrder
 	list.Padding = UDim.new(0, 4)
+	list.FillDirection = Enum.FillDirection.Horizontal
+	list.Wraps = true
+	list.HorizontalAlignment = if desktop then Enum.HorizontalAlignment.Right else Enum.HorizontalAlignment.Left
 	list.Parent = strip
 
 	DenController.onChanged(function()
