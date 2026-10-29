@@ -15,6 +15,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Net = require(Shared:WaitForChild("Net")) :: any
 local Config = require(Shared:WaitForChild("Config")) :: any
 local RaidMock = require(script.Parent:WaitForChild("RaidMock"))
+local Strings = require(script.Parent.Parent:WaitForChild("Hud"):WaitForChild("Strings"))
 
 local USE_MOCK = false
 local TARGETS_TTL = 8 -- GetRaidTargets is limited to 3 per 10 s; screens share one answer
@@ -56,7 +57,7 @@ function RaidApi.nameFor(userId: number): string
 		return cached
 	end
 	local ok, name = pcall(Players.GetNameFromUserIdAsync, Players, userId)
-	nameCache[userId] = if ok then name else "Raider"
+	nameCache[userId] = if ok then name else Strings.raiderFallback
 	return nameCache[userId]
 end
 
