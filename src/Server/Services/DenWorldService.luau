@@ -2,15 +2,30 @@
 --[[
 	DenWorldService (owner: raid agent)
 
-	Builds the night-lit greybox map under workspace.World at server start, gives each player a
-	den plot (Shared/Plots.luau decides which), spawns their character in it on every spawn, and
-	frees and empties the plot when they leave. Layout numbers live in Plots.Layout.
+	Builds the night-lit map under workspace.World at server start, gives each player a den plot
+	(Shared/Plots.luau decides which), spawns their character in it on every spawn, and frees and
+	empties the plot when they leave. Layout numbers live in Plots.Layout.
+
+	World swap seam (P2.3): every piece (ground, plaza, street lamps, den floor, border strips,
+	pads, spawn, sign, vault door, lantern) is built through Raid/Kit.luau, so art named in
+	Shared/WorldKit.luau replaces the greybox with no code change. Performance: each den is an
+	Atomic streaming model (StreamingEnabled is a place setting; start() warns when it is off),
+	its 30 pad parts are built once and pooled (hidden pads are unparented), pads carry no lights
+	(one Lantern per den instead) and nothing here runs per frame.
 
 	Server API (P0.4 economy and P0.5 live stealing build on it). Plots are numbers 1..8.
 	  getPlot(player) -> number?               nil while the server is full (player waits)
 	  getOwner(plot) -> Player?
 	  getModel(plot) -> Model                  workspace.World.Dens.Den<plot>
-	  getPads(plot) -> { BasePart }            ordered 1..6, front row (1-3) then back row
+	  getPads(plot) -> { BasePart }            all Plots.Layout.maxPads (30) pad parts, ordered by
+	                                           index (Plots.padLocal). Pads past the shown count
+	                                           are built but unparented. Economy.usablePadCount
+	                                           caps use by den level, so #getPads is the physical
+	                                           pad count.
+	  getShownPadCount(plot) -> number         pads 1..n are in the world
+	  setShownPads(plot, n)                    shows pads 1..n and pad n + 1 dim ("next to
+	                                           unlock"). RaidService calls it with
+	                                           WorldKit.shownPads(owner's den level). Idempotent.
 	  getBorder(plot) -> Model                 4 neon strips, CanCollide/CanTouch/CanQuery off
 	  getContents(plot) -> Folder              parent anything placed in the den here
 	  getSpawnCFrame(plot) -> CFrame
@@ -19,8 +34,9 @@
 	  onPlotAssigned(fn(player, plot)) -> disconnect   also called at once for current owners
 	  onPlotReleased(fn(player, plot)) -> disconnect   runs before the den is emptied
 	Replicated for the client: Player attribute "Plot" (number), den Model attributes "Plot"
-	and "OwnerUserId" (0 when empty). On release, Contents and any pad children except the
-	pad's "Light" are destroyed, so the next owner gets an empty den.
+	and "OwnerUserId" (0 when empty), pad attribute "PadIndex". On release, Contents and any pad
+	children except the pad's kit "Art" are destroyed and the den goes back to level-1 pads, so
+	the next owner gets an empty den.
 ]]
 
 local Players = game:GetService("Players")
@@ -28,17 +44,30 @@ local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local Plots = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Plots")) :: any
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Plots = require(Shared:WaitForChild("Plots")) :: any
+local WorldKit = require(Shared:WaitForChild("WorldKit")) :: any
+local Kit = require(script.Parent.Parent:WaitForChild("Raid"):WaitForChild("Kit")) :: any
 
 local L = Plots.Layout
 local GROUND_TOP = 0.5 -- sits above a default Baseplate (top at 0) so nothing z-fights
 local FLOOR_H = 0.4
 local PAD_H = 0.4
 local FLOOR_TOP = GROUND_TOP + FLOOR_H
+local START_PADS: number = WorldKit.shownPads(1) -- what an empty den shows
+
+-- Style bible night palette: navy, deep indigo, slate; neon only on accents.
+local NAVY = Color3.fromHex("#0B1026")
+local INDIGO = Color3.fromHex("#1B1F3B")
+local SLATE = Color3.fromHex("#2E3552")
+local LAMP_WARM = Color3.fromRGB(255, 196, 120)
 
 type Den = {
 	model: Model,
-	pads: { BasePart },
+	pads: { BasePart }, -- all maxPads, pooled
+	padFolder: Folder,
+	nextPad: BasePart, -- the dim "next to unlock" marker
+	shown: number,
 	border: Model,
 	contents: Folder,
 	signLabel: TextLabel,
@@ -66,7 +95,7 @@ local started = false
 
 local DenWorldService = {}
 
-local function part(parent: Instance, props: { [string]: any }): Part
+local function part(parent: Instance?, props: { [string]: any }): Part
 	local p = Instance.new("Part")
 	p.Anchored = true
 	p.Material = Enum.Material.SmoothPlastic
@@ -80,11 +109,19 @@ local function part(parent: Instance, props: { [string]: any }): Part
 end
 
 -- Ghost parts are seen but never touched: no collision, touch events or raycast hits.
-local function ghost(p: BasePart)
+local function ghost(p: Part): Part
 	p.CanCollide = false
 	p.CanTouch = false
 	p.CanQuery = false
 	p.CastShadow = false
+	return p
+end
+
+-- Flat floor pieces: walked on, never touched or shadowed.
+local function flat(p: Part): Part
+	p.CanTouch = false
+	p.CastShadow = false
+	return p
 end
 
 local function setLighting()
@@ -94,9 +131,67 @@ local function setLighting()
 	Lighting.OutdoorAmbient = Color3.fromRGB(80, 90, 135)
 	Lighting.EnvironmentDiffuseScale = 0.3
 	Lighting.EnvironmentSpecularScale = 0.3
-	Lighting.FogColor = Color3.fromRGB(12, 16, 32)
+	Lighting.FogColor = Color3.fromRGB(40, 44, 92) -- blue-violet depth fog (style bible)
 	Lighting.FogStart = 180
 	Lighting.FogEnd = 650
+end
+
+-- A lamp (kit piece lamp_post) named `name`: thin post, neon head and one warm PointLight;
+-- `base` is its bottom centre. Art that brings its own Light keeps it; otherwise the server
+-- adds the one light to the art's highest part.
+local function lamp(name: string, parent: Instance, base: CFrame, height: number, range: number): Model
+	local model = Kit.decor("lamp_post", parent, base, function(greybox: Model)
+		local post = flat(part(greybox, {
+			Name = "Post",
+			Size = Vector3.new(0.6, height, 0.6),
+			CFrame = base * CFrame.new(0, height / 2, 0),
+			Color = INDIGO,
+		}))
+		post.CanQuery = false
+		ghost(part(greybox, {
+			Name = "Head",
+			Size = Vector3.new(1.6, 1.6, 1.6),
+			CFrame = base * CFrame.new(0, height + 0.8, 0),
+			Material = Enum.Material.Neon,
+			Color = LAMP_WARM,
+		}))
+	end)
+	model.Name = name
+	if not model:FindFirstChildWhichIsA("Light", true) then
+		local top: BasePart? = nil
+		for _, d in model:GetDescendants() do
+			if d:IsA("BasePart") and (top == nil or d.Position.Y > top.Position.Y) then
+				top = d
+			end
+		end
+		if top then
+			local light = Instance.new("PointLight")
+			light.Color = LAMP_WARM
+			light.Range = range
+			light.Brightness = 1.2
+			light.Shadows = false
+			light.Parent = top
+		end
+	end
+	return model
+end
+
+-- Shows pads 1..count (clamped to the layout) and the next one dim. No work when unchanged.
+local function showPads(den: Den, count: number)
+	count = math.clamp(math.floor(count), 0, L.maxPads)
+	if count == den.shown then
+		return
+	end
+	den.shown = count
+	for index, pad in den.pads do
+		pad.Parent = if index <= count then den.padFolder else nil
+	end
+	if count < L.maxPads then
+		Kit.pivot(den.nextPad, den.pads[count + 1].CFrame * CFrame.new(0, -PAD_H / 4, 0))
+		den.nextPad.Parent = den.padFolder
+	else
+		den.nextPad.Parent = nil
+	end
 end
 
 local function buildDen(plot: number, parent: Instance): Den
@@ -114,13 +209,17 @@ local function buildDen(plot: number, parent: Instance): Den
 	model.Name = `Den{plot}`
 	model:SetAttribute("Plot", plot)
 	model:SetAttribute("OwnerUserId", 0)
+	-- Streams in and out as one unit, so a client never sees pads without their den.
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
 
-	model.PrimaryPart = part(model, {
+	local floor = flat(part(model, {
 		Name = "Floor",
 		Size = Vector3.new(L.plotSize, FLOOR_H, L.plotSize),
 		CFrame = at(0, GROUND_TOP + FLOOR_H / 2, 0),
-		Color = Color3.fromRGB(34, 38, 60),
-	})
+		Color = INDIGO,
+	}))
+	Kit.dress(floor, "den_base")
+	model.PrimaryPart = floor
 
 	local border = Instance.new("Model")
 	border.Name = "Border"
@@ -132,61 +231,64 @@ local function buildDen(plot: number, parent: Instance): Den
 		{ Vector3.new(t, 0.5, L.plotSize - 2 * t), -half + t / 2, 0 },
 	}
 	for i, s in strips do
-		ghost(part(border, {
+		local strip = ghost(part(border, {
 			Name = `Strip{i}`,
 			Size = s[1],
 			CFrame = at(s[2], FLOOR_TOP + 0.25, s[3]),
 			Material = Enum.Material.Neon,
 			Color = accent,
-			Transparency = 0.35,
 		}))
+		Kit.dress(strip, "den_border")
 	end
 	border.Parent = model
 
 	local padFolder = Instance.new("Folder")
 	padFolder.Name = "Pads"
+	local padColor = SLATE:Lerp(accent, 0.15)
 	local pads = {}
-	for pad = 1, L.padsPerPlot do
+	for pad = 1, L.maxPads do
 		local lx, lz = Plots.padLocal(pad)
-		local p = part(padFolder, {
+		local p = flat(part(nil, {
 			Name = `Pad{pad}`,
 			Size = Vector3.new(L.padSize, PAD_H, L.padSize),
 			CFrame = at(lx, FLOOR_TOP + PAD_H / 2, lz),
-			Color = Color3.fromRGB(70, 78, 112),
-		})
+			Color = padColor,
+		}))
 		p:SetAttribute("PadIndex", pad)
-		local light = Instance.new("PointLight")
-		light.Name = "Light"
-		light.Color = accent:Lerp(Color3.new(1, 1, 1), 0.5)
-		light.Range = 10
-		light.Brightness = 0.8
-		light.Shadows = false
-		light.Parent = p
+		Kit.dress(p, "pad")
 		pads[pad] = p
 	end
+	local nextPad = ghost(part(nil, {
+		Name = "NextPad",
+		Size = Vector3.new(L.padSize, PAD_H / 2, L.padSize),
+		CFrame = pads[1].CFrame,
+		Color = NAVY:Lerp(accent, 0.25),
+	}))
+	Kit.dress(nextPad, "pad_locked")
 	padFolder.Parent = model
 
-	ghost(part(model, {
+	local spawnPad = ghost(part(model, {
 		Name = "Spawn",
 		Size = Vector3.new(5, 0.1, 5),
 		CFrame = at(0, FLOOR_TOP + 0.05, L.spawnZ),
 		Material = Enum.Material.Neon,
 		Color = accent,
-		Transparency = 0.5,
 	}))
+	Kit.dress(spawnPad, "den_spawn")
 
-	local sign = part(model, {
+	local sign = flat(part(model, {
 		Name = "Sign",
 		Size = Vector3.new(16, 3.5, 0.4),
 		CFrame = at(0, FLOOR_TOP + 7, L.signZ),
-		Color = Color3.fromRGB(22, 26, 44),
-	})
-	sign.CastShadow = false
+		Color = NAVY,
+	}))
+	Kit.dress(sign, "den_sign")
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = Enum.NormalId.Front
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 30
+	gui.PixelsPerStud = 20
 	gui.LightInfluence = 0 -- readable at night
+	gui.MaxDistance = 150
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
@@ -197,19 +299,60 @@ local function buildDen(plot: number, parent: Instance): Den
 	label.Parent = gui
 	gui.Parent = sign
 
+	local props = Instance.new("Folder")
+	props.Name = "Props"
+	local vaultBase = at(L.vaultX, FLOOR_TOP, L.vaultZ)
+	local vault = Kit.decor("vault_door", props, vaultBase, function(door: Model)
+		flat(part(door, {
+			Name = "Door",
+			Size = Vector3.new(6, 8, 1),
+			CFrame = vaultBase * CFrame.new(0, 4, 0),
+			Color = SLATE,
+		}))
+		ghost(part(door, {
+			Name = "Trim",
+			Size = Vector3.new(6.4, 0.4, 1.2),
+			CFrame = vaultBase * CFrame.new(0, 8.2, 0),
+			Material = Enum.Material.Neon,
+			Color = accent,
+		}))
+	end)
+	vault.Name = "VaultDoor"
+	lamp("Lantern", props, at(L.lanternX, FLOOR_TOP, L.lanternZ), 7, 24)
+	props.Parent = model
+
 	local contents = Instance.new("Folder")
 	contents.Name = "Contents"
 	contents.Parent = model
 
-	model.Parent = parent
-	return {
+	local den: Den = {
 		model = model,
 		pads = pads,
+		padFolder = padFolder,
+		nextPad = nextPad,
+		shown = -1,
 		border = border,
 		contents = contents,
 		signLabel = label,
 		spawn = at(0, FLOOR_TOP + 3.5, L.spawnZ),
 	}
+	showPads(den, START_PADS)
+	model.Parent = parent
+	return den
+end
+
+-- BaseParts, lights and all instances under `root`.
+local function census(root: Instance): (number, number, number)
+	local parts, lights, all = 0, 0, 0
+	for _, d in root:GetDescendants() do
+		all += 1
+		if d:IsA("BasePart") then
+			parts += 1
+		elseif d:IsA("Light") then
+			lights += 1
+		end
+	end
+	return parts, lights, all
 end
 
 local function buildWorld()
@@ -217,22 +360,26 @@ local function buildWorld()
 	if old then
 		old:Destroy()
 	end
+	Kit.preload()
 	local world = Instance.new("Folder")
 	world.Name = "World"
 
-	part(world, {
+	local ground = flat(part(world, {
 		Name = "Ground",
 		Size = Vector3.new(320, 2, 240),
 		CFrame = CFrame.new(0, GROUND_TOP - 1, 0),
-		Color = Color3.fromRGB(18, 22, 38),
-	})
-	part(world, {
+		Color = NAVY,
+	}))
+	Kit.dress(ground, "ground")
+	local plaza = flat(part(world, {
 		Name = "Plaza",
 		Shape = Enum.PartType.Cylinder,
 		Size = Vector3.new(FLOOR_H, L.plazaRadius * 2, L.plazaRadius * 2),
 		CFrame = CFrame.new(0, GROUND_TOP + FLOOR_H / 2, 0) * CFrame.Angles(0, 0, math.pi / 2),
-		Color = Color3.fromRGB(44, 50, 80),
-	})
+		Color = SLATE,
+	}))
+	-- A cylinder lies on its side, so give the art an upright base and footprint explicitly.
+	Kit.dress(plaza, "plaza", CFrame.new(0, GROUND_TOP, 0), Vector3.new(L.plazaRadius * 2, FLOOR_H, L.plazaRadius * 2))
 	-- Fallback spawn for anyone without a den (server full). Den spawns are code-driven.
 	local plazaSpawn = Instance.new("SpawnLocation")
 	plazaSpawn.Name = "PlazaSpawn"
@@ -243,7 +390,27 @@ local function buildWorld()
 	plazaSpawn.CFrame = CFrame.new(0, FLOOR_TOP + 0.2, 0)
 	plazaSpawn.Material = Enum.Material.Neon
 	plazaSpawn.Color = Color3.fromRGB(120, 130, 200)
+	plazaSpawn.CastShadow = false
 	plazaSpawn.Parent = world
+
+	-- Warm lamp pools in the gaps between dens, on both sides of the street.
+	local street = Instance.new("Folder")
+	street.Name = "Street"
+	local edge = L.rowOffset - L.plotSize / 2 - 4
+	for _, spot in { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } } do
+		lamp("StreetLamp", street, CFrame.new(spot[1] * L.plotSpacing, GROUND_TOP, spot[2] * edge), 9, 30)
+	end
+	street.Parent = world
+	-- Street props have no greybox: each appears once its kit art exists (WorldKit.PropSpots).
+	local streetProps = Instance.new("Folder")
+	streetProps.Name = "Props"
+	for _, spot in WorldKit.PropSpots do
+		if Kit.has(spot.piece) then
+			local base = CFrame.new(spot.x, GROUND_TOP, spot.z) * CFrame.Angles(0, spot.yaw, 0)
+			Kit.decor(spot.piece, streetProps, base, function() end)
+		end
+	end
+	streetProps.Parent = world
 
 	local densFolder = Instance.new("Folder")
 	densFolder.Name = "Dens"
@@ -253,15 +420,19 @@ local function buildWorld()
 	end
 	world.Parent = workspace
 
-	local partCount, lightCount = 0, 0
-	for _, d in world:GetDescendants() do
-		if d:IsA("BasePart") then
-			partCount += 1
-		elseif d:IsA("Light") then
-			lightCount += 1
-		end
+	local partCount, lightCount, instanceCount = census(world)
+	print(
+		`[DenWorld] built {L.plotCount} dens: {partCount} parts, {lightCount} lights, {instanceCount} instances;`
+			.. ` streaming {if workspace.StreamingEnabled then "on" else "OFF"}, kit art for {Kit.artCount()} pieces`
+	)
+	local denParts = census(dens[1].model)
+	local expected = WorldKit.denWorldParts(START_PADS)
+	if RunService:IsStudio() and Kit.artCount() == 0 and denParts ~= expected then
+		warn(`[DenWorld] den 1 has {denParts} parts; WorldKit.denWorldParts says {expected}: update the budget`)
 	end
-	print(`[DenWorld] built {L.plotCount} dens: {partCount} parts, {lightCount} lights`)
+	if not workspace.StreamingEnabled then
+		warn("[DenWorld] Workspace.StreamingEnabled is off: every client loads every den and pocket")
+	end
 end
 
 local function fire(list: { Callback }, player: Player, plot: number)
@@ -301,11 +472,12 @@ local function emptyDen(plot: number)
 	den.contents:ClearAllChildren()
 	for _, pad in den.pads do
 		for _, child in pad:GetChildren() do
-			if child.Name ~= "Light" then
+			if child.Name ~= "Art" then
 				child:Destroy()
 			end
 		end
 	end
+	showPads(den, START_PADS)
 	den.model:SetAttribute("OwnerUserId", 0)
 	den.signLabel.Text = "Empty Den"
 end
@@ -384,6 +556,14 @@ end
 
 function DenWorldService.getPads(plot: number): { BasePart }
 	return table.clone(dens[plot].pads)
+end
+
+function DenWorldService.getShownPadCount(plot: number): number
+	return dens[plot].shown
+end
+
+function DenWorldService.setShownPads(plot: number, count: number)
+	showPads(dens[plot], count)
 end
 
 function DenWorldService.getBorder(plot: number): Model

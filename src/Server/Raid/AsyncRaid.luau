@@ -107,6 +107,7 @@ type Raid = {
 
 local TICK = 0.1
 local SETTLE_SECONDS = 1.5
+local STREAM_TIMEOUT = 2 -- seconds StartRaid waits for the pocket to stream in
 local LIMIT_WINDOW_SECONDS = 10
 
 local AsyncRaid = {}
@@ -458,6 +459,12 @@ local function enterPocket(
 			Pocket.moveGuard(pocket, i, guards[i].x, guards[i].z)
 		end
 		local spawn = Pocket.world(pocket, layout.spawn.x, layout.spawn.z, 3)
+		Pocket.setViewer(pocket, player) -- streams to this raider only
+		if workspace.StreamingEnabled then
+			-- Have the pocket on the raider's client before they land in it (bounded yield; a
+			-- raider who leaves meanwhile is ended as Left on the first tick).
+			pcall(player.RequestStreamAroundAsync, player, spawn, STREAM_TIMEOUT)
+		end
 		character:PivotTo(CFrame.lookAt(spawn, spawn - Vector3.zAxis))
 		local startedAt = workspace:GetServerTimeNow()
 		local origin = pocket.origin

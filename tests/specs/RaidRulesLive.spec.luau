@@ -134,6 +134,19 @@ tests["padCritter ignores vault, guard and inventory critters even with a stale 
 	expect.eq(RaidRules.padCritter(owner, 2), nil)
 end
 
+tests["padCritters maps every pad to what padCritter returns, in one pass"] = function()
+	local owner = den()
+	local stale = fixtures.give(owner, fixtures.critter("v2", "storm_hare", "Vault"))
+	stale.padIndex = 2
+	fixtures.give(owner, fixtures.critter("pad30", "dusk_mouse", "Pad", 30))
+	local byPad = RaidRules.padCritters(owner)
+	for pad = 1, 30 do
+		local one = RaidRules.padCritter(owner, pad)
+		expect.eq(if byPad[pad] then byPad[pad].uid else nil, if one then one.uid else nil, `pad {pad}`)
+	end
+	expect.eq(byPad[2], nil, "a vault critter with a stale padIndex is not on a pad")
+end
+
 tests["a valid live grab returns the pad critter"] = function()
 	local ok, reason, critter = RaidRules.canGrabLive(grab())
 	expect.truthy(ok, `refused: {reason}`)
@@ -254,7 +267,7 @@ end
 tests["no pad is within grab range of a den edge, so nobody grabs from outside"] = function()
 	local L = Plots.Layout
 	local half = L.plotSize / 2
-	for pad = 1, L.padsPerPlot do
+	for pad = 1, L.maxPads do
 		local x, z = Plots.padLocal(pad)
 		local edge = math.min(half - math.abs(x), half - math.abs(z))
 		expect.truthy(edge > Live.grabRange, `pad {pad} is {edge} studs from an edge`)

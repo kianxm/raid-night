@@ -85,6 +85,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "WorldKit",
+		load = function()
+			return require("./specs/WorldKit.spec")
+		end,
+	},
+	{
 		name = "Profile",
 		load = function()
 			return require("./specs/Profile.spec")

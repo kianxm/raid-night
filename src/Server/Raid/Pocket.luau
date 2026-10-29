@@ -2,14 +2,20 @@
 --[[
 	Pocket (owner: raid agent): pooled pocket-den models for async raids.
 
-	One slot per raider, far off-map (ORIGIN, SLOT_SPACING apart), so with streaming no other
-	client loads it. A slot's model is built the first time it is used and then reused: release()
-	takes it out of the world (Parent = nil) and dress() lays the next raid's pads, critters, traps
-	and guards on the same parts. Parts beyond what a raid needs stay unparented.
+	One slot per raider, far off-map (ORIGIN, SLOT_SPACING apart). A slot's model is built the
+	first time it is used and then reused: release() takes it out of the world (Parent = nil) and
+	dress() lays the next raid's pads, critters, traps and guards on the same parts. Parts beyond
+	what a raid needs stay unparented.
 
-	Part budget per pocket: 1 floor + 4 walls + 1 gate, then 2 per laid-out pad (pad + critter),
-	1 per trap (RaidRules.Pocket.maxTraps) and 1 per guard (maxGuards). A den with 6 pads, 4 traps
-	and 2 guards is 24 parts; the most any pocket can hold is 6 + 60 + 12 + 4 = 82.
+	World swap seam (P2.3): floor, walls, gate, pads, guards and each trap kind are kit pieces
+	(Shared/WorldKit.luau, built through Kit.luau), so art replaces the greybox with no code change.
+	Streaming: the model is PersistentPerPlayer and only its raider is added (setViewer), so no
+	other client ever loads it; AsyncRaid streams the area in before moving the raider there.
+
+	Part budget per pocket (WorldKit.pocketParts): 1 floor + 4 walls + 1 gate, then 2 per laid-out
+	pad (pad + critter), 1 per trap (RaidRules.Pocket.maxTraps) and 1 per guard (maxGuards). A den
+	with 6 pads, 4 traps and 2 guards is 24 parts; the most any pocket can hold is
+	6 + 60 + 12 + 4 = 82 (WorldKit.Budget.pocketParts is 90).
 
 	Display only: every position the raid logic uses comes from RaidRules.pocketLayout and the
 	server's own copy of it; no attribute here is ever read back.
@@ -21,12 +27,18 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage.Shared
 local CritterCatalog = require(Shared.CritterCatalog)
 local RaidRules = require(Shared.RaidRules)
+local WorldKit = require(Shared.WorldKit)
+local Kit = require(script.Parent.Kit) :: any
 
 local P = RaidRules.Pocket
 local ORIGIN = Vector3.new(8000, 0, 0) -- floor top of slot 1; the map spans a few hundred studs
 local SLOT_SPACING = 200
 local WALL_HEIGHT = 8
 local PROMPT_DISTANCE = 8
+-- Style bible night palette; neon only on the gate, critters and guards.
+local INDIGO = Color3.fromHex("#1B1F3B")
+local SLATE = Color3.fromHex("#2E3552")
+local PAD_COLOR = Color3.fromRGB(62, 56, 120)
 local TRAP_COLORS: { [string]: Color3 } = {
 	SlowPuddle = Color3.fromRGB(90, 200, 255),
 	Net = Color3.fromRGB(230, 230, 230),
@@ -42,7 +54,9 @@ export type Pocket = {
 	pads: { [number]: BasePart },
 	orbs: { [number]: BasePart }, -- the critter drawn on each pad (a neon ball for now)
 	traps: { BasePart },
+	trapKinds: { string }, -- the kit piece each trap part is dressed as
 	guards: { BasePart },
+	viewer: Player?, -- the one client this pocket streams to
 	inUse: boolean,
 }
 
@@ -51,12 +65,16 @@ local Pocket = {}
 local slots: { Pocket } = {}
 local onPrompt: ((Player, Pocket, number) -> ())? = nil
 
+-- An anchored, shadowless part that nothing touches (raid logic is position-based).
 local function part(name: string, size: Vector3, color: Color3, parent: Instance?): Part
 	local p = Instance.new("Part")
 	p.Name = name
 	p.Size = size
 	p.Color = color
 	p.Anchored = true
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.SmoothPlastic
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	p.Parent = parent
@@ -77,6 +95,7 @@ local function build(slot: number): Pocket
 	local origin = ORIGIN + Vector3.new(0, 0, (slot - 1) * SLOT_SPACING)
 	local model = Instance.new("Model")
 	model.Name = `Pocket{slot}`
+	model.ModelStreamingMode = Enum.ModelStreamingMode.PersistentPerPlayer
 	local pocket: Pocket = {
 		slot = slot,
 		origin = origin,
@@ -84,25 +103,32 @@ local function build(slot: number): Pocket
 		pads = {},
 		orbs = {},
 		traps = {},
+		trapKinds = {},
 		guards = {},
+		viewer = nil,
 		inUse = false,
 	}
-	local floor = part("Floor", Vector3.new(P.size, 2, P.size), Color3.fromRGB(28, 30, 60), model)
+	local floor = part("Floor", Vector3.new(P.size, 2, P.size), INDIGO, model)
 	floor.CFrame = CFrame.new(origin - Vector3.new(0, 1, 0))
+	Kit.dress(floor, "pocket_floor")
 	model.PrimaryPart = floor
 	local half = P.size / 2
-	for i, offset in
+	for _, offset in
 		{ Vector3.new(0, 0, -half), Vector3.new(0, 0, half), Vector3.new(-half, 0, 0), Vector3.new(half, 0, 0) }
 	do
-		local size = if i <= 2 then Vector3.new(P.size, WALL_HEIGHT, 2) else Vector3.new(2, WALL_HEIGHT, P.size)
-		local wall = part("Wall", size, Color3.fromRGB(45, 40, 90), model)
-		wall.CFrame = CFrame.new(origin + offset + Vector3.new(0, WALL_HEIGHT / 2, 0))
+		local wall = part("Wall", Vector3.new(P.size, WALL_HEIGHT, 2), SLATE, model)
+		-- Front faces the pocket's centre, so wall art shows its face to the raider.
+		local position = origin + offset + Vector3.new(0, WALL_HEIGHT / 2, 0)
+		wall.CFrame = CFrame.lookAt(position, position - offset)
+		Kit.dress(wall, "pocket_wall")
 	end
 	local gate = part("EscapeGate", Vector3.new(P.gateRadius * 2, 10, 1), Color3.fromRGB(80, 255, 160), model)
 	gate.Material = Enum.Material.Neon
 	gate.Transparency = 0.4
 	gate.CanCollide = false
+	gate.CanQuery = false
 	gate.CFrame = CFrame.new(Pocket.world(pocket, 0, half - 1.5, 5))
+	Kit.dress(gate, "escape_gate")
 	return pocket
 end
 
@@ -112,14 +138,16 @@ local function padPart(pocket: Pocket, padIndex: number): BasePart
 		return pad
 	end
 	local point = RaidRules.pocketPad(padIndex) :: RaidRules.Point
-	local created = part(`Pad{padIndex}`, Vector3.new(8, 0.4, 8), Color3.fromRGB(70, 60, 140), nil)
+	local created = part(`Pad{padIndex}`, Vector3.new(8, 0.4, 8), PAD_COLOR, nil)
 	created.CFrame = CFrame.new(Pocket.world(pocket, point.x, point.z, 0.2))
+	Kit.dress(created, "pocket_pad")
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText = "Grab"
 	prompt.KeyboardKeyCode = Enum.KeyCode.F
 	prompt.HoldDuration = 0.5
 	prompt.MaxActivationDistance = PROMPT_DISTANCE
 	prompt.RequiresLineOfSight = false
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton -- the nearest pad only
 	prompt.Triggered:Connect(function(player: Player)
 		if onPrompt and pocket.inUse then
 			onPrompt(player, pocket, padIndex)
@@ -181,6 +209,21 @@ function Pocket.acquire(): Pocket?
 	return nil
 end
 
+-- Streams this pocket to `player` only (nil: to nobody). Display only.
+function Pocket.setViewer(pocket: Pocket, player: Player?)
+	local old = pocket.viewer
+	if old == player then
+		return
+	end
+	if old then
+		pcall(pocket.model.RemovePersistentPlayer, pocket.model, old)
+	end
+	pocket.viewer = player
+	if player then
+		pcall(pocket.model.AddPersistentPlayer, pocket.model, player)
+	end
+end
+
 -- Lays one raid on the slot. `species` maps padIndex -> species id for the pads to draw.
 function Pocket.dress(pocket: Pocket, layout: RaidRules.PocketLayout, species: { [number]: string })
 	for padIndex, pad in pocket.pads do
@@ -203,18 +246,29 @@ function Pocket.dress(pocket: Pocket, layout: RaidRules.PocketLayout, species: {
 			or part("Trap", Vector3.new(P.trapRadius * 2, 0.3, P.trapRadius * 2), Color3.new(), nil)
 		pocket.traps[i] = p
 		p.CanCollide = false
+		p.CanQuery = false
 		p.Color = TRAP_COLORS[trap.kind] or Color3.new(1, 0, 1)
-		p.CFrame = CFrame.new(Pocket.world(pocket, trap.x, trap.z, 0.15))
+		local piece = WorldKit.trapPiece(trap.kind)
+		if pocket.trapKinds[i] ~= piece then
+			pocket.trapKinds[i] = piece
+			Kit.dress(p, piece)
+		end
+		Kit.pivot(p, CFrame.new(Pocket.world(pocket, trap.x, trap.z, 0.15)))
 		p.Parent = pocket.model
 	end
 	for i = #layout.traps + 1, #pocket.traps do
 		pocket.traps[i].Parent = nil
 	end
 	for i in layout.guardRoutes do
-		local g = pocket.guards[i] or part("Guard", Vector3.new(3, 5, 3), Color3.fromRGB(255, 70, 90), nil)
-		pocket.guards[i] = g
-		g.Material = Enum.Material.Neon
-		g.CanCollide = false
+		local g = pocket.guards[i]
+		if not g then
+			g = part("Guard", Vector3.new(3, 5, 3), Color3.fromRGB(255, 70, 90), nil)
+			g.Material = Enum.Material.Neon
+			g.CanCollide = false
+			g.CanQuery = false
+			Kit.dress(g, "guard")
+			pocket.guards[i] = g
+		end
 		g.Parent = pocket.model
 	end
 	for i = #layout.guardRoutes + 1, #pocket.guards do
@@ -226,7 +280,7 @@ end
 function Pocket.moveGuard(pocket: Pocket, index: number, x: number, z: number)
 	local g = pocket.guards[index]
 	if g then
-		g.CFrame = CFrame.new(Pocket.world(pocket, x, z, 2.5))
+		Kit.pivot(g, CFrame.new(Pocket.world(pocket, x, z, 2.5)))
 	end
 end
 
@@ -234,6 +288,7 @@ function Pocket.release(pocket: Pocket)
 	for padIndex in pocket.pads do
 		Pocket.returnCritter(pocket, padIndex)
 	end
+	Pocket.setViewer(pocket, nil)
 	pocket.model.Parent = nil
 	pocket.inUse = false
 end
