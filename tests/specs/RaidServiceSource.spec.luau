@@ -77,7 +77,7 @@ tests["the stand-in uses a reserved test id that no player, Studio test client i
 	expect.truthy(string.find(assign, "assert%(Players:GetPlayerByUserId%(userId%) == nil"), "assign: no player")
 	expect.truthy(string.find(assign, "assert%(Plots%.plotOf%(state, userId%) == nil"), "assign: no den yet")
 	expect.truthy(string.find(release, "assert%(RunService:IsStudio%(%)"), "release: Studio only")
-	expect.truthy(string.find(release, "assert%(userId < 0"), "release: negative ids only")
+	expect.truthy(string.find(release, "assert%(userId <= %-1_000_000"), "release: reserved ids only")
 end
 
 tests["a Lockdown push-back shifts the carry sample by the server's move only"] = function()

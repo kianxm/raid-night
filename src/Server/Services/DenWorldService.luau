@@ -428,7 +428,7 @@ end
 
 function DenWorldService.releaseStandIn(userId: number)
 	assert(RunService:IsStudio(), "stand-in dens are Studio-only")
-	assert(userId < 0, "stand-in userIds are negative")
+	assert(userId <= -1_000_000, "stand-in userIds are reserved test ids (<= -1000000)")
 	local plot, nextUserId = Plots.release(state, userId)
 	if plot then
 		freePlot(plot, nextUserId)
