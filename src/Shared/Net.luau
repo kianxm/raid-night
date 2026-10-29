@@ -60,6 +60,17 @@ export type RaidEnd = {
 	reason: string?,
 }
 
+-- GetReplay's answer (docs/contracts.md, Replays). data is a Shared/Replay.encode string in
+-- format `version`; decode it with Replay.decode. Positions are relative to the pocket den origin.
+export type ReplayPayload = {
+	raidId: string,
+	version: number,
+	raiderUserId: number,
+	defenderUserId: number,
+	startedAt: number, -- unix seconds; frame i is startedAt + i / Replay.HZ
+	data: string,
+}
+
 local Net = {}
 
 -- Client -> server requests (RemoteFunctions unless noted).
@@ -78,7 +89,9 @@ Net.Requests = table.freeze({
 	-- RemoteEvent: (raidId, critterUid). Async raids: grab a pocket critter (pad prompts do the same).
 	GrabCritter = "GrabCritter",
 	GetRaidLog = "GetRaidLog", -- () -> { RaidLogEntry }; also marks the log seen (raidLogSeenAt)
-	GetReplay = "GetReplay", -- (raidId) -> compressed replay frames
+	-- (raidId) -> ReplayPayload?; nil when missing, expired (7 days), not yet saved, or the caller
+	-- is neither the raider nor the defender of that raid.
+	GetReplay = "GetReplay",
 	-- () -> boolean (true if started). Den owner only, live raids only. Blocks entry only: raiders
 	-- inside can leave, but a carried critter drops at the border. Server enforces Config.LiveRaid.
 	Lockdown = "Lockdown",
@@ -101,6 +114,7 @@ Net.Limits = table.freeze({
 	Lockdown = 3,
 	GetRaidTargets = 3,
 	ReportBlocked = 2,
+	GetReplay = 3,
 })
 
 --[[
