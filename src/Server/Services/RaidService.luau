@@ -902,7 +902,7 @@ function RaidService.start()
 	-- GetReplay; AsyncRaid records and saves (P1.4b). A throw here must never stop async raids.
 	local replayStarted, replayError = pcall(ReplayStore.start, remotes :: Folder)
 	if not replayStarted then
-		warn(`[RaidService] ReplayStore.start failed (raids go on, no replays): {replayError}`)
+		warn(`[RaidService] replay store failed to start (raids go on, no replays): {replayError}`)
 	end
 	AsyncRaid.start({
 		rootOf = rootOf,
