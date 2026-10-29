@@ -54,7 +54,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
 | P1.6 | ui | P1.3, P1.5 | Todo | | | |
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
-| P1.8 | economy | P1.7 | In progress | agent/economy/P1.8 | 1 | Prepared, stacked on #95; merge only on Kian's approval (D-045) |
+| P1.8 | economy | P1.7 | Blocked | #96 (stacked on #95) | 1 | Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
 | P1.9 | matchmaking | P1.2 | In review | #94 | 1 | Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
 
