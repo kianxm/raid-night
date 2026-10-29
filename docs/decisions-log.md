@@ -3,6 +3,47 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-061 · 2026-10-29 · P2.8 product defaults while Kian's questions are open
+Context: three open product questions (Blocked list) and P2.8 starts tonight. Decision: build
+the safe side of each, all behind Config so a reversal is one value: (1) every product that
+raises or protects Glow is classified Robux-linked and fails closed (factor 1 / not offered)
+for players whose PolicyService info restricts paid random items, until the per-product audit
+says otherwise; (2) VIP's 1.5x applies to online earning only, offline accrue stays unboosted
+(the playbook's default); (3) Lantern Night is hidden from restricted players and the VIP
+description says the Glow bonus isn't available everywhere. Nothing is created in the Creator
+Dashboard; product list and prices go to Kian. Why: principle 3 (policy) and 5 (reversible).
+Reversible: yes (Config).
+
+### D-060 · 2026-10-29 · Phase 2 Studio checks run on preview/phase2 by temporary sync
+Context: merges wait for Kian (D-058), Rojo serves the main checkout. Decision: as D-055, the
+integration agent syncs preview/phase2's changed scripts into the open, unsaved edit place for a
+single-client pass, restores the originals, saves and publishes nothing, test ids only (D-056).
+If Studio MCP doesn't respond, the run goes to Needs Kian. Multi-client checks join the deferred
+list. Why: catch runtime errors before morning without touching Kian's checkout. Reversible: yes.
+
+### D-059 · 2026-10-29 · One Phase 2 profile-field batch (C6), owners add remotes in their PRs
+Context: settings, onboarding, notifications, gear, purchases and analytics each need saved
+state; Profile.luau is data's file. Decision: data adds every Phase 2 profile field in one PR
+(C6), all optional with safe defaults, no migration, reviewer at xhigh. Dependent tasks stack on
+C6. New remotes, Types and Config tables that a task needs go in that task's own PR (precedent
+#100), additive only, mirrored in docs/contracts.md, with a reviewer pass. Why: one schema
+review instead of six; tasks don't wait on each other. Reversible: yes (optional fields).
+
+### D-058 · 2026-10-29 · Phase 2 merge path: stacked PRs and preview/phase2
+Context: `gh pr merge` is refused again in unattended runs (tried on ledger #116; D-044).
+Decision: every PR targets integration; a task that needs another's code stacks on its branch;
+the Phase 2 ledger stacks on #116; before the gate the integration agent builds `preview/phase2`
+(all PRs merged in order, conflicts resolved, checks green, no PR). Kian merges. Why: work
+continues without a merge; the preview proves the stack. Reversible: yes.
+
+### D-057 · 2026-10-29 · Phase 2 runs on placeholder art and sound
+Context: no Higgsfield credits (Kian). Decision: P2.1 and P2.11 generation are Blocked; P2.2
+writes briefs and prompts only. P2.3 and P2.4 no longer wait on art: they build a seam that loads
+an asset id per piece/species when one exists in `assets/clean/<id>/ids.json` (or a Config/data
+table) and falls back to today's procedural placeholders, so real models drop in with no code
+change. Sound hooks ship with empty ids (no sound plays) in P2.5. Asset Gates 1-2 happen when
+credits return. Why: everything but the art can be finished and tested now. Reversible: yes.
+
 ### D-056 · 2026-10-29 · Studio test sessions write test-id keys to the place's DataStores (amends D-019)
 Context: the soak needs forced shutdowns in DataStore mode, which only accepted a real loaded
 raider, so the overnight run used Kian's account (D-055). Decision: in Studio only (IsStudio +

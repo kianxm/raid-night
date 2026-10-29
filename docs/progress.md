@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 1 → 2 (Phase 1 gate approved, main promoted; Phase 2 not started, waiting for Kian) · Last updated: 2026-10-29
+Current phase: 2 (started 2026-10-29, unattended overnight; D-057) · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -58,6 +58,28 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); reviewer APPROVED (no Glow bonus on live revenge, retries keep identical args). Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Done | #104, #112, #115 | 1 | Single-server soak clean 2026-10-29 (P1.10g, integration 506fe40, test ids only): ~30 min, 24 raids, 7 forced stops mid-transfer (Stop ~5 s, recovery 1-3 s), 0 dupes, 0 losses, 0 errors; soak-4 recovered once; #114 fixed by #115. Multi-client parts stay on the deferred list |
 
+## Phase 2: Vertical slice (parallelism 4)
+
+Started 2026-10-29 (Kian: "Run Phase 2", unattended overnight). No Higgsfield credits: placeholder
+art and sound, generation blocked (D-057). Merges wait for Kian; PRs stack, `preview/phase2` proves
+the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
+
+| Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| C6 | data | — | Todo | | 0 | Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
+| P2.1 | assets | — | Blocked | #87 (open) | 1 | Generation paused: no credits (D-057); Gate 1 picks are Kian's. Prompts and 40 fronts done in #87 |
+| P2.2 | assets | — | Todo | | 0 | Briefs + prompts only; generation blocked (D-057) |
+| P2.3 | raid | — | Todo | | 0 | Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
+| P2.4 | economy | — | Todo | | 0 | Was P2.1: model-id seam with placeholder fallback, mutation effects, eggMaxTier → Mythic (D-057) |
+| P2.5 | ui | — | Todo | | 0 | Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
+| P2.6 | ui | P2.5, C6 | Todo | | 0 | Onboarding (Appendix C) |
+| P2.7 | notifications | — | Todo | | 0 | Send rules, opt-in timing, launch data; strings for Kian |
+| P2.8 | economy | C6 | Todo | | 0 | Passes/products, glow-factor helper, policy audit; products for Kian |
+| P2.9 | data | C6 | Todo | | 0 | Analytics events (Appendix A) + funnels |
+| P2.10 | raid | C6, P2.3 | Todo | | 0 | Gear (live only for lockpick) |
+| P2.11 | assets | — | Blocked | | 0 | No credits (D-057); sound hooks ship empty in P2.5 |
+| P2.12 | integration | all | Todo | | 0 | Closed-test build + kit; access setup is Kian's |
+
 ## Setup notes
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
   profiles); check profiles through a temporary server Script instead. `StudioMemoryProfiles`
@@ -83,30 +105,11 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 ## Blocked (needs Kian)
 
-- PR #92 (P1.5b, fixes #90 blank Raid Portal): reviewed, CI green, src/Client only, but the
-  permission check refused `gh pr merge 92` twice ("Merge Without Review"). Merge it yourself, or
-  allow the integration agent to merge reviewed PRs. Not worked around.
+- Merges: the permission check refuses `gh pr merge` (D-044/D-058). Phase 1 ledger #116 and every
+  Phase 2 PR wait for you; merge order is in the gate report.
+- Higgsfield credits for P2.1/P2.2/P2.11 generation, and Asset Gate 1 picks (#87).
 
-- P1.7 tuning (#95, applied in P1.8's stacked PR): upgradeCostBase 100→500, eggPriceBase 50→150,
-  eggPriceGrowth 1.12→1.32. First rebirth median day 0.9 → 20.7 (p10 8.7, p90 47.7); Glow held
-  stays ~1-4 egg prices instead of climbing to 12,000. The design sets no first-rebirth target:
-  approve the ~3-week pace, pick another, or keep today's values. Level 30 of 50 on day 1 either way.
-
-- Rollout: turn `Config.Flags.asyncRaids` on only after every pre-P1.1 server has shut down
-  (shut down old servers after the publish that ships #97/#98); an old server would void a Pending
-  async record and could lose the critter and Glow (D-049).
-
-- Studio MCP wedged ("Start play hasn't finished yet" for 30+ min after a forced stop): restart Studio
-  or the MCP plugin before the next Studio run.
-- Test data (D-055, updated): `p11-sd-1` is now Committed: Kian's account 11086525754 gained test
-  critter `seed-1-1` and 474 Glow (133018 → 133492); keep or remove it. Earlier note: `p11-sd-1` was Pending with raider =
-  Kian's real account 11086525754 and test defender -1 already debited of critter `seed-1-1` (Glow 0).
-  On preview/Phase 1 code the recovery sweep commits it once into 11086525754 (that is the pending
-  forced-shutdown check: expect exactly one seed-1-1). On today's integration code an old recovery may
-  void it and the test critter is lost from -1 (test data only). Seeded test defenders `Player_-1`,
-  `Player_-2`, `Player_-3` exist. Kian's profile is otherwise unchanged (Glow 133018, 13 critters).
-
-Not urgent: all three are needed before P2.8 ships products, nothing earlier.
+P2.8 product questions (defaults chosen in D-061; confirm or overturn at the gate):
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
   vault slot (Vault critters earn 50%), auto-collect, shield, timer skips (undefined; if any
   skip covers income it grants Glow), event pass rewards, raid scout, and VIP's "non-Glow
