@@ -134,8 +134,9 @@ local Config = {
 		eggPriceGrowth = 1.32, -- egg price scales with den level
 		rebirthMinTier = "Legendary", -- must own at least one critter of this tier or higher
 		-- Highest tier a bought egg can hatch. Tiers up to it keep their EggOdds ratios,
-		-- renormalized (Economy.rollTierUpTo). Phase 2 raises it to "Mythic" (decision D-003).
-		eggMaxTier = "Uncommon",
+		-- renormalized (Economy.rollTierUpTo). Phase 0-1 used "Uncommon"; Phase 2 raised it to
+		-- "Mythic" (decision D-003, P2.4), so eggs now hatch at the published EggOdds weights.
+		eggMaxTier = "Mythic",
 	},
 
 	Matchmaking = {

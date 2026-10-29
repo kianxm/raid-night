@@ -22,8 +22,17 @@ local function chancesFor(tier: string): { number }
 	return chances
 end
 
-tests["launch egg odds show 68.75% and 31.25%"] = function()
+tests["Phase 2 egg odds show the published weights, Common to Mythic"] = function()
 	local labels = HudMath.percentLabels(chancesFor(Config.Economy.eggMaxTier))
+	local want = { "55%", "25%", "12%", "6%", "1.8%", "0.2%" }
+	expect.eq(#labels, #want, "six tiers")
+	for i, label in want do
+		expect.eq(labels[i], label, `tier {i}`)
+	end
+end
+
+tests["an Uncommon-capped egg shows 68.75% and 31.25%"] = function()
+	local labels = HudMath.percentLabels(chancesFor("Uncommon"))
 	expect.eq(labels[1], "68.75%", "common")
 	expect.eq(labels[2], "31.25%", "uncommon")
 end
