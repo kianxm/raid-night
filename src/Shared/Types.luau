@@ -9,7 +9,8 @@
 	  3. Get a review from the `reviewer` agent before merging.
 
 	Persisted types (saved to DataStore) are marked [persisted]. Never remove or rename a field on
-	a persisted type without a migration.
+	a persisted type without a migration. An optional field whose absence means the old behavior
+	needs no migration or SCHEMA_VERSION bump, but needs an old-save test (D-005).
 ]]
 
 -- Critter catalog -------------------------------------------------------------------------------
@@ -188,6 +189,10 @@ export type EscrowRecord = {
 	isRevenge: boolean,
 	createdAt: number,
 	updatedAt: number,
+	-- A unique id (GUID) set by the call that creates the record and never changed, so that call
+	-- recognises its own create when the write landed but the response was lost. Missing on
+	-- records written before it existed; no migration (they are simply never "ours").
+	createNonce: string?,
 }
 
 -- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.

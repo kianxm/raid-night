@@ -158,6 +158,9 @@ local function memoryStore(raider, defender, record)
 			return profiles[userId]
 		end,
 		saveProfile = function() end,
+		saveProfileWithoutEntry = function(profile, raidId)
+			assert(profile.appliedTransfers[raidId] == nil, "void proof with a debit")
+		end,
 	}
 	return store, records
 end
@@ -190,6 +193,64 @@ tests["recover settles a saved debit with the raider away, and credits once they
 	Escrow.recover(record.raidId, store, NOW, everyone)
 	expect.eq(records[record.raidId].state, "Committed")
 	expect.truthy(raider.critters["fox"])
+end
+
+tests["recover voids nothing when the void proof fails (stale session), and voids once proven"] = function()
+	local raider, defender, record = setup()
+	local store, records = memoryStore(raider, defender, record)
+	local proven = store.saveProfileWithoutEntry
+	store.saveProfileWithoutEntry = function()
+		error("session lost to another server")
+	end
+	expect.throws(function()
+		Escrow.recover(record.raidId, store, NOW, everyone)
+	end, "an unproven void must not finish quietly")
+	expect.eq(records[record.raidId].state, "Pending", "left for a server that holds the defender")
+	store.saveProfileWithoutEntry = proven
+	Escrow.recover(record.raidId, store, NOW, everyone)
+	expect.eq(records[record.raidId].state, "Voided")
+	expect.truthy(defender.critters["fox"], "nothing moved")
+end
+
+tests["a create is this call's own only when the stored record carries its nonce"] = function()
+	local _, _, record = setup()
+	record.createNonce = "call-a"
+	local toWrite, ours = Escrow.decideCreate(nil, record)
+	expect.eq(toWrite, record, "no record yet: write it")
+	expect.truthy(ours)
+	-- The first attempt landed but its response was lost; the retry finds it.
+	local landed = table.clone(record)
+	toWrite, ours = Escrow.decideCreate(landed, record)
+	expect.eq(toWrite, nil, "never written twice")
+	expect.truthy(ours, "recognised as this call's own: drive it, do not void it")
+	local other = table.clone(record)
+	other.createNonce = "call-b"
+	expect.falsy(select(2, Escrow.decideCreate(landed, other)), "another call's create")
+	local old = table.clone(record)
+	old.createNonce = nil
+	expect.falsy(select(2, Escrow.decideCreate(old, old)), "a record without a nonce is never ours")
+end
+
+tests["the record store never lets the creating call's nonce change"] = function()
+	local _, _, pending = setup()
+	pending.createNonce = "call-a"
+	local changed = table.clone(pending)
+	changed.createNonce = "call-b"
+	expect.falsy(Escrow.canReplace(pending, changed), "different nonce")
+	changed.createNonce = nil
+	expect.falsy(Escrow.canReplace(pending, changed), "nonce dropped")
+	expect.truthy(Escrow.canReplace(pending, table.clone(pending)), "same nonce")
+end
+
+tests["re-adding an open raid refreshes its index time so the staleness rule protects the retry"] = function()
+	local open = Escrow.indexAdd(nil, "raid-1", "Raider", NOW)
+	expect.eq(open and open["raid-1"].createdAt, NOW, "added")
+	local later = NOW + 20 * 60
+	local refreshed = Escrow.indexAdd(open, "raid-1", "Raider", later)
+	expect.eq(refreshed and refreshed["raid-1"].createdAt, later, "a retry 20 minutes later is fresh again")
+	expect.eq(refreshed and refreshed["raid-1"].role, "Raider")
+	expect.eq(Escrow.indexAdd(refreshed, "raid-1", "Raider", NOW), nil, "never moved back in time")
+	expect.eq(Escrow.indexAdd(refreshed, "raid-1", "Raider", later), nil, "no write when unchanged")
 end
 
 tests["recover leaves a Pending record alone while its defender is away"] = function()
