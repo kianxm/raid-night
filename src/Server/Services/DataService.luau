@@ -22,12 +22,17 @@
 	If a profile cannot load, or the lock is lost mid-session, the player is kicked with a clear
 	message. The game never runs on a default profile.
 
+	Analytics (P2.9, AnalyticsService): a load opens the player's analytics session (and the
+	onboarding funnel's Join step for an account under 7 days old); a leave logs session_end
+	before EndSession, while the Player is still valid. Neither yields, throws or delays a join.
+
 	Public API (everything else is private):
 	  getProfile(userId)      the live profile for a player in THIS server, or nil
 	  onProfileLoaded(fn)     fn(player, profile) after a load; also runs for already-loaded ones
 	  onProfileReleasing(fn)  fn(userId, profile) right before the final save; must not yield
 	  markRaidLogSeen(userId, now)  sets the loaded profile's raidLogSeenAt to the server's now
-	                          (Profile.markRaidLogSeen: forward only). No-op if not loaded here
+	                          (Profile.markRaidLogSeen: forward only). No-op if not loaded here.
+	                          Logs raid_log_opened (entries newer than the last visit) first
 	  advanceOnboarding(userId, stepId)  a server event completed onboarding step stepId (a
 	                          "Server" step of Profile.ONBOARDING_STEPS): forward only, pushes
 	                          OnboardingChanged. Never yields. No-op if not loaded here (C6b)
@@ -91,6 +96,8 @@ local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore) :: any
+local Analytics = require(ReplicatedStorage.Shared.Analytics)
+local AnalyticsService = require(script.Parent.AnalyticsService)
 local Profile = require(ReplicatedStorage.Shared.Profile)
 local Types = require(ReplicatedStorage.Shared.Types)
 local Net = require(ReplicatedStorage.Shared.Net)
@@ -273,6 +280,7 @@ local function onPlayerAdded(player: Player)
 
 	sessions[userId] = { session = session, player = player }
 	print(`[DataService] loaded {userId} (schema {profile.schemaVersion}, glow {profile.glow})`)
+	AnalyticsService.sessionStarted(player, profile, os.time()) -- never yields or throws (P2.9)
 	-- Queued messages are handed over now, later ones after each save; only while active.
 	session:MessageHandler(function(message: any, processed: () -> ())
 		handleMessage(userId, message, processed)
@@ -288,6 +296,7 @@ local function onPlayerRemoving(player: Player)
 	-- A late removal of an older Player object for this user must not end their newer session.
 	if entry and entry.player == player then
 		sessions[player.UserId] = nil
+		AnalyticsService.sessionEnded(player, os.time()) -- session_end while the Player is valid (P2.9)
 		entry.session:EndSession() -- runs onProfileReleasing listeners, then saves and releases
 	end
 end
@@ -399,6 +408,10 @@ function DataService.markRaidLogSeen(userId: number, now: number): boolean
 	if profile == nil then
 		return false
 	end
+	-- raid_log_opened (P2.9): entries newer than the last visit, read before the visit is marked.
+	AnalyticsService.track(userId, "raid_log_opened", {
+		entriesSinceLastVisit = Analytics.entriesSince(profile.raidLog, profile.raidLogSeenAt),
+	})
 	return Profile.markRaidLogSeen(profile, now)
 end
 
