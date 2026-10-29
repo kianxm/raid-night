@@ -132,7 +132,9 @@ export type PlayerProfile = {
 	pairRaidsToday: { [string]: number }, -- other userId (as string) -> raids and live steals between you today
 	-- Live loss rules (decision D-031). Both belong to lossDay and go back to nil when the day rolls
 	-- (RaidRules.resetDailyIfNeeded). Missing = no live loss today, so no migration.
-	liveLossBaseRate: number?, -- the den's Glow/s just before its first live loss today
+	-- The den's Glow/s for today's first live loss: at its grab (EscrowRecord.liveBaseRate, D-034),
+	-- or just before its debit when the record has no grab-time base.
+	liveLossBaseRate: number?,
 	liveLossRateToday: number?, -- Glow/s of the critters lost to live steals today, summed
 
 	-- Raid history and idempotency
@@ -206,6 +208,13 @@ export type EscrowRecord = {
 	-- Set at create and never changed (Escrow.canReplace). Missing = "Live": every record written
 	-- before it existed is a Phase 0 live steal, so no migration (decision D-031).
 	kind: TransferKind?,
+	-- Live only (decision D-034): the defender den's Glow/s (Economy.denRate) when the raider's
+	-- grab was accepted, before the owner could react. The base for the day's first live loss.
+	-- Set by Escrow.create (checked by Escrow.checkLiveBaseRate, rounded to 0.001 Glow/s) and never
+	-- changed; part of the transfer's identity (Escrow.sameTransfer). Missing = no grab-time
+	-- measurement (records written before it existed, Async): the debit measures the den instead.
+	-- No migration.
+	liveBaseRate: number?,
 }
 
 -- [persisted, inside EscrowOpenIndex] One open escrow a player is a party to.

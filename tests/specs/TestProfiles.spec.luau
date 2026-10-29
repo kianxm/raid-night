@@ -152,7 +152,7 @@ tests["EscrowService takes its storage mode only from a decided persistence()"] 
 	-- transferLive refuses before any write while undecided.
 	local live = source.functionBody(code, "EscrowService.transferLive") or ""
 	local refused = string.find(live, 'if storage%(%) == nil then%s*return "Refused"')
-	local driven = string.find(live, "pcall%(startOrResume")
+	local driven = string.find(live, "pcall%(%s*startOrResume")
 	expect.truthy(
 		refused and driven and (refused :: number) < (driven :: number),
 		"transferLive refuses while undecided"

@@ -255,7 +255,10 @@ end
 	Live loss rules (decision D-031). Live steals only; async raids keep maxLossesPerDay.
 	  - A den's live losses are valued in Glow/s: each stolen critter's Economy.critterRate at the
 	    debit (mutation, rebirths, its placement before the steal).
-	  - The base is Economy.denRate of the den just before its first live loss of the UTC day.
+	  - The base is Economy.denRate of the den for its first live loss of the UTC day, measured when
+	    that steal's grab was accepted, before the owner was alerted (decision D-034): the record's
+	    liveBaseRate. An owner who moves high earners off their pads during the carry cannot
+	    shrink it. A record without one falls back to denRate just before the debit.
 	  - Once today's losses reach Config.LiveRaid.protectionLossShare of the base, the den is
 	    protected from live steals for the rest of the UTC day. The debit that crosses the line
 	    lands; nothing after it does (canGrabLive refuses, and Escrow.debitDefender takes nothing).
@@ -276,14 +279,18 @@ end
 
 --[[
 	Records one live loss on the defender: the base on the day's first, and the critter's Glow/s.
-	Call it from the escrow debit BEFORE the critter leaves the profile, so the base still counts
-	it and its rate is the one it earned where it sat. Errors if the critter is already gone.
+	Call it from the escrow debit BEFORE the critter leaves the profile, so its rate is the one it
+	earned where it sat (and a fallback base still counts it). Errors if the critter is already gone.
+	`grabBaseRate` is the record's liveBaseRate (D-034): the base when this is the day's first live
+	loss. nil, or anything but a finite number >= 0, means none: denRate is measured now instead.
+	Later losses that day never change the base.
 ]]
-function RaidRules.recordLiveLoss(defender: PlayerProfile, critter: Critter, now: number)
+function RaidRules.recordLiveLoss(defender: PlayerProfile, critter: Critter, now: number, grabBaseRate: number?)
 	assert(defender.critters[critter.uid] ~= nil, "recordLiveLoss: call before the critter leaves the profile")
 	RaidRules.resetDailyIfNeeded(defender, now)
 	if defender.liveLossBaseRate == nil then
-		defender.liveLossBaseRate = Economy.denRate(defender)
+		local measured = type(grabBaseRate) == "number" and grabBaseRate >= 0 and grabBaseRate < math.huge
+		defender.liveLossBaseRate = if measured then grabBaseRate else Economy.denRate(defender)
 	end
 	defender.liveLossRateToday = (defender.liveLossRateToday or 0) + Economy.critterRate(critter, defender.rebirths)
 end

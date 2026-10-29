@@ -10,6 +10,11 @@
 	  - pile-ons: a crowd of raiders taking turns on one den in the same hour, each for a critter
 	    of its own, so dens reach live protection and the async count cap (decision D-031)
 	  - Live and Async records mixed on the same defenders: each kind has its own daily loss rule
+	  - Live records with and without a grab-time base (liveBaseRate, decision D-034), measured
+	    before the owner reacts, and owners who move their best pad earner to Inventory during
+	    the carry (shrinking the den to buy protection with one cheap loss), then put it back
+	  - Live records that request no Glow (Phase 0 live steals, D-015), so live debits that take
+	    nothing at all happen (D-033)
 	  - players leaving after a crashed transfer and staying away 5 to 12 days, so open escrows
 	    outlive the 7-day appliedTransfers retention
 	  - on every join: prune appliedTransfers against the player's open-escrow index, then
@@ -33,8 +38,12 @@
 
 	On every save of a profile that gains a debit, it checks the daily loss rule for the record's
 	kind (Escrow invariant 4, decision D-031): a Live debit takes nothing from a den that was
-	already protected, and records exactly the stolen critter's Glow/s; an Async debit takes
-	nothing once the defender lost Config.Limits.maxLossesPerDay critters that day.
+	already protected, and records exactly the stolen critter's Glow/s; the day's first live loss
+	sets the base to the record's liveBaseRate, or to the den's Glow/s at the debit when it has
+	none, and later losses never change it (D-034); an Async debit takes nothing once the
+	defender lost Config.Limits.maxLossesPerDay critters that day. It also checks invariant 5
+	(D-033): a Live debit that took no critter and no Glow leaves the defender's shield, revenge
+	tokens, pair count and raid log untouched; every other debit records all four.
 
 	After every sweep and at the end, it checks:
 	  1. every critter uid exists in exactly one place
@@ -75,6 +84,9 @@ local RETRY_CHANCE = 0.5 -- per live call left in flight: the caller retries it 
 local ASYNC_CHANCE = 0.3 -- per record: an Async record (count cap) instead of a Live one (value rule)
 local PILE_ON_CHANCE = 0.1 -- per raid round: a crowd takes turns on the same den
 local PILE_ON_MAX = 6 -- extra raiders in a pile-on, at most
+local GRAB_BASE_CHANCE = 0.5 -- per Live record: it carries the grab-time base (D-034)
+local NO_GLOW_CHANCE = 0.5 -- per Live record: no Glow requested (Phase 0 live steals, D-015)
+local SHRINK_CHANCE = 0.15 -- per raid round: the owner moves their best pad earner off during the carry
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -89,6 +101,27 @@ end
 
 local CRASH = "simulated crash"
 local STALE = "session lost to another server"
+
+local function countKeys(t: { [string]: any }): number
+	local n = 0
+	for _ in t do
+		n += 1
+	end
+	return n
+end
+
+-- The same raid-log entries, in the same order.
+local function sameLog(a: { Types.RaidLogEntry }, b: { Types.RaidLogEntry }): boolean
+	if #a ~= #b then
+		return false
+	end
+	for i, entry in a do
+		if entry.raidId ~= b[i].raidId then
+			return false
+		end
+	end
+	return true
+end
 
 local function newWorld(seed: number)
 	local rng = rngLib.new(seed)
@@ -125,7 +158,22 @@ local function newWorld(seed: number)
 		now = START,
 		lastLiveLoss = {} :: { [number]: number }, -- Glow/s of each den's latest live loss
 		-- How often each daily loss rule was met, so a run proves it exercised them.
-		stats = { liveTaken = 0, liveRefused = 0, protectionReached = 0, asyncTaken = 0, asyncCapped = 0 },
+		stats = {
+			liveTaken = 0,
+			liveRefused = 0,
+			protectionReached = 0,
+			asyncTaken = 0,
+			asyncCapped = 0,
+			-- D-034: the day's first live loss, measured against the record's grab-time base or (no
+			-- base on the record) the den at the debit; and how often the den had shrunk in between.
+			grabBase = 0,
+			debitBase = 0,
+			grabBaseDiffers = 0,
+			shrinkDefeated = 0, -- the shrunk den would have been protected; the grab-time base was not
+			-- D-033: debits that took nothing at all.
+			emptyLive = 0,
+			emptyAsync = 0,
+		},
 	}
 
 	-- A server can load or save only a profile it holds. Touching an away player's profile is a
@@ -141,7 +189,8 @@ local function newWorld(seed: number)
 		local target = if r.critterUid then before.critters[r.critterUid] else nil
 		local onPad = target ~= nil and target.placement == "Pad"
 		local stats = world.stats
-		if Escrow.kindOf(r) == "Live" then
+		local live = Escrow.kindOf(r) == "Live"
+		if live then
 			local wasProtected = RaidRules.liveProtected(before, applied.at)
 			if applied.critter then
 				assert(not wasProtected, `{raidId}: a live debit took a critter from a protected den`)
@@ -150,6 +199,26 @@ local function newWorld(seed: number)
 				local value = Economy.critterRate(applied.critter, before.rebirths)
 				expect.eq(after.liveLossRateToday, lostBefore + value, `{raidId}: live loss recorded at its Glow/s`)
 				world.lastLiveLoss[after.userId] = value
+				-- The base (D-034): set by the day's first live loss, never changed by a later one.
+				if today and before.liveLossBaseRate ~= nil then
+					expect.eq(after.liveLossBaseRate, before.liveLossBaseRate, `{raidId}: a later loss kept the base`)
+				else
+					local atDebit = Economy.denRate(before) -- the den the debit's working copy was loaded from
+					local grab = r.liveBaseRate
+					expect.eq(after.liveLossBaseRate, grab or atDebit, `{raidId}: the first loss's base`)
+					if grab == nil then
+						stats.debitBase += 1
+					else
+						stats.grabBase += 1
+						local line = Config.LiveRaid.protectionLossShare
+						if grab ~= atDebit then
+							stats.grabBaseDiffers += 1
+						end
+						if value >= line * atDebit and value < line * grab then
+							stats.shrinkDefeated += 1
+						end
+					end
+				end
 				stats.liveTaken += 1
 				if RaidRules.liveProtected(after, applied.at) then
 					stats.protectionReached += 1
@@ -164,6 +233,29 @@ local function newWorld(seed: number)
 				stats.asyncTaken += 1
 			elseif atCap and onPad then
 				stats.asyncCapped += 1
+			end
+		end
+
+		-- Invariant 5 (D-033): an empty live debit grants nothing; every other debit records the
+		-- raid on the defender (Async unchanged, even when empty).
+		local empty = applied.critter == nil and applied.glow == 0
+		local pairBefore = RaidRules.pairCount(before, r.raiderUserId, applied.at)
+		local pairAfter = RaidRules.pairCount(after, r.raiderUserId, applied.at)
+		if live and empty then
+			expect.eq(after.shieldUntil, before.shieldUntil, `{raidId}: an empty live debit gave a shield`)
+			expect.eq(after.revengeTokens[raidId], nil, `{raidId}: an empty live debit gave a revenge token`)
+			expect.eq(countKeys(after.revengeTokens), countKeys(before.revengeTokens), `{raidId}: revenge tokens`)
+			expect.eq(pairAfter, pairBefore, `{raidId}: an empty live debit used up the pair slot`)
+			expect.truthy(sameLog(before.raidLog, after.raidLog), `{raidId}: an empty live debit wrote the raid log`)
+			stats.emptyLive += 1
+		else
+			local shield = math.max(before.shieldUntil, applied.at + Config.Shield.afterSuccessfulRaidSeconds)
+			expect.eq(after.shieldUntil, shield, `{raidId}: the defender's shield`)
+			expect.truthy(after.revengeTokens[raidId], `{raidId}: the defender's revenge token`)
+			expect.eq(pairAfter, pairBefore + 1, `{raidId}: the pair count`)
+			expect.eq(after.raidLog[1] and after.raidLog[1].raidId, raidId, `{raidId}: the raid log`)
+			if empty then
+				stats.emptyAsync += 1
 			end
 		end
 	end
@@ -440,6 +532,9 @@ local function runSimulation(seed: number)
 				end
 			end
 			local grabbed = if #pads > 0 then pads[rng.int(1, #pads)] else nil
+			-- The grab-time base (D-034): the den's Glow/s when the grab is accepted, before the
+			-- owner is alerted and can react.
+			local grabRate = Economy.denRate(defender)
 
 			-- The defender reacts before the debit lands: moves the target into the vault.
 			if grabbed and rng.chance(VAULT_MOVE_CHANCE) then
@@ -447,6 +542,25 @@ local function runSimulation(seed: number)
 				if live.critters[grabbed] then
 					live.critters[grabbed].placement = "Vault"
 					live.critters[grabbed].padIndex = nil
+					world.store.saveProfile(live)
+				end
+			end
+			-- ...or moves every pad critter that earns more than the target to Inventory, to shrink
+			-- the den so that one cheap loss reaches the protection line (the exploit D-034
+			-- closes). They go back on their pads once the carries are over (below).
+			local shrunk: { [string]: number } = {} -- uid -> its pad
+			if grabbed and rng.chance(SHRINK_CHANCE) then
+				local live = world.store.loadProfile(defenderId)
+				local target = live.critters[grabbed]
+				local targetRate = if target then Economy.critterRate(target, live.rebirths) else math.huge
+				for uid, c in live.critters do
+					if c.placement == "Pad" and c.padIndex and Economy.critterRate(c, live.rebirths) > targetRate then
+						shrunk[uid] = c.padIndex
+						c.placement = "Inventory"
+						c.padIndex = nil
+					end
+				end
+				if next(shrunk) then
 					world.store.saveProfile(live)
 				end
 			end
@@ -475,9 +589,17 @@ local function runSimulation(seed: number)
 					continue -- the server refuses a live transfer unless both are loaded there
 				end
 				local raidId = if n == 1 then `raid-{i}` else `raid-{i}-{n}`
-				local loot = RaidRules.lootGlow(snapshot, false)
 				local kind: Types.TransferKind = if rng.chance(ASYNC_CHANCE) then "Async" else "Live"
-				local record = Escrow.create(raidId, thisRaider, defenderId, raid.grabbed, loot, false, world.now, kind)
+				local loot = RaidRules.lootGlow(snapshot, false)
+				local base: number? = nil
+				if kind == "Live" then
+					loot = if rng.chance(NO_GLOW_CHANCE) then 0 else loot
+					-- The first raider grabbed before the owner reacted; the crowd grabs as it arrives.
+					local measured = if n == 1 then grabRate else Economy.denRate(world.profiles[defenderId])
+					base = if rng.chance(GRAB_BASE_CHANCE) then measured else nil
+				end
+				local record =
+					Escrow.create(raidId, thisRaider, defenderId, raid.grabbed, loot, false, world.now, kind, base)
 				record.createNonce = `call-{raidId}`
 				world.before[raidId] = deepCopy(world.profiles[defenderId])
 				-- Index both parties before the record exists, as EscrowService does.
@@ -519,6 +641,19 @@ local function runSimulation(seed: number)
 						end
 					end
 				end
+			end
+
+			-- The carries are over: the owner puts the earners back on their pads.
+			if next(shrunk) and online(defenderId) then
+				local live = world.store.loadProfile(defenderId)
+				for uid, padIndex in shrunk do
+					local c = live.critters[uid]
+					if c and c.placement == "Inventory" then
+						c.placement = "Pad"
+						c.padIndex = padIndex
+					end
+				end
+				world.store.saveProfile(live)
 			end
 		end
 
@@ -588,6 +723,12 @@ tests["1,000 raids with crashes, duplicates, races and long absences never dupli
 	expect.truthy(stats.liveRefused > 0, "a live debit met a protected den and took nothing")
 	expect.truthy(stats.asyncCapped > 0, "an async debit met the daily count cap and took nothing")
 	expect.truthy(stats.liveTaken > 0 and stats.asyncTaken > 0, "both kinds stole critters")
+	-- Without these it would not prove the grab-time base (D-034) or empty live commits (D-033).
+	expect.truthy(stats.grabBase > 0 and stats.debitBase > 0, "first live losses with and without a grab-time base")
+	expect.truthy(stats.grabBaseDiffers > 0, "a den changed between the grab and the debit")
+	expect.truthy(stats.shrinkDefeated > 0, "a shrunk den that the debit-time base would have protected")
+	expect.truthy(stats.emptyLive > 0, "a live debit took nothing and granted nothing")
+	expect.truthy(stats.emptyAsync > 0, "an async debit took nothing and still recorded the raid")
 end
 
 tests["the same holds across 5 more random seeds"] = function()
