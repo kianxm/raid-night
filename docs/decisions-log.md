@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-010 · 2026-10-28 · Multi-client testing deferred; single-client harness for P0.5
+Context: Kian has no testers now and will test with people once, at the end. Decision: keep all
+multi-client checks in one deferred list in docs/progress.md; P0.5 ships a Studio-only test
+hook (guarded by RunService:IsStudio()) that seeds a dummy defender den so one client can
+exercise grab, carry, tag, escape, lockdown and the escrow handoff. Why: keep verifying as we go
+without needing people. Reversible: yes.
+
 ### D-009 · 2026-10-28 · C1 runs in parallel with the P0.3b fix round
 Context: C1 was queued behind #11 only to avoid edit conflicts in Types, Config and
 contracts.md. Decision: start C1 now with a second data agent; it stays out of Escrow,
