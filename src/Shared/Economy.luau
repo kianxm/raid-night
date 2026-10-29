@@ -138,9 +138,19 @@ function Economy.rollTier(roll: number): Tier
 	return last.tier :: Tier
 end
 
--- Like rollTier, but only tiers up to `maxTier` can hatch. Their weights keep their published
--- ratios (renormalised to sum to 1), so the capped egg is the launch egg minus the top tiers.
-function Economy.rollTierUpTo(roll: number, maxTier: Tier): Tier
+export type TierChance = { tier: Tier, chance: number }
+export type SpeciesChance = { speciesId: string, chance: number }
+export type EggOdds = { rescue: boolean, tiers: { TierChance } }
+
+--[[
+	Egg odds as data (decision D-028): every egg shows its odds on screen from Phase 0. These
+	helpers are the single source of truth for that display. The rolls below are built on the
+	same functions, so what the UI shows is exactly what the server rolls.
+]]
+
+-- Tier odds of a bought egg capped at `maxTier`: the Config.EggOdds tiers up to the cap, in
+-- Config order (Common first), with their weights renormalised to sum to 1. Fresh tables.
+function Economy.eggTierOdds(maxTier: Tier): { TierChance }
 	local maxRank = CritterCatalog.tierRank(maxTier)
 	local total = 0
 	for _, entry in Config.EggOdds do
@@ -148,35 +158,65 @@ function Economy.rollTierUpTo(roll: number, maxTier: Tier): Tier
 			total += entry.weight
 		end
 	end
-	local cumulative = 0
-	local last: Tier = "Common"
+	local odds: { TierChance } = {}
+	if total <= 0 then
+		return odds
+	end
 	for _, entry in Config.EggOdds do
 		local tier = entry.tier :: Tier
 		if CritterCatalog.tierRank(tier) <= maxRank then
-			cumulative += entry.weight / total
-			last = tier
-			if roll < cumulative then
-				return tier
-			end
+			table.insert(odds, { tier = tier, chance = entry.weight / total })
+		end
+	end
+	return odds
+end
+
+-- Like rollTier, but only tiers up to `maxTier` can hatch. Their weights keep their published
+-- ratios (renormalised to sum to 1), so the capped egg is the launch egg minus the top tiers.
+function Economy.rollTierUpTo(roll: number, maxTier: Tier): Tier
+	local cumulative = 0
+	local last: Tier = "Common"
+	for _, entry in Economy.eggTierOdds(maxTier) do
+		cumulative += entry.chance
+		last = entry.tier
+		if roll < cumulative then
+			return entry.tier
 		end
 	end
 	return last -- rounding sliver at the top
 end
 
--- Picks a species uniformly within a tier from a uniform random number in [0, 1).
--- Event-only species are never returned.
-function Economy.rollSpecies(tier: Tier, roll: number): CritterSpecies?
+-- The species an egg of `tier` can hatch, in catalog order. Event-only species are never in it.
+local function eggSpeciesPool(tier: Tier): { CritterSpecies }
 	local pool: { CritterSpecies } = {}
 	for _, species in CritterCatalog.byTier(tier) do
 		if not species.eventOnly then
 			table.insert(pool, species)
 		end
 	end
+	return pool
+end
+
+-- Picks a species uniformly within a tier from a uniform random number in [0, 1).
+-- Event-only species are never returned.
+function Economy.rollSpecies(tier: Tier, roll: number): CritterSpecies?
+	local pool = eggSpeciesPool(tier)
 	if #pool == 0 then
 		return nil
 	end
 	local index = math.clamp(math.floor(roll * #pool) + 1, 1, #pool)
 	return pool[index]
+end
+
+-- Species odds within a tier: uniform over exactly the pool rollSpecies uses, in catalog order.
+-- Empty for a tier no egg can hatch a species of (Secret is event-only).
+function Economy.speciesOdds(tier: Tier): { SpeciesChance }
+	local pool = eggSpeciesPool(tier)
+	local odds: { SpeciesChance } = {}
+	for _, species in pool do
+		table.insert(odds, { speciesId = species.id, chance = 1 / #pool })
+	end
+	return odds
 end
 
 -- Storage cap in Glow (not seconds) at the den's current rate and level.
@@ -354,6 +394,20 @@ end
 -- What the next egg costs this player in banked Glow (0 for a rescue egg). Accrue first.
 function Economy.eggCost(profile: PlayerProfile): number
 	return if Economy.isRescueEgg(profile) then 0 else Economy.eggPrice(profile.denLevel)
+end
+
+-- Tier odds of the rescue egg's fixed table: Common, always.
+function Economy.rescueEggTierOdds(): { TierChance }
+	return { { tier = RESCUE_EGG_TIER, chance = 1 } }
+end
+
+-- The odds of the egg this player would get next: the rescue table when isRescueEgg(profile),
+-- otherwise eggTierOdds(maxTier). Accrue first, as with eggCost, so the rescue check is current.
+function Economy.nextEggOdds(profile: PlayerProfile, maxTier: Tier): EggOdds
+	if Economy.isRescueEgg(profile) then
+		return { rescue = true, tiers = Economy.rescueEggTierOdds() }
+	end
+	return { rescue = false, tiers = Economy.eggTierOdds(maxTier) }
 end
 
 --[[

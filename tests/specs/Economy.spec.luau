@@ -588,4 +588,125 @@ tests["DenState reflects the profile with a stable, copied critter list"] = func
 	expect.eq(a.padIndex, 2, "the client copy cannot change the profile")
 end
 
+-- P0.9: egg odds as data for the UI (decision D-028) --------------------------------------------
+
+local GRID = 100_000 -- grid points (i + 0.5) / GRID: each odds boundary misplaces at most 1 point
+
+local function sumChances(odds: { any }): number
+	local total = 0
+	for _, entry in odds do
+		total += entry.chance
+	end
+	return total
+end
+
+tests["egg tier odds sum to 1, run Common up to the cap, and never pass it"] = function()
+	for _, maxTier in { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" } :: { Types.Tier } do
+		local odds = Economy.eggTierOdds(maxTier)
+		expect.near(sumChances(odds), 1, 1e-9, `{maxTier} sum`)
+		expect.eq(odds[1].tier, "Common", `{maxTier} starts at Common`)
+		expect.eq(odds[#odds].tier, maxTier, `{maxTier} ends at the cap`)
+		expect.eq(#odds, CritterCatalog.tierRank(maxTier), `{maxTier} lists every tier up to the cap`)
+		for i, entry in odds do
+			expect.truthy(entry.chance > 0, `{maxTier} {entry.tier} chance is positive`)
+			expect.eq(CritterCatalog.tierRank(entry.tier), i, `{maxTier} ordered Common upwards`)
+		end
+	end
+	local launch = Economy.eggTierOdds(Config.Economy.eggMaxTier :: Types.Tier)
+	expect.eq(#launch, 2, "launch egg is Common and Uncommon")
+	expect.near(launch[1].chance, 0.55 / 0.8, 1e-12, "Common 0.6875")
+	expect.near(launch[2].chance, 0.25 / 0.8, 1e-12, "Uncommon 0.3125")
+	local full = Economy.eggTierOdds("Mythic")
+	for i, entry in Config.EggOdds do
+		expect.near(full[i].chance, entry.weight, 1e-12, `uncapped {entry.tier} is the published weight`)
+	end
+end
+
+tests["egg tier odds match rollTierUpTo over a fine roll grid"] = function()
+	for _, maxTier in { "Uncommon", "Mythic" } :: { Types.Tier } do
+		local counts: { [string]: number } = {}
+		for i = 0, GRID - 1 do
+			local tier = Economy.rollTierUpTo((i + 0.5) / GRID, maxTier)
+			counts[tier] = (counts[tier] or 0) + 1
+		end
+		local listed: { [string]: boolean } = {}
+		for _, entry in Economy.eggTierOdds(maxTier) do
+			listed[entry.tier] = true
+			expect.near((counts[entry.tier] or 0) / GRID, entry.chance, 1e-3, `{maxTier} {entry.tier}`)
+		end
+		for tier in counts do
+			expect.truthy(listed[tier], `{maxTier} rolled {tier}, which the odds do not list`)
+		end
+	end
+end
+
+tests["the rescue egg's odds are Common, always"] = function()
+	local odds = Economy.rescueEggTierOdds()
+	expect.eq(#odds, 1)
+	expect.eq(odds[1].tier, "Common")
+	expect.eq(odds[1].chance, 1)
+end
+
+tests["species odds are uniform over the rollSpecies pool and skip event-only species"] = function()
+	for _, tier in CritterCatalog.TIER_ORDER do
+		local odds = Economy.speciesOdds(tier)
+		local eligible = 0
+		for _, species in CritterCatalog.byTier(tier) do
+			if not species.eventOnly then
+				eligible += 1
+			end
+		end
+		expect.eq(#odds, eligible, `{tier} lists every eligible species`)
+		if eligible == 0 then
+			expect.eq(Economy.rollSpecies(tier, 0.5), nil, `{tier} rolls nothing either`)
+			continue
+		end
+		expect.near(sumChances(odds), 1, 1e-9, `{tier} sum`)
+		local listed: { [string]: number } = {}
+		for _, entry in odds do
+			local species = CritterCatalog.get(entry.speciesId)
+			expect.truthy(species and species.tier == tier, `{entry.speciesId} is a {tier}`)
+			expect.truthy(species and not species.eventOnly, `{entry.speciesId} is not event-only`)
+			expect.near(entry.chance, 1 / eligible, 1e-12, `{entry.speciesId} uniform`)
+			listed[entry.speciesId] = entry.chance
+		end
+		local counts: { [string]: number } = {}
+		for i = 0, GRID - 1 do
+			local species = Economy.rollSpecies(tier, (i + 0.5) / GRID)
+			local id = if species then species.id else "?"
+			counts[id] = (counts[id] or 0) + 1
+		end
+		for id, count in counts do
+			local chance = listed[id]
+			expect.truthy(chance ~= nil, `{tier} rolled {id}, which the odds do not list`)
+			expect.near(count / GRID, chance :: number, 1e-3, `{tier} {id}`)
+		end
+	end
+	expect.eq(#Economy.speciesOdds("Secret"), 0, "Secret is event-only, so no egg odds")
+end
+
+tests["next egg odds switch with the rescue rule"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	local rescue = Economy.nextEggOdds(p, "Uncommon")
+	expect.truthy(rescue.rescue, "no critters, no Glow: rescue egg")
+	expect.eq(#rescue.tiers, 1)
+	expect.eq(rescue.tiers[1].tier, "Common")
+	expect.eq(rescue.tiers[1].chance, 1)
+	local mythicCap = Economy.nextEggOdds(p, "Mythic")
+	expect.truthy(mythicCap.rescue and #mythicCap.tiers == 1, "the rescue egg ignores the cap")
+
+	p.glow = Economy.eggPrice(1)
+	local paid = Economy.nextEggOdds(p, "Uncommon")
+	expect.falsy(paid.rescue, "can afford an egg: paid egg")
+	expect.eq(#paid.tiers, 2)
+	expect.near(paid.tiers[1].chance, 0.6875, 1e-12)
+
+	p.glow = 0
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
+	local owner = Economy.nextEggOdds(p, "Rare")
+	expect.falsy(owner.rescue, "owns a critter: paid egg")
+	expect.eq(owner.tiers[#owner.tiers].tier, "Rare")
+end
+
 return tests
