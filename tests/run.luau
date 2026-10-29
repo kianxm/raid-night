@@ -43,6 +43,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "RaidServiceSource",
+		load = function()
+			return require("./specs/RaidServiceSource.spec")
+		end,
+	},
+	{
 		name = "Plots",
 		load = function()
 			return require("./specs/Plots.spec")
