@@ -499,7 +499,8 @@ function HudController.start()
 			return
 		end
 		remote.OnClientEvent:Connect(function(payload: any)
-			if type(payload) ~= "table" then
+			-- Async raids carry a reason; RaidHudController shows their outcome card instead.
+			if type(payload) ~= "table" or payload.reason ~= nil then
 				return
 			end
 			local speciesId = payload.speciesId

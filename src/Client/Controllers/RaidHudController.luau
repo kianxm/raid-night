@@ -68,7 +68,7 @@ function RaidHudController.start()
 	resultSub.Size = UDim2.new(1, -16, 0, 24)
 	resultSub.Position = UDim2.fromOffset(8, 46)
 
-	local active: { raidId: string, endsAt: number, gate: Vector3? }? = nil
+	local active: { raidId: string, endsAt: number, gate: Vector3?, critters: number, isRevenge: boolean }? = nil
 	local conn: RBXScriptConnection? = nil
 	local resultToken = 0
 
@@ -93,7 +93,11 @@ function RaidHudController.start()
 
 		local carrying = player:GetAttribute("CarryingSpecies")
 		local species = if type(carrying) == "string" and carrying ~= "" then CritterCatalog.get(carrying) else nil
-		carryLine.Text = if species then species.name else Strings.raidFindCritter
+		carryLine.Text = if species
+			then species.name
+			elseif raid.isRevenge then Strings.raidRevengeGrab
+			elseif raid.critters > 0 then Strings.format(Strings.raidCritters, { n = tostring(raid.critters) })
+			else Strings.raidFindCritter
 		arrow.TextColor3 = if species then COLOR.go else COLOR.dim
 
 		local gate = raid.gate
@@ -117,29 +121,32 @@ function RaidHudController.start()
 		end
 	end
 
-	RaidApi.raidStarted:Connect(function(raidId: string, _target: number, endsAt: number, gate: Vector3?)
-		stop()
-		result.Visible = false
-		active = { raidId = raidId, endsAt = endsAt, gate = gate }
-		timerPanel.Visible = true
-		conn = RunService.Heartbeat:Connect(tick)
-		tick()
-	end)
+	RaidApi.raidStarted:Connect(
+		function(raidId: string, _target: number, endsAt: number, gate: Vector3?, critters: number, isRevenge: boolean)
+			stop()
+			result.Visible = false
+			-- endsAt is server time; tick() compares it against workspace:GetServerTimeNow().
+			active = { raidId = raidId, endsAt = endsAt, gate = gate, critters = critters, isRevenge = isRevenge }
+			timerPanel.Visible = true
+			conn = RunService.Heartbeat:Connect(tick)
+			tick()
+		end
+	)
 
 	RaidApi.raidEnded:Connect(function(payload: any)
 		stop()
 		local escaped = payload.escaped == true
 		local species = if type(payload.speciesId) == "string" then CritterCatalog.get(payload.speciesId) else nil
+		local key = RaidMath.outcomeKey(payload.reason, escaped)
 		if escaped then
 			resultTitle.Text = if species
 				then Strings.format(Strings.raidEscaped, { name = species.name })
 				else Strings.raidEscapedNone
-			resultTitle.TextColor3 = COLOR.go
 		else
-			resultTitle.Text = Strings.raidCaught
-			resultTitle.TextColor3 = COLOR.revenge
+			resultTitle.Text = (Strings :: any)[key]
 		end
-		resultSub.Text = if payload.glow > 0
+		resultTitle.TextColor3 = if escaped then COLOR.go else COLOR.revenge
+		resultSub.Text = if type(payload.glow) == "number" and payload.glow > 0
 			then Strings.format(Strings.raidGlow, { n = tostring(payload.glow) })
 			else ""
 		local hasSub = resultSub.Text ~= ""

@@ -8,6 +8,7 @@ local Controllers = script.Parent:WaitForChild("Controllers")
 
 for _, name in
 	{
+		"RevengeController", -- first: it must hear RevengeJoinStatus the moment a teleport lands
 		"DenController",
 		"HudController",
 		"RaidLogController",

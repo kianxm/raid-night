@@ -15,7 +15,9 @@ local Strings = require(Hud:WaitForChild("Strings"))
 local HudMath = require(Hud:WaitForChild("HudMath"))
 local RaidApi = require(Raid:WaitForChild("RaidApi"))
 local RaidMath = require(Raid:WaitForChild("RaidMath"))
+local Toast = require(Raid:WaitForChild("Toast"))
 local Ui = require(Raid:WaitForChild("Ui"))
+local RevengeController = require(script.Parent:WaitForChild("RevengeController")) :: any
 
 local COLOR = Ui.COLOR
 local ROW_HEIGHT = 62
@@ -42,16 +44,22 @@ local function tryRaid(target: any)
 	if busy then
 		return
 	end
-	busy = true
 	setMessage("")
+	local revengeId = if target.isRevenge then target.revengeRaidId else nil
+	if revengeId then
+		-- Revenge rows go through the shared flow (join their server, or the async revenge raid).
+		close()
+		RevengeController.begin(target.userId, revengeId, target.raiderOnline)
+		return
+	end
+	busy = true
 	task.spawn(function()
-		local revengeId = if target.isRevenge then target.revengeRaidId else nil
-		local start = RaidApi.startRaid(target.userId, revengeId)
+		local start = RaidApi.startRaid(target.userId, nil)
 		busy = false
 		if start then
 			close()
 		else
-			setMessage(Strings.portalRefused)
+			Toast.show(Strings.portalRefused)
 		end
 	end)
 end
@@ -79,7 +87,7 @@ local function addRow(target: any, order: number)
 	name.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local hint = Ui.label(row, Ui.BODY, 15, COLOR.dim)
-	hint.Text = (Strings :: any)[RaidMath.hintKey(target.power)]
+	hint.Text = (Strings :: any)[RaidMath.hintKey(target.topTier)]
 	hint.Size = UDim2.new(0.5, -8, 0, 20)
 	hint.Position = UDim2.fromOffset(10, 35)
 	hint.TextXAlignment = Enum.TextXAlignment.Left
