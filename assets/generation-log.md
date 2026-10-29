@@ -144,6 +144,30 @@ job IDs are in `assets/raw/<id>/` (`jobs.txt`). "Kept?" is Gate 1 (Kian); "pendi
 | 2026-10-29 | eclipse_wyrm | front-01 | seedream_v4_5 | 1 | pending | Mouse head with round ears (style reference leaking in). Redo |
 | 2026-10-29 | midnight_mew | front-01 | seedream_v4_5 | 1 | pending | Moon eye glows but it has a second normal eye |
 | 2026-10-29 | snooze_bat | 3D (front-03, side-01, back-01) | tripo_h3_1_multiview_to_3d | 9 | pending | Textured GLB, 1.44M triangles (budget 1,500): needs decimation, or a re-run with face_limit (also 9 credits). No Blender on this machine yet |
+| 2026-10-29 | storm_hare | front-02 | seedream_v4_5 | 1 | pending | Wow pass 1, no reference. Silver, cute; surfboard prop and a dark frame border |
+| 2026-10-29 | lunar_kitsune | front-02 | seedream_v4_5 | 1 | pending | Wow pass 1. Moon tails, forehead crescent; stands upright, four tails |
+| 2026-10-29 | abyss_angler | front-02 | seedream_v4_5 | 1 | pending | Wow pass 1. Baked-in title text 'Abyst Angler'; legs |
+| 2026-10-29 | king_bandit | front-02 | seedream_v4_5 | 1 | pending | Wow pass 1. 'King Bandit' printed on the sash; second trash can on its head |
+| 2026-10-29 | nebula_owl | front-02 | seedream_v4_5 | 1 | pending | Wow pass 1. Star crest, orbiting planets, galaxy wings |
+| 2026-10-29 | nebula_owl | front-03 | seedream_v4_5 | 1 | pending | Wow pass 1. As 02, bigger and cleaner. Best owl |
+| 2026-10-29 | eclipse_wyrm | front-02 | seedream_v4_5 | 1 | pending | Wow pass 1. Real dragon head, crown, sun corona; stubby legs and arms |
+| 2026-10-29 | eclipse_wyrm | front-03 | seedream_v4_5 | 1 | pending | Wow pass 1. Dark eclipse disc (more accurate) but a hanging string |
+| 2026-10-29 | midnight_mew | front-02 | seedream_v4_5 | 1 | pending | Wow pass 1. Starfield body, crescent forehead, smoky ears; two eyes, legs |
+| 2026-10-29 | midnight_mew | front-03 | seedream_v4_5 | 1 | pending | Wow pass 1. Baked-in 'Secret Tier' caption text. Unusable |
+| 2026-10-29 | storm_hare | front-03 | seedream_v4_5 | 1 | pending | Wow pass 2 (no names or tier labels). Silver, crouched on cloud, glowing bolt ears. Best hare |
+| 2026-10-29 | lunar_kitsune | front-03 | seedream_v4_5 | 1 | pending | Wow pass 2. Moons and spirit flames; still upright with five tails |
+| 2026-10-29 | abyss_angler | front-03 | seedream_v4_5 | 1 | pending | Wow pass 2. Legs again; crescent lure instead of full moon |
+| 2026-10-29 | king_bandit | front-03 | seedream_v4_5 | 1 | pending | Wow pass 2. Came out as a multi-view sheet with partial extra figures |
+| 2026-10-29 | eclipse_wyrm | front-04 | seedream_v4_5 | 1 | pending | Wow pass 2. Horned whiskered dragon head, glowing scale edges, blazing corona, orbiting motes; two small feet. Best wyrm |
+| 2026-10-29 | midnight_mew | front-04 | seedream_v4_5 | 1 | pending | Wow pass 2. Box head, two big eyes plus forehead moon, legs |
+| 2026-10-29 | midnight_mew | front-05 | seedream_v4_5 | 1 | pending | Wow pass 2. Starfield, centered crescent, but two side eyes, legs and a small tag |
+
+**Wow ladder passes (Kian, 2026-10-29: the rarer, the more wow).** Legendary and above got signature
+designs and a tier line, and every critter except dusk_mouse dropped the mouse style reference
+(its ears and face leaked in). Without the reference, the model printed critter names and
+"Secret tier"-style labels as captions, and defaulted to a two-legged vinyl figure for fish,
+serpents and void creatures. Prompts now omit names and tier words; "no legs" poses help but don't
+fully stop it. Balance after: 27 credits.
 
 Batch 1 lessons (folded into `tools/assets/Prompts.luau`): "short stubby limbs" adds limbs to
 limbless animals, so it now applies only where the animal has limbs; unnamed glows land anywhere,
