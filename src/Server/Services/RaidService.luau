@@ -64,7 +64,8 @@
 	TODO (Phase 1):
 	  [x] P1.3b: onAsyncEscape -> EscrowService.transferAsync (its debit writes the defender's
 	      shield, revenge token, pair count and log)
-	  [ ] data handoff: the raider's Outgoing log, pair count and revenge-token use need a write path
+	  [x] P1.3e: the raider side (Outgoing log, pair count, revenge token) is written by the escrow
+	      credit (P1.3d); onAsyncEscape passes run.revengeRaidId as the 7th argument
 	  [x] P1.4b: replay frames (positions at 5 Hz + events), saved by ReplayStore, served by
 	      GetReplay to the raider and the defender only
 ]]
@@ -692,7 +693,8 @@ function RaidService.onAsyncEscape(run: AsyncRaid.Escape): RaidRules.EscapeOutco
 		run.defenderUserId,
 		run.critterUid,
 		run.glowRequested,
-		run.isRevenge
+		run.isRevenge,
+		run.revengeRaidId
 	)
 	if not ok then
 		-- transferAsync catches its own errors, so this is unexpected: the raider's Open_ index

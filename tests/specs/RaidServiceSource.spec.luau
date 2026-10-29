@@ -106,7 +106,7 @@ tests["async escape: escrow only, through transferAsync with server-tracked argu
 	end
 	expect.eq(
 		table.concat(args, ","),
-		"run.raidId,run.raiderUserId,run.defenderUserId,run.critterUid,run.glowRequested,run.isRevenge",
+		"run.raidId,run.raiderUserId,run.defenderUserId,run.critterUid,run.glowRequested,run.isRevenge,run.revengeRaidId",
 		"every argument comes from the server-tracked escape"
 	)
 	local first = string.find(code, "function RaidService.onAsyncEscape", 1, true)
