@@ -30,7 +30,7 @@ Current phase: 0 → 1 (Phase 0 gate approved; Phase 1 not started, waiting for 
 | C2 | data | — | Done | #59 | 1 | Reviewer APPROVED. Config.Boosts + contracts.md Robux-linked multipliers (D-030) |
 | P0.12 | economy | C2 | Done | #62 | 2 | Reviewer APPROVED; S1/S2/S5 landed: glowBoostFactor({ vip, lanternNight, paidRandomRestricted?, purchasesEnabled }) fails closed, factor clamped to [1, maxGlowBoostFactor()], NaN `now` ignored. 206 tests |
 | P0.5g | data | — | Done | #64, #65 | 1 | Reviewer APPROVED both. Value-based live protection, postLossSafetySeconds, live pair limit, EscrowRecord.kind, simulation reaches protection 53-65x per seed. 225 tests on integration. Follow-ups: D-033 (data), base-measurement question (Kian) |
-| C4 | data | P0.5g | In progress | agent/data/C4 | 1 | D-033 (empty live commits grant nothing, pinned in the simulation), liveProtected NaN test, D-034 grab-time base (`EscrowRecord.liveBaseRate`, transferLive param), contracts.md mirror of #62's money-model rules (may split into C4-b) |
+| C4 | data | P0.5g | In review | #73, #74 | 1 | D-033 (empty live commits grant nothing, pinned in the simulation), liveProtected NaN test, D-034 grab-time base (`EscrowRecord.liveBaseRate`, transferLive param), contracts.md mirror of #62's money-model rules (may split into C4-b) |
 | P0.5h | raid | P0.5g, C4 | In review | #71 | 1 | CI green. Merge after C4; reviewer pass with C4 (D-034 wiring). Base measured at grab-hold accept (owner signal comes at carry start). Server also hides prompts on closed dens. Optional: pure RaidRules helper for the duplicated window check in `denClosed` | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
 | P0.5i | ui | — | Done | #70 | 1 | Den marker "Protected today" / "Safe for m:ss", own-den chip, steal prompt hidden while protected. Refusal copy built but no channel to show it (D-035). Cosmetic edge: a prompt the server disabled while protection hid it comes back on when protection ends (server still refuses) |
 
@@ -64,6 +64,13 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
+
+Not urgent (before Go public; live steals only, async unaffected):
+- Planned self-protection (data on #73): D-034 stops shrinking the den after the alert, not a
+  planned one. The owner moves every earner but one Common to Inventory, has an alt/friend steal
+  it, then puts everything back: protected from live steals for the rest of the UTC day for one
+  Common. Options: (a) base = the den's peak rate earlier that day/session, (b) protection lifts
+  when the den earns more again, (c) losses to friends don't count. Loss-rule change, so yours.
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):

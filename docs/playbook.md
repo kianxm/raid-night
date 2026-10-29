@@ -130,9 +130,10 @@ turns the reversal into tasks.
 - Handoff file: after every merge wave, overwrite `docs/orchestrator-handoff.md` (max 40 lines):
   phase, tasks in flight with branches, what's next, open "Ask Kian" items, anything you'd
   otherwise have to remember.
-- Planned restarts: after every merge wave, or after 4 completed tasks, whichever comes first,
-  write the handoff, then stop and tell Kian "Ready for a fresh session." On startup, read the
-  handoff before anything else.
+- Planned restarts: restart at the end of a merge wave once your context is past roughly 40%,
+  or immediately if it passes 60%. Never restart mid-wave unless you hit 60%. To restart: write
+  the handoff, stop, and tell Kian "Ready for a fresh session." On startup, read the handoff
+  before anything else.
 
 ---
 
