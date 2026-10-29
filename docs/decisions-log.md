@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-050 · 2026-10-29 · Async raid details (P1.3a)
+Context: raid on #100/#101. Decision: (1) MatchmakingService.noteRaided runs on escape with the
+snapshot's power, not at StartRaid, so a failed raid doesn't hide a den for 4 h; (2) reaching the
+gate without a critter ends the raid and takes nothing (no walk-in, walk-out Glow); (3) guard and
+trap tuning lives in RaidRules.Pocket until it moves to Config (as D-021); (4) raidLogSeenAt is
+an optional Profile field written by the server when GetRaidLog is called (no migration). Why:
+fairness to the defender and simplest thing for the gate. Reversible: yes.
+
 ### D-049 · 2026-10-29 · Escrow fix round on #97/#98; asyncRaids waits for old servers to die
 Context: reviewer APPROVED #97 and #98 at xhigh with suggestions. Decision: one fix round for the
 two Glow dupe/loss-adjacent items (a stale session's same-second debit writing its loot into the
