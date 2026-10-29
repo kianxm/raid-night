@@ -111,8 +111,44 @@ job IDs are in `assets/raw/<id>/` (`jobs.txt`). "Kept?" is Gate 1 (Kian); "pendi
 | 2026-10-29 | drama_possum | front-01 | seedream_v4_5 | 1 | pending | Quadruped, tail tip glows; expression mild for "dramatic" |
 | 2026-10-29 | lid_raccoon | front-01 | seedream_v4_5 | 1 | pending | Upright, lid rim glows |
 | 2026-10-29 | pocket_whale | front-01 | seedream_v4_5 | 1 | pending | Floating, constellation glow, clean silhouette |
+| 2026-10-29 | snooze_bat | side-01 | seedream_v4_5 | 1 | pending | Matches front-03; profile reads well |
+| 2026-10-29 | snooze_bat | back-01 | seedream_v4_5 | 1 | pending | Three-quarter back rather than straight on; consistent design |
+| 2026-10-29 | dusk_mouse | front-01 | seedream_v4_5 | 1 | pending | On-style; small in frame |
+| 2026-10-29 | pebble_toad | front-01 | seedream_v4_5 | 1 | pending | Spots glow, squat toad; slight stone texture |
+| 2026-10-29 | blinkbug | front-01 | seedream_v4_5 | 1 | pending | Bulb tail glows, hovering |
+| 2026-10-29 | button_beetle | front-01 | seedream_v4_5 | 1 | pending | Button shell holes glow; strong silhouette |
+| 2026-10-29 | fuzz_owlet | front-01 | seedream_v4_5 | 1 | pending | Real fur, off-style ('ninety percent fluff' beats 'no fuzz'). Redo |
+| 2026-10-29 | neon_shrimp | front-01 | seedream_v4_5 | 1 | pending | Curled, gloves up, antennae glow |
+| 2026-10-29 | moonquill | front-01 | seedream_v4_5 | 1 | pending | Quill tips glow; reads grumpy, not bashful |
+| 2026-10-29 | boo_mole | front-01 | seedream_v4_5 | 1 | pending | Translucent ghost, sunglasses |
+| 2026-10-29 | nimbus_lamb | front-01 | seedream_v4_5 | 1 | pending | Not a lamb (koala-like); cloud floats above its head instead of being its wool. Redo |
+| 2026-10-29 | crumb_rat | front-01 | seedream_v4_5 | 1 | pending | Shaggy fur, off-style. Redo |
+| 2026-10-29 | streetlamp_frog | front-01 | seedream_v4_5 | 1 | pending | Tall and skinny as the look says, so not chunky; bulb glows |
+| 2026-10-29 | noodle_weasel | front-01 | seedream_v4_5 | 1 | pending | Body drawn as literal noodles, giraffe neck, small head |
+| 2026-10-29 | crescent_fox | front-01 | seedream_v4_5 | 1 | pending | Lanky legs and small head break the chunky proportions |
+| 2026-10-29 | patchwork_bear | front-01 | seedream_v4_5 | 1 | pending | Button eyes and ears glow rather than the patches |
+| 2026-10-29 | dj_owl | front-01 | seedream_v4_5 | 1 | pending | Strong; turntable glows |
+| 2026-10-29 | shroom_fawn | front-01 | seedream_v4_5 | 1 | pending | Strong; mushroom antlers glow |
+| 2026-10-29 | bubble_otter | front-01 | seedream_v4_5 | 1 | pending | Strong; bubble glows |
+| 2026-10-29 | comet_ferret | front-01 | seedream_v4_5 | 1 | pending | Stands upright; should be on four legs. Redo |
+| 2026-10-29 | tick_toad | front-01 | seedream_v4_5 | 1 | pending | Watch face glows; glossy gold |
+| 2026-10-29 | aurora_pup | front-01 | seedream_v4_5 | 1 | pending | Aurora mane glows |
+| 2026-10-29 | mirror_cat | front-01 | seedream_v4_5 | 1 | pending | Chrome with moon reflections |
+| 2026-10-29 | ufo_hamster | front-01 | seedream_v4_5 | 1 | pending | Saucer rim glows; face worried more than suspicious |
+| 2026-10-29 | neon_drake | front-01 | seedream_v4_5 | 1 | pending | Neon wing outlines glow |
+| 2026-10-29 | storm_hare | front-01 | seedream_v4_5 | 1 | pending | Yellow body instead of silver; with lightning ears it drifts toward a well-known yellow electric mascot. Redo |
+| 2026-10-29 | lunar_kitsune | front-01 | seedream_v4_5 | 1 | pending | Five tails plus a moon overhead (look says three tails) |
+| 2026-10-29 | abyss_angler | front-01 | seedream_v4_5 | 1 | pending | Moon lure held in its fins; sly face |
+| 2026-10-29 | king_bandit | front-01 | seedream_v4_5 | 1 | pending | Strong; trash-can crown glows, tattered cape |
+| 2026-10-29 | nebula_owl | front-01 | seedream_v4_5 | 1 | pending | Galaxy orb held in one wing |
+| 2026-10-29 | eclipse_wyrm | front-01 | seedream_v4_5 | 1 | pending | Mouse head with round ears (style reference leaking in). Redo |
+| 2026-10-29 | midnight_mew | front-01 | seedream_v4_5 | 1 | pending | Moon eye glows but it has a second normal eye |
+| 2026-10-29 | snooze_bat | 3D (front-03, side-01, back-01) | tripo_h3_1_multiview_to_3d | 9 | pending | Textured GLB, 1.44M triangles (budget 1,500): needs decimation, or a re-run with face_limit (also 9 credits). No Blender on this machine yet |
 
 Batch 1 lessons (folded into `tools/assets/Prompts.luau`): "short stubby limbs" adds limbs to
 limbless animals, so it now applies only where the animal has limbs; unnamed glows land anywhere,
 so every critter names its glowing feature; hanging poses bring strings, so the AVOID block bans
 strings, ropes, hooks and hangers. 3D quote: Tripo H3.1 multiview 9 credits, Meshy 30.
+
+All 40 critters have a front (2026-10-29). crumb_rat's first submit hit a 429 before a job was created and
+was resubmitted once. Balance after: 44 credits.
