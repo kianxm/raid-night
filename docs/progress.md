@@ -68,12 +68,12 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | --- | --- | --- | --- | --- | --- | --- |
 | C6 | data | — | In progress | agent/data/C6 | 1 | Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
 | P2.1 | assets | — | Blocked | #87 (open) | 1 | Generation paused: no credits (D-057); Gate 1 picks are Kian's. Prompts and 40 fronts done in #87 |
-| P2.2 | assets | — | Todo | | 0 | Briefs + prompts only; generation blocked (D-057) |
+| P2.2 | assets | — | In progress | agent/assets/P2.2 | 1 | Briefs + prompts only; generation blocked (D-057) |
 | P2.3 | raid | — | In progress | agent/raid/P2.3 | 1 | Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
 | P2.4 | economy | — | In progress | agent/economy/P2.4 | 1 | Was P2.1: model-id seam with placeholder fallback, mutation effects, eggMaxTier → Mythic (D-057) |
-| P2.5 | ui | — | In progress | agent/ui/P2.5 | 1 | Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
+| P2.5 | ui | — | In review | #119, #120, #121 (stacked) | 1 | 358 tests. Shop + strings table, Bag + Den mgmt, Settings + silent sound cues. Needs GetSettings/SaveSettings remotes on C6 (data) and DenState.vaultSlots. Not run in Studio. Was: Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
 | P2.6 | ui | P2.5, C6 | Todo | | 0 | Onboarding (Appendix C) |
-| P2.7 | notifications | — | In review | #118 | 1 | 358 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
+| P2.7 | notifications | — | In review | #118 | 1 | Reviewer APPROVED; fail-closed + atomic day claim folded in. 359 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
 | P2.8 | economy | C6 | Todo | | 0 | Passes/products, glow-factor helper, policy audit; products for Kian |
 | P2.9 | data | C6 | Todo | | 0 | Analytics events (Appendix A) + funnels |
 | P2.10 | raid | C6, P2.3 | Todo | | 0 | Gear (live only for lockpick) |
@@ -196,6 +196,8 @@ dropped based on real play.
 - getLiveRevenge can miss a block that exists only in a snapshot and was added after arrival (reviewer #94; rare).
 - `raiderOnline` tells a victim whether their raider is online (reviewer #94; privacy note, by design, blocks respected).
 - seenOnline: one MemoryStore read per revenge row per GetRaidTargets (15 s cache); watch the budget (reviewer #94). Six more in #94.
+
+- Notifications (reviewer #118): the opt-in prompt hook saves promptedAt before the client confirms the prompt showed (check CanPromptOptInAsync client-side); `successfulRaids == 1` is the only chance (confirm the onboarding steal doesn't count); launchRaidId must go through the server revenge-token check; NotificationState_v1 needs right-to-erasure handling; confirm Open Cloud from HttpService with a Secret works live (small each).
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
