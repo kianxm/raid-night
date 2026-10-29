@@ -68,7 +68,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | --- | --- | --- | --- | --- | --- | --- |
 | C6 | data | — | In progress | agent/data/C6 | 1 | Phase 2 optional profile fields (settings, onboarding, notifications, gear, purchases, analytics), no migration |
 | P2.1 | assets | — | Blocked | #87 (open) | 1 | Generation paused: no credits (D-057); Gate 1 picks are Kian's. Prompts and 40 fronts done in #87 |
-| P2.2 | assets | — | In progress | agent/assets/P2.2 | 1 | Briefs + prompts only; generation blocked (D-057) |
+| P2.2 | assets | — | Blocked | #122 (stacked on #87) | 1 | Briefs done: 19 pieces, kit manifest (ids empty), credit estimate ~263 (38 images + 25 meshes incl. retries). Generation + Asset Gates wait for credits (D-057) |
 | P2.3 | raid | — | In progress | agent/raid/P2.3 | 1 | Was P2.2: kit seam with placeholder pieces, pads 6→30, mobile perf pass (D-057) |
 | P2.4 | economy | — | In progress | agent/economy/P2.4 | 1 | Was P2.1: model-id seam with placeholder fallback, mutation effects, eggMaxTier → Mythic (D-057) |
 | P2.5 | ui | — | In review | #119, #120, #121 (stacked) | 1 | 358 tests. Shop + strings table, Bag + Den mgmt, Settings + silent sound cues. Needs GetSettings/SaveSettings remotes on C6 (data) and DenState.vaultSlots. Not run in Studio. Was: Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
