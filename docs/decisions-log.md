@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-047 · 2026-10-29 · Async escrow records are never voided; cleanup deferred
+Context: data on #97/#98. Decision: close D-012 #6 by never voiding Async records (any server may
+redeliver the debit; it applies once per raidId) instead of a void tombstone. Deleting finished
+escrow records (D-008) moves to the hardening backlog (storage growth only). Async debits accrue
+the defender's offline income to debit time, take the loot share of what's stored then, and
+credit the raider exactly that. asyncRaids turns on only in a deploy after P1.1 ships. Why: an
+escaped raid always completes, with no void race (principle 1). Reviewer checks idempotency.
+Reversible: yes.
+
 ### D-046 · 2026-10-29 · P1.3 and P1.4 split so they start before P1.1 lands
 Context: P1.1 (escrow) is the long pole; most of P1.3 and P1.4 doesn't touch escrow. Decision:
 P1.3a builds StartRaid (lock, flags, block and presence re-checks), the pocket den, traps,

@@ -47,7 +47,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| P1.1 | data | — | In progress | agent/data/P1.1 | 1 | Carries D-008, D-012 #6, D-026 TODOs, C5 day-high check |
+| P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) on both. Own Studio run waits for merge (D-044) |
 | P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
 | P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: agent/raid/P1.3a | 1 | Split (D-046): P1.3a = StartRaid, pocket den, traps, guards, timer, grabs (from integration); P1.3b = escrow handoff, shield, revenge token, logs (after P1.1) |
 | P1.4 | raid | P1.3 | In progress | P1.4a: agent/raid/P1.4a | 1 | Split (D-046): P1.4a = codec + store (new files); P1.4b = hook into raids (after P1.3) |
@@ -91,6 +91,9 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
   eggPriceGrowth 1.12→1.32. First rebirth median day 0.9 → 20.7 (p10 8.7, p90 47.7); Glow held
   stays ~1-4 egg prices instead of climbing to 12,000. The design sets no first-rebirth target:
   approve the ~3-week pace, pick another, or keep today's values. Level 30 of 50 on day 1 either way.
+
+- Rollout: turn `Config.Flags.asyncRaids` on only in a deploy after the one that ships P1.1 (#97/#98);
+  an older server could otherwise cancel an async transfer under the live rules (D-047).
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
@@ -150,6 +153,7 @@ dropped based on real play.
 - A raider can block their victim after a raid to hide from revenge (reviewer #91; decide after playtest).
 - Raider's own block list is session-only until their first ReportBlocked; fall back to the last snapshot (reviewer #91; small).
 - Studio hook `targets` also skips the `raids` gate; doc says asyncRaids only (reviewer #91; Studio only, doc fix).
+- Finished escrow records are never deleted (D-008 cleanup deferred, D-047; storage growth only; proposal in #98).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 - Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
 - Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).
