@@ -112,40 +112,30 @@ lists only newer Incoming entries.
 Set `StudioMemoryProfiles = true`, Play. For asyncRaids, set `Flags.asyncRaids = true` in
 the Studio copy of `Shared.Config` only, and revert it afterwards.
 
-**D. Matchmaking (#91, P1.2).** `mm:Invoke("seed")`, `"targets"`, `"lock"`, `"block"`
-(`"raider"` and `"defender"`), `"unblock"`, `"presence"`, `"clear"`. Revenge row first, then
-normal rows; blocked players never match; second `lock` is contended.
+**D. Matchmaking (#91).** `mm:Invoke` `seed`, `targets`, `lock`, `block` (raider and defender),
+`unblock`, `presence`, `clear`. Revenge row first; blocked players never match; second `lock` contends.
 
-**E. Live revenge, #94 plan (single client).** `raid:Invoke("seed")`, `mm:Invoke("revenge", plot)`,
-then `join "here"` (Arrived, token kept), `live`, `join "away"` (Failed TeleportFailed, token kept,
-warn expected), `join "offline"` (Failed RaiderOffline), forged `arrive "forged-id"` (NoToken),
-Lockdown then `join "here"` (you land outside, border pushes you out), client
-`JoinRevengeServer:InvokeServer(...)` with the flag off (SwitchedOff, third call in 10 s is Busy),
-junk payloads. Then `clear` on both hooks.
+**E. Live revenge (#94 plan).** `raid:Invoke("seed")`, `mm:Invoke("revenge", plot)`, then `join`
+`here` (Arrived, token kept), `live`, `away` (Failed TeleportFailed, expected warn), `offline`
+(RaiderOffline), forged `arrive` (NoToken), Lockdown then `join here` (border pushes you out),
+client `JoinRevengeServer` with the flag off (SwitchedOff; third call in 10 s is Busy), junk
+payloads. `clear` both hooks.
 
-**F. Async raid, #101 plan (steps 1 to 12).** Kill switch first (`SwitchedOff` before the flag
-edit), start, grab and carry, escape, teleport exploit (`gate` after grab gives TooFast,
-Retreat), retreat and the 3-minute timeout, guards and traps (patrol, tag, net, alarm moth,
-trapdoor), refusals (AlreadyRaiding, Blocked both ways, RevengeExpired, valid revenge),
-client trust checks, reset mid-raid (Left), live regression (RaidTestHook flow still works),
-pocket part count (24 for 6 pads, 4 traps, 2 guards).
-**[needs P1.3b]** After the changes, an escape must now move the critter and Glow: critter
-gone from the snapshot den, in your profile once, Glow = the debited amount, shield set on the
-defender, revenge token on the defender, a log entry on each side, and the pair limit counts
-every ended raid.
+**F. Async raid (#101 plan, steps 1 to 12).** Kill switch, start, grab and carry, escape, `gate`
+exploit (TooFast, Retreat), retreat, 3-minute timeout, guards and traps, refusals (AlreadyRaiding,
+Blocked both ways, RevengeExpired, valid revenge), client trust checks, reset mid-raid, live
+stealing regression, pocket part count (24 for 6 pads, 4 traps, 2 guards).
+**[needs P1.3b]** Escape now moves the critter and Glow: gone from the den, in your profile once,
+Glow equals the debit, shield and revenge token on the defender, a log entry each side.
 
-**G. Replays, #99 plan.** `ReplayTestHook:Invoke("synthetic")` gives a GUID and about 1.4 to
-1.8 KB; `fetch` as a party returns `v1 raider ... 900 frames`; a non-party returns `nil`;
-client `GetReplay:InvokeServer(raidId)` returns data and `Replay.decode` returns non-nil; bad
-inputs return `nil`; the 4th call in a burst is rate-limited. **[needs P1.4b]** A real async
-raid in F now leaves a replay under its raidId, saved at raid end, never changing the result.
+**G. Replays (#99 plan).** `ReplayTestHook` `synthetic` (about 1.4 to 1.8 KB), `fetch` as a party
+(900 frames) and as a non-party (nil), client `GetReplay` plus `Replay.decode`, bad inputs nil,
+burst rate-limited. **[needs P1.4b]** A real raid leaves a replay, saved at raid end.
 
-**H. Client UI, #102 plan.** Open Raid: revenge row first, then normal rows. Tap a row to raid:
-timer from server `endsAt`, gate arrow, carry line. Refusal toast (no error). All four outcomes
-(Time's up, Escaped, Caught, You left). Revenge async (red "Revenge!" line). Live revenge
-choice card with the hook (`here`, `away` with "Raid their den instead", `offline`). Raid log:
-unseen Incoming entry opens the log on rejoin, Replay shows "Replay not ready" until P1.4b.
-Check Output for the `ReportBlocked` send. **[needs P1.9b]** a live revenge grab now spends the
+**H. Client UI (#102 plan).** Revenge row first; raid from a row (server `endsAt` timer, gate
+arrow); refusal toast; all four outcomes; async revenge ("Revenge!" line); live-revenge choice
+card (`here`, `away` with "Raid their den instead", `offline`); raid log opens on rejoin with an
+unseen entry; `ReportBlocked` sends cleanly. **[needs P1.9b]** a live revenge grab spends the
 token only when the raid starts.
 
 ## End of the pass
@@ -367,19 +357,5 @@ Bugs to file (steps, expected, actual, owner):
 Dupes or lost critters seen (should be none):
 ```
 
-Per player:
-
-```
-Player:
-Device:
-Sessions / minutes played:
-Came back on day 2 / day 3 unprompted? (yes / no):
-Raids suffered while offline:
-Went back for revenge? (yes / no / why):
-Q1 Most fun moment:
-Q2 When wanted to stop:
-Q3 Losing a critter while offline fair?:
-Q4 Went back for revenge, and why:
-Q5 Confused by:
-Notable quotes:
-```
+Per player: device; sessions and minutes; came back day 2/3 unprompted; raids suffered offline;
+went back for revenge (and why); answers to Q1 to Q5; notable quotes.
