@@ -61,6 +61,10 @@ RaidRules.Reason = table.freeze({
 	Locked = "Locked", -- another raider holds the defender's raid lock
 	NoPocket = "NoPocket", -- no free pocket den in this server
 	TimeUp = "TimeUp", -- the raid timer has run out
+	-- Onboarding (P2.6r, D-063, D-064)
+	NewPlayerShield = "NewPlayerShield", -- the den's owner joined less than 30 minutes ago (live only)
+	TutorialClosed = "TutorialClosed", -- this player's onboarding is not at the guided steal
+	NotYourTutorial = "NotYourTutorial", -- every tutorial den belongs to one player
 })
 
 function RaidRules.dayIndex(now: number): number
@@ -393,6 +397,10 @@ function RaidRules.canGrabLive(g: LiveGrab): (boolean, string?, Critter?)
 	local profile = g.ownerProfile
 	if profile == nil or profile.userId ~= g.ownerUserId then
 		return false, RaidRules.Reason.OwnerNotReady, nil
+	end
+	-- Appendix C step 6 (D-063): absolute, like new-player protection; revenge does not break it.
+	if RaidRules.newPlayerShielded(profile, g.now) then
+		return false, RaidRules.Reason.NewPlayerShield, nil
 	end
 	if g.lockdownBlocked then
 		return false, RaidRules.Reason.LockdownActive, nil
@@ -1052,6 +1060,85 @@ end
 function RaidRules.raidLogSeenAt(profile: PlayerProfile): number
 	local at = profile.raidLogSeenAt
 	return if type(at) == "number" and at == at then at else 0
+end
+
+-- Onboarding (P2.6r, decisions D-063, D-064) -------------------------------------------------------
+
+local function finite(value: any): boolean
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+end
+
+--[[
+	The new-player shield (Appendix C step 6, D-063): no live steal from a den whose owner first
+	joined (profile.createdAt, stamped by Profile.prepare) less than
+	Config.Protection.newPlayerLiveShieldSeconds ago. Derived, never saved. Async raids need no
+	check here: new-player protection (createdAt + newPlayerSeconds, 48 h) already refuses them,
+	in Matchmaking.pickCandidates and in RaidRules.canRaid at StartRaid.
+	A corrupt createdAt (not a finite number) reads as an old account: no shield, never a lock-out.
+]]
+function RaidRules.newPlayerShieldUntil(profile: PlayerProfile): number
+	local createdAt: any = profile.createdAt
+	if not finite(createdAt) then
+		return 0
+	end
+	return createdAt + Config.Protection.newPlayerLiveShieldSeconds
+end
+
+function RaidRules.newPlayerShielded(profile: PlayerProfile, now: number): boolean
+	return now < RaidRules.newPlayerShieldUntil(profile) -- a NaN `now` is never shielded
+end
+
+--[[
+	The tutorial den (Appendix C step 4, D-064). A server-owned den "next door" with no defender
+	profile and one placeholder critter, open only to a player whose next onboarding step is the
+	guided steal (Economy.TUTORIAL_CLAIM_STEP, "stealHome"). Carrying it home over their own den's
+	border grants the tutorial critter (IncomeService.grantTutorialCritter), never Escrow.
+	TUTORIAL_RAID_ID is the raidId RaidEnded carries for it: never a GUID, so never an escrow raid
+	or a replay.
+]]
+RaidRules.TUTORIAL_RAID_ID = "tutorial"
+RaidRules.TUTORIAL_CRITTER_UID = "tutorial" -- CarryingUid while the tutorial critter is carried
+
+-- `status` is Profile.onboardingStatus of the player's loaded profile (nil = not loaded).
+function RaidRules.tutorialDenOpen(status: { step: number, nextStepId: string?, complete: boolean }?): boolean
+	return status ~= nil and status.complete == false and status.nextStepId == Economy.TUTORIAL_CLAIM_STEP
+end
+
+export type TutorialGrab = {
+	open: boolean, -- tutorialDenOpen for this player and IncomeService.tutorialCritterAvailable
+	isOwner: boolean, -- the den asked for is this player's own tutorial den
+	raiderReady: boolean, -- a den to carry it home to and a loaded profile
+	busy: boolean, -- carrying live, in an async raid, or carrying the tutorial critter already
+	distance: number, -- root part to the tutorial pad, server positions
+}
+
+-- Can this player grab their tutorial critter? No kill switch, Lockdown, live loss rule or owner:
+-- nothing is stolen from anyone, and the grant is once per player ever.
+function RaidRules.canGrabTutorial(t: TutorialGrab): (boolean, string?)
+	if not t.isOwner then
+		return false, RaidRules.Reason.NotYourTutorial
+	end
+	if not t.open then
+		return false, RaidRules.Reason.TutorialClosed
+	end
+	if not t.raiderReady then
+		return false, RaidRules.Reason.RaiderNotReady
+	end
+	if t.busy then
+		return false, RaidRules.Reason.AlreadyCarrying
+	end
+	if not (t.distance <= Config.LiveRaid.grabRange) then -- also refuses NaN
+		return false, RaidRules.Reason.OutOfRange
+	end
+	return true, nil
+end
+
+-- Hours since the raid that granted this revenge token (analytics revenge_started). The token is
+-- written at the debit with expiresAt = now + Config.Revenge.windowSeconds. Never negative.
+function RaidRules.hoursSinceRaided(token: RevengeToken, now: number): number
+	local raidedAt = token.expiresAt - Config.Revenge.windowSeconds
+	local hours = (now - raidedAt) / 3600
+	return if finite(hours) and hours > 0 then hours else 0
 end
 
 return RaidRules

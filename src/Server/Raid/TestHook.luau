@@ -6,7 +6,8 @@
 
 	It seeds a stand-in defender den: a fake owner (reserved test userId -1_000_001, which no
 	player and no Studio test client can have) with an in-memory profile, one pad
-	critter per weight on pads 1-4 plus a Vault and an Inventory critter, and a red "StandInOwner"
+	critter per weight on pads 1-4 (mutations None, Shiny, Moonlit, Haunted, drawn by CritterView
+	like a real den, P2.4) plus a Vault and an Inventory critter, and a red "StandInOwner"
 	block that tags like a real owner. One client can then grab, carry, get tagged, escape, and
 	watch a Lockdown block entry. The real rules run unchanged: the stand-in is only another
 	answer to "who owns this den, with what profile, standing where".
@@ -14,6 +15,8 @@
 	Drive it from the Studio command bar (server side) during Play:
 	  local hook = game:GetService("ServerStorage"):WaitForChild("RaidTestHook")
 	  hook:Invoke("seed")              --> plot number of the stand-in den
+	  hook:Invoke("seed", "newPlayer") --> the same, but the stand-in joined just now: its den is
+	                                       under the 30-minute new-player shield (NewPlayerShield)
 	  hook:Invoke("status")            --> one-line summary: carries (with the D-034 base), locks,
 	                                       Lockdown, live protection / last live loss, stand-in pads
 	  hook:Invoke("chase", true)       --> the stand-in owner walks at you; within tagRange it tags
@@ -45,6 +48,7 @@ local Services = script.Parent.Parent.Services
 local DataService = require(Services.DataService) :: any
 local DenWorldService = require(Services.DenWorldService) :: any
 local Lockdown = require(script.Parent.Lockdown)
+local CritterView = require(script.Parent.Parent.Economy.CritterView) :: any
 
 type PlayerProfile = Types.PlayerProfile
 
@@ -59,6 +63,8 @@ local STAND_IN_USER_ID = -1_000_001 -- reserved test id (<= -1_000_000, Profile.
 local MEMORY_HINT = "set the ServerStorage attribute StudioMemoryProfiles = true before Play"
 local CHASE_SPEED = 18 -- faster than any carrier (16 * 0.9), so a chase always ends in a tag
 local WEIGHTS = { "Light", "Medium", "Heavy", "VeryHeavy" }
+-- One mutation per seeded pad, so a carry shows each look over the raider's head (P2.4).
+local PAD_MUTATIONS: { Types.Mutation } = { "None", "Shiny", "Moonlit", "Haunted" }
 
 local TestHook = {}
 
@@ -87,8 +93,10 @@ local function critter(speciesId: string, placement: Types.Placement, padIndex: 
 	}
 end
 
-local function buildProfile(): PlayerProfile
-	local profile = Profile.new(STAND_IN_USER_ID, os.time() - 3 * 86400)
+-- `newPlayer`: the stand-in first joined just now, so its den is under the 30-minute new-player
+-- shield (P2.6r, D-063) and every grab is refused with NewPlayerShield.
+local function buildProfile(newPlayer: boolean): PlayerProfile
+	local profile = Profile.new(STAND_IN_USER_ID, if newPlayer then os.time() else os.time() - 3 * 86400)
 	local pad = 0
 	local first: string? = nil
 	for _, weight in WEIGHTS do
@@ -97,6 +105,7 @@ local function buildProfile(): PlayerProfile
 				pad += 1
 				first = first or species.id
 				local c = critter(species.id, "Pad", pad)
+				c.mutation = PAD_MUTATIONS[pad] or "None"
 				profile.critters[c.uid] = c
 				break
 			end
@@ -109,8 +118,8 @@ local function buildProfile(): PlayerProfile
 	return profile
 end
 
--- Placeholder pad critters, drawn like IncomeService draws a real den (Contents/Critters, one
--- model per pad critter, PrimaryPart over the pad). Carried critters are skipped.
+-- Pad critters, drawn like IncomeService draws a real den: CritterView models in Contents/Critters,
+-- one per pad critter, standing on the pad. Carried critters are skipped.
 local function draw(plot: number, profile: PlayerProfile)
 	local contents = DenWorldService.getContents(plot)
 	local folder = contents:FindFirstChild("Critters")
@@ -124,20 +133,13 @@ local function draw(plot: number, profile: PlayerProfile)
 	for uid, c in profile.critters do
 		local pad = if c.placement == "Pad" and c.padIndex then pads[c.padIndex] else nil
 		local species = CritterCatalog.get(c.speciesId)
-		if pad and species and not api.isLocked(STAND_IN_USER_ID, uid) then
-			local model = Instance.new("Model")
-			model.Name = "Critter"
-			local body = Instance.new("Part")
-			body.Name = "Body"
-			body.Shape = Enum.PartType.Ball
-			body.Size = Vector3.one * 2.4
-			body.Anchored = true
-			body.CanCollide = false
-			body.Material = Enum.Material.Neon
-			body.Color = Color3.fromHex(species.palette[1])
-			body.CFrame = pad.CFrame * CFrame.new(0, pad.Size.Y / 2 + 1.2, 0)
-			body.Parent = model
-			model.PrimaryPart = body
+		local model = if pad
+				and species
+				and not api.isLocked(STAND_IN_USER_ID, uid)
+			then CritterView.build(c.speciesId, c.mutation or "None")
+			else nil
+		if pad and model then
+			model:PivotTo(pad.CFrame * CFrame.new(0, pad.Size.Y / 2, 0))
 			model.Parent = folder
 		end
 	end
@@ -165,11 +167,11 @@ local function releaseProfile(): (boolean, string?)
 	return released == true, why
 end
 
-local function seed(): (number?, string?)
+local function seed(kind: any): (number?, string?)
 	if seeded then
 		return seeded.plot, nil
 	end
-	local profile = buildProfile()
+	local profile = buildProfile(kind == "newPlayer")
 	-- The profile goes to DataService before any den is taken, so a refused load leaves nothing.
 	local loaded = false
 	if DataService.persistence() == "Memory" then
