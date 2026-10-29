@@ -51,7 +51,7 @@ function MenuController.register(screen: Screen)
 	closeButton.Activated:Connect(MenuController.close)
 	screens[screen.id] = { frame = frame, refresh = screen.build(body) }
 
-	local b = Ui.button(strip, screen.id .. "Button", screen.label, screen.color, UDim2.fromOffset(64, 48))
+	local b = Ui.button(strip, screen.id .. "Button", screen.label, screen.color, UDim2.fromOffset(64, 44))
 	b.LayoutOrder = #strip:GetChildren()
 	b.Activated:Connect(function()
 		if current == screen.id then
@@ -73,7 +73,7 @@ function MenuController.start()
 	strip.Parent = gui
 	local list = Instance.new("UIListLayout")
 	list.SortOrder = Enum.SortOrder.LayoutOrder
-	list.Padding = UDim.new(0, 6)
+	list.Padding = UDim.new(0, 4)
 	list.Parent = strip
 
 	DenController.onChanged(function()

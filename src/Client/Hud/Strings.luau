@@ -121,6 +121,27 @@ local Strings = {
 	shopMaxLevel = "Max level",
 	shopUpgraded = "Den upgraded!",
 	shopUpgradeFailed = "Couldn't upgrade now",
+
+	-- Bag (inventory) and Den management
+	menuBag = "Bag",
+	menuDen = "Den",
+	bagTitle = "Bag",
+	bagEmpty = "Nothing in your bag",
+	bagToPad = "Pad",
+	bagToVault = "Vault",
+	critterLine = "{tier}",
+	critterLineMutation = "{tier}, {mutation}",
+	placeDone = "Moved!",
+	placeFailed = "Can't move it now",
+	denTitle = "Your den",
+	denPads = "Pads {used}/{total}",
+	denVault = "Vault {used}",
+	denBag = "Bag {n}",
+	denPickHint = "Tap a critter, then a pad",
+	denPadEmpty = "Empty",
+	denToVault = "To Vault",
+	denToBag = "To Bag",
+	denSelected = "{name} selected",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string
