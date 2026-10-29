@@ -127,7 +127,6 @@ local function fetch(force: boolean)
 		if ok and type(result) == "table" then
 			slots = result
 			relayout()
-			refreshPanel()
 		end
 	end)
 end
