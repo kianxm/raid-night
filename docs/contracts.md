@@ -64,8 +64,10 @@ Studio-only memory and test profiles (decision D-019, details in `DataService.lu
   `RunService:IsStudio()`): `StudioAsyncRaids = true` makes `EscrowService.canStartTransfer`
   count `asyncRaids` as on (the master `raids` switch still applies), and
   `StudioEscrowPause = "<checkpoint>"` (an Escrow checkpoint name such as `"deliveredDebit"`)
-  holds any escrow drive at that step for up to 2 minutes, so a playtest can stop the server
-  mid-transfer. A live server never reads either.
+  holds any escrow drive at that step, so a playtest can stop the server mid-transfer.
+  Clearing the attribute resumes the drive; the server closing, or 2 minutes, stops it with an
+  error instead, so the paused step is never finished from that server and recovery finishes it
+  on the next load (#114). A live server never reads either.
 
 Profile writes outside a session (P1.1): `DataService.updateOffline` runs one `UpdateAsync` on
 `Player_<userId>` that lands only while ProfileStore's `MetaData.ActiveSession` is empty, runs
