@@ -155,7 +155,30 @@ tests["a debit message only wakes recovery, and async transfers never take the l
 	expect.eq(count(async, "drive%(raidId, raiderUserId, false, false%)"), 2, "both drives recover")
 	expect.eq(count(async, "drive%("), 2, "no other drive")
 	expect.falsy(string.find(async, "Escrow%.advance"), "never the live path")
-	expect.truthy(string.find(async, 'Escrow%.create%(.-"Async"%s*%)'), "creates an Async record")
+	expect.truthy(
+		string.find(async, 'Escrow%.create%(.-"Async",%s*nil,%s*revengeRaidId%s*%)'),
+		"creates an Async record carrying the revenge token, never a grab-time base"
+	)
+end
+
+tests["an async transfer naming a bad revenge token is Refused before anything is read or written"] = function()
+	local code = source.codeOnly(source.read(ESCROW))
+	local entry = source.functionBody(code, "EscrowService.transferAsync") or ""
+	expect.truthy(
+		string.find(entry, "pcall%(%s*startAsync,[^%)]-isRevenge == true,%s*revengeRaidId%s*%)"),
+		"transferAsync hands the token to startAsync"
+	)
+	local async = source.functionBody(code, "startAsync") or ""
+	local check = string.find(async, 'Escrow%.checkRevengeRaidId%("Async", isRevenge, revengeRaidId%)')
+	local refused = string.find(async, 'if not revengeOk then%s*return "Refused", revengeWhy')
+	local created = string.find(async, "Escrow%.create%(")
+	local firstRead = string.find(async, "pcall%(read, ")
+	local firstWrite = string.find(async, "indexAdd%(")
+	expect.truthy(check and refused and created and firstRead and firstWrite, "check, refusal, create, read, write")
+	expect.truthy((check :: number) < (refused :: number), "checked, then refused")
+	for name, at in { create = created, read = firstRead, write = firstWrite } do
+		expect.truthy((refused :: number) < (at :: number), `refused before the {name}`)
+	end
 end
 
 return tests
