@@ -93,6 +93,7 @@ function Ui.screenGui(name: string, order: number, parent: Instance): ScreenGui
 	local gui = Instance.new("ScreenGui")
 	gui.Name = name
 	gui.ResetOnSpawn = false
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling -- children always draw above their parent
 	gui.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
 	gui.DisplayOrder = order
 	gui.Parent = parent

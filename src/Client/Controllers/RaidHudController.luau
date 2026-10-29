@@ -142,6 +142,9 @@ function RaidHudController.start()
 		resultSub.Text = if payload.glow > 0
 			then Strings.format(Strings.raidGlow, { n = tostring(payload.glow) })
 			else ""
+		local hasSub = resultSub.Text ~= ""
+		resultSub.Visible = hasSub
+		result.Size = UDim2.fromOffset(280, if hasSub then 76 else 52)
 		result.Visible = true
 		resultToken += 1
 		local token = resultToken

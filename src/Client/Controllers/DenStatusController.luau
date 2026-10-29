@@ -70,6 +70,7 @@ local function buildOwnChip()
 	gui.Name = "DenStatus"
 	gui.ResetOnSpawn = false
 	gui.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.DisplayOrder = 1
 	gui.Parent = player:WaitForChild("PlayerGui")
 	local holder = Instance.new("Frame")

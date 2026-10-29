@@ -158,6 +158,7 @@ local function build(): { [string]: any }
 	-- ScreenInsets supersedes IgnoreGuiInset. CoreUISafeInsets keeps content clear of the
 	-- Roblox top bar and also covers device notches and rounded corners.
 	gui.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.DisplayOrder = 1
 	gui.Parent = player:WaitForChild("PlayerGui")
 
