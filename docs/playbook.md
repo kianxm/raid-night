@@ -373,8 +373,15 @@ revenge screen.
 with idempotent receipts. Before any product that raises or protects Glow ships (VIP, Lantern
 Night, vault slot, auto-collect, shield, timer skips, event pass), run the reviewer policy audit
 and the PolicyService check (D-028, D-030). List every product with price for Kian to create in the Creator
-Dashboard (**stop** for that). No paid randomness. _Done when:_ test purchases grant exactly
-once, including after a forced shutdown mid-purchase.
+Dashboard (**stop** for that). No paid randomness. Glow multipliers (D-030, D-032): one server
+helper is the only place a player's factor changes and it accrues at the old factor first; every
+server accrue of an online player goes through it (IncomeService, EscrowService, snapshots, the
+final accrue before a save on leave), pinned by a source guard that `Economy.accrue(` and
+`Economy.collect(` appear in src/Server only inside that helper. _Done when:_ test purchases grant
+exactly once, including after a forced shutdown mid-purchase; a VIP player with normal HUD
+activity earns 1.5× over 10 minutes; a VIP player who joins after 8 hours offline gains exactly
+the unboosted 8 hours (unless Kian decides VIP boosts offline income); a restricted player never
+gets a factor above 1.
 
 **P2.9 Analytics.** Fire every event in Appendix A; set up funnels for onboarding and the raid
 flow; daily economy sources and sinks. _Done when:_ events visible in analytics from a test
