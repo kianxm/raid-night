@@ -3,6 +3,16 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-065 · 2026-10-29 · P2.8 open product questions: safe defaults, answers are Kian's
+Context: economy on #127. Decision: (1) restricted players aren't offered VIP (`vip.offerRestricted
+= false`) until its non-Glow perks are defined; (2) a restricted player who buys a Robux-linked
+product outside our UI gets NotProcessedYet (no grant); whether that is an acceptable refund path is
+Kian's; (3) timer skips, event-pass rewards and cosmetic sets stay undefined and unsold; (4) Lantern
+Night ending early on server shutdown is listed for Kian (no carry-over built). Remaining accrue
+call sites move to the helper in P2.8b (data), P2.8m (matchmaking); DenState.vaultSlots and
+GetShopOffers in P2.8c (economy, additive Net per D-059). Why: what is sold and refunds are product
+and policy calls. Reversible: yes (Config).
+
 ### D-064 · 2026-10-29 · No onboarding skip yet; tutorial steal is a one-time grant
 Context: data on #126. Decision: no skip remote for now (the guided steal is the hook; revisit
 after the closed test). The tutorial den has no defender profile, so its steal grants one fixed

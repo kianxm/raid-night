@@ -74,7 +74,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.5 | ui | — | In review | #119, #120, #121 (stacked) | 1 | 358 tests. Shop + strings table, Bag + Den mgmt, Settings + silent sound cues. Needs GetSettings/SaveSettings remotes on C6 (data) and DenState.vaultSlots. Not run in Studio. Was: Full UI pass, inventory, den mgmt, settings, strings table, sound hooks with empty ids (P2.11 stand-in) |
 | P2.6 | ui | P2.5, C6b, P2.6r | Todo | | 0 | Onboarding (Appendix C) |
 | P2.7 | notifications | — | In review | #118 | 1 | Reviewer APPROVED; fail-closed reads + atomic day claim + merged saveState folded in. 359 tests. Own DataStore for state (D-062); storage category off. Handoffs: onLoss after debit commit (data, P2.9), onSuccessfulRaid (raid, P2.10), PromptOptIn remote + prompt UI + launchRaidId on revenge screen (ui, P2.6). Open Cloud body to verify (integration). Strings for Kian |
-| P2.8 | economy | C6 | In progress | agent/economy/P2.8 (stacked on C6) | 1 | Passes/products, glow-factor helper, policy audit; products for Kian |
+| P2.8 | economy | C6 | In review | #127 (stacked on #123) | 1 | 396 tests. Receipts exactly-once (40 seeds x 60 forced-shutdown sim, mutation caught), factor helper in IncomeService + source guard, Config.Purchases (D-061 defaults, ids 0), products + audit table for Kian. Reviewer (xhigh) running. Handoffs P2.8b/m/c, ui (D-065). Was: Passes/products, glow-factor helper, policy audit; products for Kian |
 | P2.9 | data | C6 | In progress | agent/data/P2.9 (stacked on C6) | 1 | Analytics events (Appendix A) + funnels |
 | P2.10 | raid | C6, P2.3 | In progress | agent/raid/P2.10 (stacked on C6) | 1 | Gear (live only for lockpick) |
 | P2.11 | assets | — | Blocked | | 0 | No credits (D-057); sound hooks ship empty in P2.5 |
@@ -82,6 +82,10 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.6r | raid | C6b, P2.3, P2.6e | Todo | | 0 | Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
 | P2.4t | economy | P2.4, P2.8 | Todo | | 0 | Tuning proposal after eggMaxTier → Mythic (den 40 on day 2.7); prepared on a branch, stop for Kian |
 | P2.6e | economy | C6b | In progress | agent/economy/P2.6e (stacked on C6b) | 1 | advanceOnboarding call points, one-time untradeable tutorial critter grant, setShownPads (D-064) |
+| P2.8b | data | P2.8 | In progress | agent/data/P2.8b (stacked on #127) | 1 | EscrowService loadProfile + seedTestSession through the factor helper |
+| P2.8m | matchmaking | P2.8 | Todo | | 0 | SnapshotService build accrues through the helper; raid scout perk |
+| P2.8c | economy | P2.8 | Todo | | 0 | DenState.vaultSlots, GetShopOffers remote (additive Net, D-059) |
+| P2.5d | ui | P2.5, C6b, P2.8c | Todo | | 0 | ui handoffs: settings/onboarding wiring, shop offers, Lantern Night announcement, critter idle animator, odds chip 6 tiers |
 | P2.12 | integration | all | Todo | | 0 | Closed-test build + kit; access setup is Kian's |
 
 ## Setup notes
