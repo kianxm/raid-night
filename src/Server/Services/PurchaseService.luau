@@ -39,16 +39,27 @@
 
 	Lantern Night: one end time per server. A purchase starts one or extends a running one by
 	Config.Boosts.lanternNightSeconds (the bonus never stacks), sets every player's
-	lanternNightUntil through the helper and announces the buyer:
-	ServerAnnouncement("LanternNight", { buyerUserId, buyerName, endsAt }) (display name, no
-	player text, so no filtering). Players who join later get the end time too. The boost lives
-	in this server's memory: a shutdown ends it early.
+	lanternNightUntil through the helper and announces the buyer to each player:
+	ServerAnnouncement("LanternNight", { buyerUserId, buyerName, endsAt, boosted }) (display name,
+	no player text, so no filtering). `boosted` is whether the boost applies to that recipient
+	(their policy known unrestricted and purchases on), so a restricted player's client never says
+	they earn +50%. A player who joins while one runs gets its end time and the same announcement
+	(for the latest buyer). The boost lives in this server's memory: a shutdown ends it early.
+
+	Shop (P2.8c): GetShopOffers () -> Net.ShopOffers, Economy.shopOffers over Config.Purchases.
+	Waits up to SHOP_POLICY_WAIT_SECONDS for loadPolicy, then answers; an unknown policy fails
+	closed (no Robux-linked item unless offered to restricted players). Rate limit
+	Net.Limits.GetShopOffers.
+
+	Analytics (P2.9): `purchase` (product = the Config.Purchases key, price in Robux) once per
+	first grant of a product receipt (never for a redelivery) and once per pass purchase
+	MarketplaceService confirms.
 
 	Server API:
 	  policyOf(userId) -> Economy.PurchasePolicy
 	  ownsPass(userId, passKey) -> boolean       MarketplaceService ownership, never saved
 	  perkActive(userId, passKey) -> boolean     Economy.perkActive: owned, on, policy allows
-	  offers(userId) -> { { key, kind, id, price } }  what the shop may show this player
+	  offers(userId) -> { Net.ShopOffer }      what the shop may show this player (Economy.shopOffers)
 	  lanternNightEndsAt() -> number             0 = none running
 ]]
 
@@ -63,8 +74,10 @@ local Economy = require(Shared.Economy) :: any
 local Profile = require(Shared.Profile) :: any
 local RaidRules = require(Shared.RaidRules) :: any
 local Net = require(Shared.Net) :: any
+local RateLimit = require(Shared.RateLimit) :: any
 local DataService = require(script.Parent.DataService) :: any
 local IncomeService = require(script.Parent.IncomeService) :: any
+local AnalyticsService = require(script.Parent.AnalyticsService) :: any
 
 local POLICY_ATTEMPTS = 3
 local POLICY_BACKOFF_SECONDS = 2
@@ -74,15 +87,19 @@ local POLICY_BACKOFF_SECONDS = 2
 -- on every rejoin.
 local RECEIPT_WAIT_SECONDS = 60
 local PASS_CHECK_ATTEMPTS = 3
+-- How long GetShopOffers waits for loadPolicy before answering with the policy still unknown.
+local SHOP_POLICY_WAIT_SECONDS = 10
 
 type PlayerState = {
 	restricted: boolean?, -- PolicyService ArePaidRandomItemsRestricted; nil = unknown (restricted)
 	policyDone: boolean, -- loadPolicy finished (answered, or gave up: restricted stays nil)
 	owns: { [string]: boolean }, -- pass key -> owned
+	limits: any, -- RateLimit.State for this service's requests
 }
 
 local states: { [number]: PlayerState } = {}
 local lanternEndsAt = 0
+local lanternBuyer: { userId: number, name: string }? = nil
 local announce: RemoteEvent? = nil
 
 local PurchaseService = {}
@@ -90,7 +107,7 @@ local PurchaseService = {}
 local function stateOf(userId: number): PlayerState
 	local state = states[userId]
 	if not state then
-		state = { restricted = nil, policyDone = false, owns = {} }
+		state = { restricted = nil, policyDone = false, owns = {}, limits = {} }
 		states[userId] = state
 	end
 	return state :: PlayerState
@@ -118,20 +135,9 @@ function PurchaseService.perkActive(userId: number, passKey: string): boolean
 end
 
 function PurchaseService.offers(userId: number): { any }
-	local policy = PurchaseService.policyOf(userId)
-	local list = {}
-	for key, item in Config.Purchases.passes do
-		if Economy.purchaseOffered(item, policy) and not PurchaseService.ownsPass(userId, key) then
-			table.insert(list, { key = key, kind = "pass", id = item.id, price = item.price })
-		end
-	end
-	for key, item in Config.Purchases.products do
-		local available = item.kind ~= "eventPass" or Config.Purchases.currentEventId ~= ""
-		if available and Economy.purchaseOffered(item, policy) then
-			table.insert(list, { key = key, kind = item.kind, id = item.id, price = item.price })
-		end
-	end
-	return list
+	return Economy.shopOffers(Config.Purchases, PurchaseService.policyOf(userId), function(key: string): boolean
+		return PurchaseService.ownsPass(userId, key)
+	end)
 end
 
 function PurchaseService.lanternNightEndsAt(): number
@@ -232,17 +238,29 @@ end
 
 -- Lantern Night ----------------------------------------------------------------------------------
 
+-- The running Lantern Night's announcement to one player. `boosted`: the boost applies to them.
+local function announceLanternNight(player: Player)
+	local buyer = lanternBuyer
+	if not (announce and buyer and lanternEndsAt > os.time()) then
+		return
+	end
+	local policy = PurchaseService.policyOf(player.UserId)
+	announce:FireClient(player, "LanternNight", {
+		buyerUserId = buyer.userId,
+		buyerName = buyer.name,
+		endsAt = lanternEndsAt,
+		boosted = policy.purchasesEnabled == true and policy.paidRandomRestricted == false,
+	})
+end
+
 local function startLanternNight(buyer: Player, now: number)
 	lanternEndsAt = Economy.extendLanternNight(lanternEndsAt, now)
+	lanternBuyer = { userId = buyer.UserId, name = buyer.DisplayName }
 	for _, player in Players:GetPlayers() do
 		IncomeService.setGlowInputs(player.UserId, { lanternNightUntil = lanternEndsAt }, now)
 	end
-	if announce then
-		announce:FireAllClients("LanternNight", {
-			buyerUserId = buyer.UserId,
-			buyerName = buyer.DisplayName,
-			endsAt = lanternEndsAt,
-		})
+	for _, player in Players:GetPlayers() do
+		announceLanternNight(player)
 	end
 end
 
@@ -324,6 +342,7 @@ local function decide(info: any): string
 		return "NotProcessedYet"
 	end
 	local now = os.time()
+	local granted = false -- this call granted (a redelivery grants nothing)
 	local decision = Economy.processReceipt({
 		hasReceipt = function(): boolean
 			return Profile.hasReceipt(profile, purchaseId)
@@ -341,6 +360,7 @@ local function decide(info: any): string
 			if not ok then
 				warn(`[PurchaseService] grant refused after canGrant for {userId} receipt {purchaseId}`)
 			end
+			granted = ok
 			return ok
 		end,
 		save = function(): boolean
@@ -355,6 +375,10 @@ local function decide(info: any): string
 	})
 	if decision == "PurchaseGranted" then
 		refreshLater(player) -- a shield shows in DenState
+		local key = Economy.productById(productId)
+		if granted and key and item then
+			AnalyticsService.track(player, "purchase", { product = key, price = item.price })
+		end
 	end
 	return decision
 end
@@ -378,30 +402,67 @@ local function onPlayerAdded(player: Player)
 	if lanternEndsAt > os.time() then
 		IncomeService.setGlowInputs(player.UserId, { lanternNightUntil = lanternEndsAt }, os.time())
 	end
-	task.spawn(loadPolicy, player)
+	task.spawn(function()
+		loadPolicy(player)
+		-- After the policy answer, so `boosted` is right; nothing if it ended meanwhile. The
+		-- refresh shows perks the answer turned on (DenState.vaultSlots).
+		if player.Parent == Players then
+			announceLanternNight(player)
+			refreshLater(player)
+		end
+	end)
 	task.spawn(loadPasses, player)
 end
 
-local function announceRemote(): RemoteEvent
+-- GetShopOffers: rate limit, then wait (while the player is here) for loadPolicy, then answer.
+local function getShopOffers(player: Player): any
+	local userId = player.UserId
+	local state = states[userId]
+	if
+		not state or not RateLimit.take(state.limits, Net.Requests.GetShopOffers, Net.Limits.GetShopOffers, os.clock())
+	then
+		return { policyKnown = false, offers = {} }
+	end
+	local deadline = os.clock() + SHOP_POLICY_WAIT_SECONDS
+	while not state.policyDone and player.Parent == Players and os.clock() < deadline do
+		task.wait(0.5)
+	end
+	local current = states[userId]
+	if current ~= state or player.Parent ~= Players then
+		return { policyKnown = false, offers = {} }
+	end
+	return { policyKnown = state.restricted ~= nil, offers = PurchaseService.offers(userId) }
+end
+
+-- The remote named `name` of class `className` in ReplicatedStorage.Remotes, made if missing.
+local function remoteOf(className: string, name: string): Instance
 	local folder = ReplicatedStorage:FindFirstChild("Remotes")
 	if not (folder and folder:IsA("Folder")) then
 		folder = Instance.new("Folder")
 		folder.Name = "Remotes"
 		folder.Parent = ReplicatedStorage
 	end
-	local name = Net.Pushes.ServerAnnouncement
 	local existing = (folder :: Folder):FindFirstChild(name)
-	if existing and existing:IsA("RemoteEvent") then
+	if existing and existing.ClassName == className then
 		return existing
 	end
-	local remote = Instance.new("RemoteEvent")
+	local remote = Instance.new(className)
 	remote.Name = name
 	remote.Parent = folder
 	return remote
 end
 
 function PurchaseService.start()
-	announce = announceRemote()
+	announce = remoteOf("RemoteEvent", Net.Pushes.ServerAnnouncement) :: RemoteEvent
+	local shop = remoteOf("RemoteFunction", Net.Requests.GetShopOffers) :: RemoteFunction
+	shop.OnServerInvoke = function(player: Player): any
+		local ok, result = pcall(getShopOffers, player)
+		if not ok then
+			warn(`[PurchaseService] GetShopOffers failed for {player.UserId}: {result}`)
+			return { policyKnown = false, offers = {} }
+		end
+		return result
+	end
 	IncomeService.setPerks({
 		extraVaultSlots = function(userId: number): number
 			return if PurchaseService.perkActive(userId, "vaultSlot") then 1 else 0
@@ -425,7 +486,12 @@ function PurchaseService.start()
 						return
 					end
 					if ownsPassAsync(player, passId) then
+						local already = PurchaseService.ownsPass(player.UserId, key)
 						setOwned(player, key, true)
+						if not already then
+							local item = Config.Purchases.passes[key]
+							AnalyticsService.track(player, "purchase", { product = key, price = item.price })
+						end
 						return
 					end
 					if attempt < PASS_CHECK_ATTEMPTS then

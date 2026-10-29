@@ -25,7 +25,7 @@
 	Revisit when P2.5 adds an inventory UI (placing from Inventory becomes the player's choice).
 
 	Remotes live in ReplicatedStorage.Remotes, named exactly as in Shared/Net.luau:
-	  RemoteFunctions GetDenState, Collect, PlaceCritter, BuyEgg, UpgradeDen
+	  RemoteFunctions GetDenState, Collect, PlaceCritter, BuyEgg, UpgradeDen, UpgradeGear
 	  RemoteEvent     DenChanged (DenState), fired to the owner after every change
 	Every request is rate-limited per player (Net.Limits, per 10 s) and every payload is checked.
 
@@ -74,6 +74,20 @@
 	  buyEgg    a paid egg hatched
 	  place     PlaceCritter onto a Pad
 	  collect   a collect banked more than 0
+
+	Gear purchase (P2.8c; P2.10 handoff, D-068): UpgradeGear buys (level 0 -> 1) or upgrades one
+	gear item with banked Glow through Economy.buyGear, which checks the id, the gear kill switches
+	(Config.Gear.enabled, the item's own), the max level and the price, then writes the level and
+	spends in one non-yielding call. Never Robux. Rate limit Net.Limits.UpgradeGear.
+
+	Analytics (P2.9 call points; schema Shared/Analytics.luau, sender AnalyticsService, which never
+	yields or throws): egg_bought, critter_placed (PlaceCritter only, not auto-placement) and
+	glow_collected (player collects; the auto-collect pass logs only its economy flows, to keep the
+	per-player budget for player actions). Economy flows: Glow source Collect, sinks Egg,
+	DenUpgrade, GearUpgrade; DenGlow source DenOfflineIncome (the offline gap, logged when the
+	first accrue of a load pays it) and DenIncome (online income, summed in the helper and logged
+	before each collect and at the leave), sink DenCollect. Rebirth is not served yet: its
+	`rebirth` event and Rebirth sink belong to the handler that serves it.
 ]]
 
 local Players = game:GetService("Players")
@@ -88,7 +102,9 @@ local CritterCatalog = require(Shared.CritterCatalog) :: any
 local Net = require(Shared.Net) :: any
 local Plots = require(Shared.Plots) :: any
 local Profile = require(Shared.Profile) :: any
+local GearRules = require(Shared.GearRules) :: any
 local DataService = require(script.Parent.DataService) :: any
+local AnalyticsService = require(script.Parent.AnalyticsService) :: any
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 local CritterView = require(script.Parent.Parent.Economy.CritterView) :: any
 
@@ -269,7 +285,7 @@ end
 	profile it belongs to. A profile that is not the one loaded in this server for its player
 	(an offline copy, an absent defender) accrues at factor 1: offline income is unboosted.
 ]]
-type GlowEntry = { state: any, profile: any }
+type GlowEntry = { state: any, profile: any, income: number }
 local glowEntries: { [number]: GlowEntry } = {}
 
 local function glowSettings(): any
@@ -282,7 +298,7 @@ end
 local function glowEntry(userId: number): GlowEntry
 	local entry = glowEntries[userId]
 	if not entry then
-		entry = { state = Economy.newGlowFactorState(), profile = nil }
+		entry = { state = Economy.newGlowFactorState(), profile = nil, income = 0 }
 		glowEntries[userId] = entry
 	end
 	return entry :: GlowEntry
@@ -301,8 +317,30 @@ local function loadedEntry(profile: any): GlowEntry?
 	if entry.profile ~= profile then
 		entry.profile = profile
 		entry.state.joined = false
+		entry.income = 0
 	end
 	return entry
+end
+
+-- Analytics for Glow one helper accrue paid into `profile`'s storage: the offline gap (the first
+-- accrue of a load) is logged at once, online income is summed until flushIncome.
+local function noteIncome(entry: GlowEntry, profile: any, added: number, wasJoined: boolean)
+	if not (added > 0) then
+		return
+	end
+	if wasJoined then
+		entry.income += added
+	else
+		AnalyticsService.economy(profile.userId, "DenOfflineIncome", added, math.max(0, math.floor(profile.stored)))
+	end
+end
+
+local function flushIncome(entry: GlowEntry, profile: any)
+	local income = entry.income
+	entry.income = 0
+	if income > 0 then
+		AnalyticsService.economy(profile.userId, "DenIncome", income, math.max(0, math.floor(profile.stored)))
+	end
 end
 
 function IncomeService.accrue(profile: any, now: number): number
@@ -310,7 +348,10 @@ function IncomeService.accrue(profile: any, now: number): number
 	if not entry then
 		return Economy.accrue(profile, now)
 	end
-	return Economy.accrueBoosted(entry.state, profile, now, glowSettings())
+	local wasJoined = entry.state.joined == true
+	local added = Economy.accrueBoosted(entry.state, profile, now, glowSettings())
+	noteIncome(entry, profile, added, wasJoined)
+	return added
 end
 
 function IncomeService.collect(profile: any, now: number): number
@@ -318,7 +359,9 @@ function IncomeService.collect(profile: any, now: number): number
 	if not entry then
 		return Economy.collect(profile, now)
 	end
-	return Economy.collectBoosted(entry.state, profile, now, glowSettings())
+	IncomeService.accrue(profile, now)
+	flushIncome(entry, profile) -- DenIncome before the DenCollect sink that empties it
+	return Economy.collectBoosted(entry.state, profile, now, glowSettings()) -- its accrue: a no-op
 end
 
 function IncomeService.setGlowInputs(userId: number, change: any, now: number): number
@@ -328,7 +371,12 @@ function IncomeService.setGlowInputs(userId: number, change: any, now: number): 
 	local entry = glowEntry(userId)
 	local profile = DataService.getProfile(userId)
 	local loaded = if profile and loadedEntry(profile) then profile else nil
-	return Economy.changeGlowInputs(entry.state, loaded, now, change, glowSettings())
+	local wasJoined = entry.state.joined == true
+	local added = Economy.changeGlowInputs(entry.state, loaded, now, change, glowSettings())
+	if loaded then
+		noteIncome(entry, loaded, added, wasJoined)
+	end
+	return added
 end
 
 function IncomeService.glowFactor(userId: number, now: number): number
@@ -342,7 +390,9 @@ local function releaseGlow(userId: number, profile: any)
 	local entry = glowEntries[userId]
 	glowEntries[userId] = nil
 	if entry and entry.profile == profile then
-		Economy.accrueBoosted(entry.state, profile, os.time(), glowSettings())
+		local wasJoined = entry.state.joined == true
+		noteIncome(entry, profile, Economy.accrueBoosted(entry.state, profile, os.time(), glowSettings()), wasJoined)
+		flushIncome(entry, profile) -- logged only while the Player is still in the server
 	else
 		Economy.accrue(profile, os.time())
 	end
@@ -363,7 +413,7 @@ local function push(player: Player)
 	Economy.autoPlace(profile, physicalPads(player), now, function(uid: string): boolean
 		return isLocked(userId, uid)
 	end)
-	denChanged:FireClient(player, Economy.denState(profile))
+	denChanged:FireClient(player, Economy.denState(profile, perks.extraVaultSlots(userId)))
 	local plot = DenWorldService.getPlot(player)
 	-- P2.3: show a newly unlocked pad at once, before critters are drawn on it (RaidService also
 	-- syncs it at 2 Hz). setShownPads exists only once P2.3's DenWorldService is in.
@@ -432,8 +482,24 @@ end
 
 -- Requests --------------------------------------------------------------------------------------
 
-local function collect(player: Player, profile: any, now: number): number
+-- The tier of a species id, for analytics ("Common" for an unknown one, so it is never refused).
+local function tierOf(speciesId: string): string
+	local species = CritterCatalog.get(speciesId)
+	return if species then species.tier else "Common"
+end
+
+-- `auto`: the auto-collect pass, which logs only its economy flows (see the header).
+local function collect(player: Player, profile: any, now: number, auto: boolean?): number
+	IncomeService.accrue(profile, now) -- so the fill below is current (a no-op after guarded's)
+	local fill = Economy.storageFillRaw(profile)
 	local banked = IncomeService.collect(profile, now)
+	if banked > 0 then
+		AnalyticsService.economy(player, "DenCollect", banked, math.max(0, math.floor(profile.stored)))
+		AnalyticsService.economy(player, "Collect", banked, profile.glow)
+		if not auto then
+			AnalyticsService.track(player, "glow_collected", { amount = banked, storageFill = fill })
+		end
+	end
 	push(player)
 	if banked > 0 then
 		onboard(player, "collect")
@@ -442,6 +508,8 @@ local function collect(player: Player, profile: any, now: number): number
 end
 
 local function buyEgg(player: Player, profile: any, now: number): any
+	local price = Economy.eggCost(profile) -- what this egg costs (0 = rescue); guarded accrued
+	local denLevel = profile.denLevel
 	local critter = Economy.buyEgg(profile, now, {
 		tierRoll = random:NextNumber(),
 		speciesRoll = random:NextNumber(),
@@ -450,6 +518,12 @@ local function buyEgg(player: Player, profile: any, now: number): any
 		physicalPads = physicalPads(player),
 	})
 	if critter then
+		AnalyticsService.track(player, "egg_bought", {
+			tier = tierOf(critter.speciesId),
+			price = price,
+			denLevel = denLevel,
+		})
+		AnalyticsService.economy(player, "Egg", price, profile.glow) -- 0 (a rescue egg) logs nothing
 		push(player)
 		if critter.untradeable then
 			-- The free egg is the hatch. buyEgg (or push's auto-place) puts it straight on a pad,
@@ -468,11 +542,37 @@ local function buyEgg(player: Player, profile: any, now: number): any
 end
 
 local function upgradeDen(player: Player, profile: any, now: number): boolean
+	local cost = Economy.upgradeCost(profile.denLevel)
 	local ok = Economy.upgradeDen(profile, now)
 	if ok then
+		AnalyticsService.economy(player, "DenUpgrade", cost, profile.glow)
 		push(player)
 	end
 	return ok
+end
+
+-- Economy.buyGear's rules, from GearRules and Profile (Economy cannot require them: a cycle).
+local GEAR_SHOP = {
+	isGearId = Profile.isGearId,
+	level = Profile.gearLevel,
+	setLevel = Profile.setGearLevel,
+	upgradeCost = GearRules.upgradeCost,
+	switchedOn = function(gearId: any): boolean
+		return GearRules.switchedOn(Config.Gear, gearId)
+	end,
+}
+
+local function upgradeGear(player: Player, profile: any, now: number, gearId: any): boolean
+	if type(gearId) ~= "string" or #gearId > MAX_UID_LENGTH then
+		return false
+	end
+	local ok, _, spent = Economy.buyGear(profile, gearId, now, GEAR_SHOP)
+	if not ok then
+		return false
+	end
+	AnalyticsService.economy(player, "GearUpgrade", spent, profile.glow)
+	push(player)
+	return true
 end
 
 local function placeCritter(player: Player, profile: any, now: number, uid: any, placement: any, padIndex: any): boolean
@@ -491,6 +591,11 @@ local function placeCritter(player: Player, profile: any, now: number, uid: any,
 	local extraSlots = perks.extraVaultSlots(userId)
 	local ok = Economy.place(profile, uid, placement, padIndex, physicalPads(player), now, locked, extraSlots)
 	if ok then
+		local critter = profile.critters[uid]
+		AnalyticsService.track(player, "critter_placed", {
+			tier = tierOf(if critter then critter.speciesId else ""),
+			placement = placement,
+		})
 		push(player)
 		if placement == "Pad" then
 			onboard(player, "place")
@@ -524,13 +629,16 @@ local function guarded(name: string, failValue: any, handler: (Player, any, numb
 end
 
 local handlers = {
-	GetDenState = guarded(Net.Requests.GetDenState, nil, function(_player, profile, _now)
-		return Economy.denState(profile)
+	GetDenState = guarded(Net.Requests.GetDenState, nil, function(player, profile, _now)
+		return Economy.denState(profile, perks.extraVaultSlots(player.UserId))
 	end),
-	Collect = guarded(Net.Requests.Collect, 0, collect),
+	Collect = guarded(Net.Requests.Collect, 0, function(player, profile, now)
+		return collect(player, profile, now, false) -- client arguments never reach `auto`
+	end),
 	PlaceCritter = guarded(Net.Requests.PlaceCritter, false, placeCritter),
 	BuyEgg = guarded(Net.Requests.BuyEgg, nil, buyEgg),
 	UpgradeDen = guarded(Net.Requests.UpgradeDen, false, upgradeDen),
+	UpgradeGear = guarded(Net.Requests.UpgradeGear, false, upgradeGear),
 }
 
 -- Auto-collect pass: banks each online owner's stored Glow every Config.Purchases.autoCollectSeconds
@@ -543,7 +651,7 @@ local function autoCollectLoop()
 			local profile = DataService.getProfile(player.UserId)
 			local ok, active = pcall(perks.autoCollect, player.UserId)
 			if profile and ok and active == true then
-				local done, err = pcall(collect, player, profile, os.time())
+				local done, err = pcall(collect, player, profile, os.time(), true)
 				if not done then
 					warn(`[IncomeService] auto-collect failed for {player.UserId}: {err}`)
 				end

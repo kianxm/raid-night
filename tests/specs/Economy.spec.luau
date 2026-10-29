@@ -907,4 +907,198 @@ tests["timing rule: a boosted accrue first makes internal factor-1 accrues a no-
 	expect.eq(Economy.collect(p, NOW + 100), 200, "nor did collect's")
 end
 
+-- P2.8c: gear purchase (Economy.buyGear, the P2.10 handoff) ---------------------------------------
+
+local GearRules = require("../../src/Shared/GearRules")
+local Profile = require("../../src/Shared/Profile")
+
+-- The real rules, as IncomeService passes them; `gear` replaces Config.Gear for the switches.
+local function gearShop(gear: any?): Economy.GearShop
+	return {
+		isGearId = Profile.isGearId,
+		level = Profile.gearLevel,
+		setLevel = Profile.setGearLevel,
+		upgradeCost = GearRules.upgradeCost,
+		switchedOn = function(gearId: any): boolean
+			return GearRules.switchedOn(gear or Config.Gear, gearId)
+		end,
+	}
+end
+
+tests["buyGear buys level 1 at the item's price and spends banked Glow only"] = function()
+	local p = fixtures.veteran(1, NOW)
+	local price = Config.Gear.items.smoke.price
+	p.glow = price + 7
+	p.stored = 50
+	local ok, why, spent = Economy.buyGear(p, "smoke", NOW, gearShop())
+	expect.truthy(ok, why)
+	expect.eq(spent, price, "spent the price")
+	expect.eq(GearRules.upgradeCost("smoke", 0), price, "level 0 -> 1 costs the price")
+	expect.eq(Profile.gearLevel(p, "smoke"), 1, "owned at level 1")
+	expect.eq(p.glow, 7, "banked Glow paid it")
+	expect.eq(p.stored, 50, "stored Glow untouched")
+end
+
+tests["buyGear upgrades one level at a time at GearRules.upgradeCost, up to max level"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.glow = 10_000_000
+	local total = 0
+	for level = 0, Config.Gear.maxLevel - 1 do
+		local cost = GearRules.upgradeCost("grapple", level) :: number
+		local before = p.glow
+		local ok, why, spent = Economy.buyGear(p, "grapple", NOW, gearShop())
+		expect.truthy(ok, `level {level}: {why}`)
+		expect.eq(spent, cost, `cost from level {level}`)
+		expect.eq(p.glow, before - cost, "spent exactly the cost")
+		expect.eq(Profile.gearLevel(p, "grapple"), level + 1, "one level up")
+		total += cost
+	end
+	local before = p.glow
+	local ok, why = Economy.buyGear(p, "grapple", NOW, gearShop())
+	expect.falsy(ok, "past max level")
+	expect.eq(why, "gear is at max level", "reason")
+	expect.eq(p.glow, before, "nothing spent at max")
+	expect.eq(Profile.gearLevel(p, "grapple"), Config.Gear.maxLevel, "level unchanged")
+	expect.eq(Profile.gearLevel(p, "smoke"), 0, "other items untouched")
+	expect.truthy(total > 0, "a full upgrade path costs Glow")
+end
+
+tests["buyGear refuses without enough Glow, changing nothing"] = function()
+	local p = fixtures.veteran(1, NOW)
+	local price = Config.Gear.items.decoy.price
+	p.glow = price - 1
+	p.stored = 1_000_000 -- stored Glow is not spendable: collect first
+	local ok, why = Economy.buyGear(p, "decoy", NOW, gearShop())
+	expect.falsy(ok)
+	expect.eq(why, "not enough Glow")
+	expect.eq(p.glow, price - 1, "nothing spent")
+	expect.eq(Profile.gearLevel(p, "decoy"), 0, "not owned")
+	expect.eq(p.gear, nil, "no gear table written")
+end
+
+tests["buyGear refuses unknown and malformed gear ids"] = function()
+	for _, bad in { "jetpack", "", "Grapple", 1, true, {}, 0 / 0 } do
+		local p = fixtures.veteran(1, NOW)
+		p.glow = 1_000_000
+		local ok, why = Economy.buyGear(p, bad :: any, NOW, gearShop())
+		expect.falsy(ok, `id {tostring(bad)}`)
+		expect.eq(why, "unknown gear", "reason")
+		expect.eq(p.glow, 1_000_000, "nothing spent")
+		expect.eq(p.gear, nil, "nothing written")
+	end
+end
+
+tests["buyGear refuses NaN and infinite input: time, balance, a saved level or a price"] = function()
+	for _, badNow in { 0 / 0, math.huge, -math.huge, "1" } do
+		local p = fixtures.veteran(1, NOW)
+		p.glow = 1_000_000
+		local ok, why = Economy.buyGear(p, "smoke", badNow :: any, gearShop())
+		expect.falsy(ok, `now {tostring(badNow)}`)
+		expect.eq(why, "bad time")
+		expect.eq(p.glow, 1_000_000, "nothing spent")
+		expect.eq(p.storedUpdatedAt, NOW, "nothing accrued")
+	end
+	-- A NaN balance is never enough (NaN < cost is false, so a plain `<` check would pay).
+	local nanGlow = fixtures.veteran(1, NOW)
+	nanGlow.glow = 0 / 0
+	local ok, why = Economy.buyGear(nanGlow, "smoke", NOW, gearShop())
+	expect.falsy(ok, "NaN glow")
+	expect.eq(why, "not enough Glow")
+	expect.eq(Profile.gearLevel(nanGlow, "smoke"), 0, "not owned")
+	-- A corrupt saved level reads as 0 (Profile.gearLevel): it buys level 1 at the price.
+	local corrupt = fixtures.veteran(1, NOW)
+	corrupt.glow = 1_000_000
+	corrupt.gear = { smoke = 0 / 0 } :: any
+	expect.truthy(Economy.buyGear(corrupt, "smoke", NOW, gearShop()), "NaN level reads as 0")
+	expect.eq(Profile.gearLevel(corrupt, "smoke"), 1, "level 1")
+	expect.eq(corrupt.glow, 1_000_000 - Config.Gear.items.smoke.price, "paid the level-1 price")
+	-- A price that is not a positive finite number never sells: never free, never NaN.
+	for _, badCost in { 0 / 0, 0, -5, math.huge } do
+		local p = fixtures.veteran(1, NOW)
+		p.glow = 1_000_000
+		local shop = gearShop()
+		shop.upgradeCost = function(_gearId: any, _level: any): number?
+			return badCost
+		end
+		local refused, reason = Economy.buyGear(p, "smoke", NOW, shop)
+		expect.falsy(refused, `price {badCost}`)
+		expect.eq(reason, "no price")
+		expect.eq(p.glow, 1_000_000, "nothing spent")
+		expect.eq(Profile.gearLevel(p, "smoke"), 0, "not owned")
+	end
+end
+
+tests["buyGear respects the gear kill switches (Config.Gear.enabled and the lockpick's own)"] = function()
+	local allOff = { enabled = false, items = {} }
+	local lockpickOff = { enabled = true, items = { lockpick = { enabled = false } } }
+	local p = fixtures.veteran(1, NOW)
+	p.glow = 1_000_000
+	local ok, why = Economy.buyGear(p, "smoke", NOW, gearShop(allOff))
+	expect.falsy(ok, "all gear off")
+	expect.eq(why, "gear is switched off")
+	ok, why = Economy.buyGear(p, "lockpick", NOW, gearShop(lockpickOff))
+	expect.falsy(ok, "lockpick off")
+	expect.eq(why, "gear is switched off")
+	expect.eq(p.glow, 1_000_000, "nothing spent")
+	expect.truthy(Economy.buyGear(p, "smoke", NOW, gearShop(lockpickOff)), "other items still sell")
+	expect.eq(Config.Gear.enabled, true, "gear ships on")
+end
+
+tests["buyGear accrues first and spends nothing when the level cannot be written"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse")) -- 1 Glow/s
+	p.glow = 1_000_000
+	expect.truthy(Economy.buyGear(p, "smoke", NOW + 30, gearShop()), "bought")
+	expect.eq(p.stored, 30, "accrued at the old state first")
+	expect.eq(p.storedUpdatedAt, NOW + 30, "timestamp moved")
+	local shop = gearShop()
+	shop.setLevel = function(_profile: any, _gearId: any, _level: number): boolean
+		return false
+	end
+	local before = p.glow
+	local ok, why = Economy.buyGear(p, "smoke", NOW + 30, shop)
+	expect.falsy(ok)
+	expect.eq(why, "level not written")
+	expect.eq(p.glow, before, "never spent without the level")
+end
+
+tests["gear prices sit in the egg-price range of a raid-ready den (no retune, P2.8c check)"] = function()
+	-- Async raids open at den level Config.Protection.minDenLevel. Level-1 gear should cost a
+	-- handful of eggs there, and every item at level 1 must cost more than one egg at level 1.
+	local eggAtRaidLevel = Economy.eggPrice(Config.Protection.minDenLevel)
+	for id, item in Config.Gear.items :: any do
+		expect.truthy(item.price > Economy.eggPrice(1), `{id} costs more than a starter egg`)
+		local eggs = item.price / eggAtRaidLevel
+		expect.truthy(eggs >= 2 and eggs <= 15, `{id}: {eggs} eggs at den level {Config.Protection.minDenLevel}`)
+	end
+end
+
+-- P2.8c: DenState.vaultSlots and the glow_collected storage fill -----------------------------------
+
+tests["DenState.vaultSlots is the saved slots plus an active pass's slot"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.vaultSlots = 2
+	expect.eq(Economy.denState(p).vaultSlots, 2, "no pass")
+	expect.eq(Economy.denState(p, 0).vaultSlots, 2, "pass inactive")
+	expect.eq(Economy.denState(p, 1).vaultSlots, 3, "pass active")
+	for _, bad in { -1, 0.5, 0 / 0, math.huge } do
+		expect.eq(Economy.denState(p, bad).vaultSlots, 2, `bad extra {bad}`)
+	end
+end
+
+tests["storageFillRaw is stored over the cap, unclamped, and 0 for an empty den or bad values"] = function()
+	local p = fixtures.veteran(1, NOW)
+	expect.eq(Economy.storageFillRaw(p), 0, "no income, no cap")
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
+	local cap = Economy.storageCap(p)
+	p.stored = cap / 4
+	expect.eq(Economy.storageFillRaw(p), 0.25, "a quarter")
+	p.stored = cap * 1.5
+	expect.eq(Economy.storageFillRaw(p), 1.5, "past 1 when the cap shrank")
+	p.stored = 0 / 0
+	expect.eq(Economy.storageFillRaw(p), 0, "NaN")
+	p.stored = -3
+	expect.eq(Economy.storageFillRaw(p), 0, "negative")
+end
+
 return tests

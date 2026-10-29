@@ -256,6 +256,17 @@ Schema: `src/Shared/Analytics.luau` (pure, tested in `Analytics.spec`). Sender:
 `raided_offline` is logged on the defender when they are in the server that saved the debit,
 otherwise on the raider (`attributedTo = "Raider"`), since a profile no server holds has no Player.
 
+Economy call points (P2.8c): IncomeService logs `egg_bought` (price 0 for the rescue egg),
+`critter_placed` (PlaceCritter only, not auto-placement) and `glow_collected` (player collects; the
+auto-collect pass logs only its economy flows, to spare the per-player budget). PurchaseService
+logs `purchase` once per first grant of a receipt (never a redelivery) and once per pass purchase
+MarketplaceService confirms. Economy flows: Glow source `Collect`; Glow sinks `Egg`, `DenUpgrade`,
+`GearUpgrade`; DenGlow source `DenOfflineIncome` (the offline gap, when the first accrue of a load
+pays it) and `DenIncome` (online income summed inside the Glow-factor helper and logged before each
+collect and at the leave, not per accrue); DenGlow sink `DenCollect`. `RaidLoot` and `DenRaided`
+are EscrowService's. `rebirth` and the `Rebirth` sink wait for the rebirth request, which is not
+served yet (D-026's escrow check first).
+
 ## Money model
 
 - `stored`: Glow in the den. Accrues lazily. Stealable (25% per raid, capped by what is there).
@@ -289,6 +300,12 @@ otherwise on the raider (`attributedTo = "Raider"`), since a profile no server h
   `storedUpdatedAt` as they were.
 - `Net.DenState.ratePerSecond` and `storageCap` are unboosted (`denRate`, `storageCap`).
   Showing a boosted rate would be a contract change.
+- `Net.DenState.vaultSlots` (P2.8c, additive): the Vault slots the player can fill now,
+  `Economy.vaultCapacity(profile, extra)`: saved `vaultSlots` (1 + rebirths) plus 1 while the vault
+  slot pass's perk is active (owned, purchases on, policy known unrestricted). Critters already in
+  the Vault stay when it drops, so the Vault can hold more than this. `Economy.denState(profile,
+  extraVaultSlots?)`; IncomeService passes the pass's slot in every push and in `GetDenState`, and
+  PurchaseService re-pushes after the policy answer or a pass purchase turns a perk on.
 - **The Glow-factor helper (P2.8).** Server code accrues and collects only through
   `IncomeService.accrue(profile, now)` and `IncomeService.collect(profile, now)`, and a player's
   factor changes only through `IncomeService.setGlowInputs(userId, change, now)`, which accrues
@@ -296,15 +313,17 @@ otherwise on the raider (`attributedTo = "Raider"`), since a profile no server h
   server for its player accrues at factor 1 (offline income is unboosted). A source guard
   (`PurchaseSource.spec`) fails if `Economy.accrue`, `Economy.collect` or their boosted forms
   appear in `src/Server` outside the helper's markers.
-- **P2.8 gate.** One factor-1 accrue of online players remains: snapshots (`SnapshotService`
-  building through `Matchmaking.buildSnapshot`, matchmaking's handoff, tracked by the guard on
-  its own). Anything listed in the guard's `PENDING` makes it fail once it lands until it is
-  removed from the list, and the guard also fails if `Config.Flags.purchases` is on while any
-  remain. Landed in P2.8b (data): the escrow store's `loadProfile` accrues through
-  `IncomeService.accrue` (every profile it loads is loaded in that server, so online), and
-  `DataService.seedTestSession` (Studio only) accrues through the same helper, handed to
-  DataService by `EscrowService.start` (`DataService.setGlowAccrue`; DataService cannot require
-  IncomeService), refusing before any change when none is registered.
+- **P2.8 gate.** Every online accrue goes through the helper: no factor-1 accrue of an online
+  player remains, and the guard's `PENDING` is empty. Landed in P2.8b (data, #132): the escrow
+  store's `loadProfile` accrues through `IncomeService.accrue` (every profile it loads is loaded in
+  that server, so online), and `DataService.seedTestSession` (Studio only) accrues through the same
+  helper, handed to DataService by `EscrowService.start` (`DataService.setGlowAccrue`; DataService
+  cannot require IncomeService), refusing before any change when none is registered. Landed in
+  P2.8m (matchmaking, #133): `SnapshotService` accrues through `IncomeService.accrue` before
+  `Matchmaking.buildSnapshot`, whose own accrue is then a no-op. The guard (`PurchaseSource.spec`)
+  still fails if a new `Economy.accrue`, `Economy.collect` or `Economy.changeGlowInputs` call
+  appears in `src/Server` outside the helper's markers, or if a snapshot is built without the
+  helper's accrue first, and it keeps `Config.Flags.purchases` off while any such site exists.
   `Escrow.debitAbsentProfile` accrues an absent (offline) defender at factor 1, which is correct
   while VIP is online-only (D-061 (2)); reversing `vipBoostsOffline` must revisit it.
 
@@ -660,8 +679,18 @@ economy's (below).
   `"Interrupted"` (a lockpick), `"Ended"` (a decoy popped early); `gearId`, `userId`, `at`, and
   per item `endsAt`, `position`, `from`, `direction`, `radius`, `plot`, `reason`. To every player
   for the shared world, to the raider only for a pocket.
-- `Net.Requests.UpgradeGear` `(gearId) -> boolean` is reserved for economy's Glow purchase and
-  is **not served yet**. Its cost is `GearRules.upgradeCost(gearId, level)` (level 0 = buying it).
+- `Net.Requests.UpgradeGear` `(gearId) -> boolean`, served by IncomeService (P2.8c), Glow only,
+  never Robux. `Net.Limits.UpgradeGear` 5 per 10 s; the den accrues through the helper first.
+  `Economy.buyGear(profile, gearId, now, shop)` buys level 1 or upgrades one level: it checks a
+  finite `now`, a known id, the gear kill switches (`GearRules.switchedOn(Config.Gear, id)`, so
+  `Config.Gear.enabled` false or the lockpick's own switch refuses), not at max level, a price that
+  is a positive finite number (`GearRules.upgradeCost(gearId, level)`, level 0 = buying it), and
+  banked Glow >= the price (stored Glow never counts; a NaN balance is never enough). Then it
+  writes `Profile.setGearLevel(level + 1)` and spends, in one call that never yields. `shop` passes
+  GearRules' and Profile's functions in, because Economy cannot require them (they require
+  RaidRules, which requires Economy). On success the server fires `DenChanged`; the client asks
+  `GetGear` for the new level. A purchase mid-raid changes that raid's async charges only from the
+  next raid (charges fill at raid start).
 - Cooldowns and async charges are server memory, per player, cleared on leaving. Gear works only
   while `raids` is on (RaidService's `Escrow.canStartTransfer(Config.Flags, "Live", false)`).
 - Gear kill switches (D-068), inside `Config.Gear`, not `Config.Flags`, checked by
@@ -977,11 +1006,29 @@ runs on its own thread, so it can never turn a saved grant into `NotProcessedYet
 `Purchases.spec` simulates forced shutdowns at every step with redeliveries: each purchase is
 granted exactly once.
 
+### Shop offers
+
+`Net.Requests.GetShopOffers` `() -> ShopOffers` (P2.8c, additive), served by PurchaseService,
+`Net.Limits.GetShopOffers` 3 per 10 s. `ShopOffers = { policyKnown: boolean, offers: { ShopOffer } }`,
+`ShopOffer = { key, kind, id, price }`: `key` the `Config.Purchases` key, `kind` `"pass"` or the
+product's kind, `id` the Creator Dashboard id to prompt, `price` in Robux. The list is
+`Economy.shopOffers(Config.Purchases, policy, ownsPass)`: every item `purchaseOffered` allows,
+minus passes the player owns and the event pass while `currentEventId` is `""`; passes first, then
+products, each sorted by key. It waits up to 10 s for the player's PolicyService answer, then
+answers either way: a restricted player, or one whose policy is still unknown (`policyKnown`
+false), never sees a Robux-linked item unless its `offerRestricted` is true (D-061, D-065; at
+launch only `denTheme`, `gearSkin`, `escapeEmote`). Purchases off, or every id still 0: empty.
+Ask again after a purchase; the server re-checks everything at the receipt anyway.
+
 ### Lantern Night announcement
 
-`Net.Pushes.ServerAnnouncement` fired to all clients with kind `"LanternNight"` and payload
-`{ buyerUserId: number, buyerName: string (display name), endsAt: number (unix seconds) }` on
-every purchase (start or extension). The boost lives in the server's memory; a shutdown ends it.
+`Net.Pushes.ServerAnnouncement` fired to each client with kind `"LanternNight"` and payload
+`{ buyerUserId: number, buyerName: string (display name), endsAt: number (unix seconds),
+boosted: boolean }` on every purchase (start or extension), and once to a player who joins while
+one runs (after their PolicyService read, naming the latest buyer). `boosted` (P2.8c, additive) is
+whether the +50% applies to that recipient: purchases on and their policy known unrestricted. A
+client must not claim a boost, or show a buy button, when it is false. The boost lives in the
+server's memory; a shutdown ends it.
 
 ## Tradeability
 

@@ -442,6 +442,57 @@ function Economy.processReceipt(steps: ReceiptSteps): ReceiptDecision
 	return if steps.save() == true then "PurchaseGranted" else "NotProcessedYet"
 end
 
+--[[
+	What the shop may show one player (P2.8c, GetShopOffers; D-061, D-065): every pass and product
+	`purchaseOffered` allows, minus passes the player owns (`owns(key)`, MarketplaceService) and
+	the event pass while no event runs (`catalog.currentEventId` ""). A restricted player, or one
+	whose policy is still unknown, is never shown a Robux-linked item unless its offerRestricted
+	says so. Passes first, then products, each sorted by key. Fresh tables. `catalog` has
+	Config.Purchases' shape (tests pass their own).
+]]
+function Economy.shopOffers(catalog: any, policy: PurchasePolicy, owns: ((key: string) -> boolean)?): { Net.ShopOffer }
+	local offers: { Net.ShopOffer } = {}
+	if type(catalog) ~= "table" then
+		return offers
+	end
+	local ownsPass: (key: string) -> boolean = owns or function(_key: string): boolean
+		return false
+	end
+	local function add(group: any, isPass: boolean)
+		if type(group) ~= "table" then
+			return
+		end
+		local keys: { string } = {}
+		for key in group do
+			if type(key) == "string" then
+				table.insert(keys, key)
+			end
+		end
+		table.sort(keys)
+		for _, key in keys do
+			local item = group[key]
+			local available = if isPass
+				then ownsPass(key) ~= true
+				else type(item) == "table"
+					and (
+						item.kind ~= "eventPass"
+						or (type(catalog.currentEventId) == "string" and catalog.currentEventId ~= "")
+					)
+			if available and Economy.purchaseOffered(item, policy) then
+				table.insert(offers, {
+					key = key,
+					kind = if isPass then "pass" else item.kind,
+					id = item.id,
+					price = item.price,
+				})
+			end
+		end
+	end
+	add(catalog.passes, true)
+	add(catalog.products, false)
+	return offers
+end
+
 -- Share of the storage cap currently filled, 0..1. Drives the "storage nearly full" notification.
 function Economy.storageFillShare(profile: PlayerProfile): number
 	local capAmount = Economy.denRate(profile) * Economy.storageCapSeconds(profile.denLevel)
@@ -449,6 +500,20 @@ function Economy.storageFillShare(profile: PlayerProfile): number
 		return 0
 	end
 	return math.clamp(profile.stored / capAmount, 0, 1)
+end
+
+-- stored / storage cap, not clamped (it passes 1 when the cap shrank under stored Glow): the
+-- glow_collected analytics field. 0 for an empty cap or a value that is not a finite number >= 0.
+function Economy.storageFillRaw(profile: PlayerProfile): number
+	local capAmount = Economy.storageCap(profile)
+	if not (capAmount > 0) then
+		return 0
+	end
+	local share = profile.stored / capAmount
+	if share ~= share or share < 0 or share == math.huge then
+		return 0
+	end
+	return share
 end
 
 -- Cost to upgrade from `level` to `level + 1`, or nil at max level.
@@ -728,6 +793,62 @@ function Economy.upgradeDen(profile: PlayerProfile, now: number): (boolean, stri
 end
 
 --[[
+	Gear purchase (P2.10 handoff, D-068): buys a gear item (level 0 -> 1) or upgrades it one level
+	with banked Glow. Never Robux.
+
+	The rules it needs live in GearRules and Profile, which this module cannot require (they
+	require RaidRules, which requires Economy). So the caller passes them in as `shop`; the server
+	and the tests pass the real ones:
+	  { isGearId = Profile.isGearId, level = Profile.gearLevel, setLevel = Profile.setGearLevel,
+	    upgradeCost = GearRules.upgradeCost,
+	    switchedOn = function(id) return GearRules.switchedOn(Config.Gear, id) end }
+
+	Checks, first failure wins, before anything changes: a finite `now`, a known gear id, the
+	gear's kill switch (Config.Gear.enabled, or the item's own), not at max level (upgradeCost
+	nil), a usable price, and enough banked Glow (a NaN balance is never enough). Then it accrues
+	(factor 1: no-op on the server, which accrued through the helper with the same `now`), writes
+	the new level and spends the price, in one call that never yields.
+	Returns true, nil and the Glow spent; or false and a reason with no Glow spent and no level
+	changed (only a refused setLevel, after the accrue, can have moved storage forward).
+]]
+export type GearShop = {
+	isGearId: (value: any) -> boolean,
+	level: (profile: PlayerProfile, gearId: any) -> number,
+	setLevel: (profile: PlayerProfile, gearId: any, level: number) -> boolean,
+	upgradeCost: (gearId: any, level: any) -> number?,
+	switchedOn: (gearId: any) -> boolean,
+}
+
+function Economy.buyGear(profile: PlayerProfile, gearId: any, now: number, shop: GearShop): (boolean, string?, number?)
+	if type(now) ~= "number" or now ~= now or now == math.huge or now == -math.huge then
+		return false, "bad time", nil
+	end
+	if not shop.isGearId(gearId) then
+		return false, "unknown gear", nil
+	end
+	if shop.switchedOn(gearId) ~= true then
+		return false, "gear is switched off", nil
+	end
+	local level = shop.level(profile, gearId)
+	local cost = shop.upgradeCost(gearId, level)
+	if cost == nil then
+		return false, "gear is at max level", nil
+	end
+	if type(cost) ~= "number" or not (cost > 0) or cost == math.huge then
+		return false, "no price", nil -- a corrupt price overlay: never free, never NaN
+	end
+	if not (profile.glow >= cost) then
+		return false, "not enough Glow", nil
+	end
+	Economy.accrue(profile, now)
+	if shop.setLevel(profile, gearId, level + 1) ~= true then
+		return false, "level not written", nil
+	end
+	profile.glow -= cost
+	return true, nil, cost
+end
+
+--[[
 	Rescue egg (decision D-004): a player with no critters at all and not enough Glow (banked plus
 	stored) for an egg gets their next egg free. This is how a new player starts (Profile.new gives
 	0 Glow and no critters), and it means nobody can be raided into a dead end. It cannot be
@@ -863,8 +984,10 @@ function Economy.grantTutorialCritter(
 end
 
 -- The client's view of a den. Call accrue first so `stored` is current. Critters are copies,
--- ordered oldest first (then by uid) so the client gets a stable list.
-function Economy.denState(profile: PlayerProfile): Net.DenState
+-- ordered oldest first (then by uid) so the client gets a stable list. `vaultSlots` is
+-- vaultCapacity(profile, extraVaultSlots): the saved slots plus the vault slot pass's while its
+-- perk is active (the server passes it; nil or a bad value counts as 0).
+function Economy.denState(profile: PlayerProfile, extraVaultSlots: number?): Net.DenState
 	local critters: { Critter } = {}
 	for _, critter in profile.critters do
 		table.insert(critters, table.clone(critter))
@@ -883,6 +1006,7 @@ function Economy.denState(profile: PlayerProfile): Net.DenState
 		denLevel = profile.denLevel,
 		rebirths = profile.rebirths,
 		shieldUntil = profile.shieldUntil,
+		vaultSlots = Economy.vaultCapacity(profile, extraVaultSlots),
 		critters = critters,
 	}
 end
