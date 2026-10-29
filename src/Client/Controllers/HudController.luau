@@ -15,6 +15,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
+local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -28,12 +29,16 @@ local Ui = require(script.Parent.Parent:WaitForChild("Raid"):WaitForChild("Ui"))
 local Strings = require(Hud:WaitForChild("Strings"))
 local HudMath = require(Hud:WaitForChild("HudMath"))
 local HudLayout = require(Hud:WaitForChild("HudLayout"))
+local SettingsState = require(Hud:WaitForChild("SettingsState"))
 local Theme = require(script.Parent.Parent:WaitForChild("Ui"):WaitForChild("Theme"))
 local OnboardingController = require(script.Parent:WaitForChild("OnboardingController")) :: any
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
 local LOCKDOWN_REMOTE = Net.Requests.Lockdown
 local TOAST_SECONDS = 4
+local BANNER_SECONDS = 6
+local TOAST_Y = 56
+local TIMER_Y = 8
 
 local C = Theme.color
 local COLOR = {
@@ -245,20 +250,76 @@ local function build(): { [string]: any }
 	carryText.Size = UDim2.new(1, -16, 1, 0)
 	carryText.Position = UDim2.fromOffset(8, 0)
 
-	-- Short toast under the carried pill (raid alerts, Lockdown result).
-	local toast = panel(gui, "Toast", UDim2.fromOffset(280, 40), UDim2.new(0.5, -140, 0, 56))
+	-- Short toast under the carried pill (raid alerts, Lockdown result). The text colour carries
+	-- the kind (toast kinds in the design system: gold default, go, lock); the sub line is dim.
+	local toast = panel(gui, "Toast", UDim2.fromOffset(280, 40), UDim2.new(0.5, -140, 0, TOAST_Y))
 	toast.Visible = false
 	toast.ZIndex = 5
-	local toastText = label(toast, DISPLAY_FONT, 20)
+	local toastText = label(toast, DISPLAY_FONT, Theme.type.buttonText - 2, C.gold)
 	toastText.Size = UDim2.new(1, -16, 1, 0)
 	toastText.Position = UDim2.fromOffset(8, 0)
 	toastText.ZIndex = 6
-	local toastSub = label(toast, BODY_FONT, 14)
+	local toastSub = label(toast, BODY_FONT, Theme.type.caption + 2, C.inkDim)
 	toastSub.Name = "Sub"
 	toastSub.Size = UDim2.new(1, -16, 0, 22)
 	toastSub.Position = UDim2.fromOffset(8, 32)
 	toastSub.ZIndex = 6
 	toastSub.Visible = false
+
+	-- Breach banner (Breach.dc.html): the only pulsing element. Siren tile, revenge title, one
+	-- dim line. Top-centre, over the carried pill, which a defender is not showing.
+	local bannerWidth = if DESKTOP then 560 else 430
+	local banner = panel(gui, "Breach", UDim2.new(0.92, 0, 0, 64), UDim2.new(0.5, 0, 0, 8))
+	banner.AnchorPoint = Vector2.new(0.5, 0)
+	banner.Visible = false
+	banner.ZIndex = 7
+	local bannerCap = Instance.new("UISizeConstraint")
+	bannerCap.MaxSize = Vector2.new(bannerWidth, 64)
+	bannerCap.Parent = banner
+	local bannerRim = banner:FindFirstChildOfClass("UIStroke") :: UIStroke
+	bannerRim.Thickness = Theme.stroke.heavy
+	local siren = Instance.new("Frame")
+	siren.Name = "Siren"
+	siren.Size = UDim2.fromOffset(44, 44)
+	siren.Position = UDim2.new(0, 8, 0.5, -22)
+	siren.BackgroundColor3 = C.revenge
+	siren.BorderSizePixel = 0
+	siren.ZIndex = 8
+	Theme.corner(siren, Theme.radius.lg)
+	Theme.outline(siren, Theme.stroke.normal)
+	Theme.gradient(siren, 0.2)
+	siren.Parent = banner
+	local sirenMark = label(siren, DISPLAY_FONT, Theme.type.titleLg, C.onAccent)
+	sirenMark.Text = "!"
+	sirenMark.ZIndex = 9
+	local bannerTitle = label(banner, DISPLAY_FONT, Theme.type.title - 2, C.revenge)
+	bannerTitle.Name = "Title"
+	bannerTitle.Size = UDim2.new(1, -72, 0, 28)
+	bannerTitle.Position = UDim2.fromOffset(60, 6)
+	bannerTitle.TextXAlignment = Enum.TextXAlignment.Left
+	bannerTitle.ZIndex = 8
+	local bannerSub = label(banner, BODY_FONT, Theme.type.label, C.inkDim)
+	bannerSub.Name = "Sub"
+	bannerSub.Size = UDim2.new(1, -72, 0, 22)
+	bannerSub.Position = UDim2.fromOffset(60, 36)
+	bannerSub.TextXAlignment = Enum.TextXAlignment.Left
+	bannerSub.ZIndex = 8
+
+	-- Lockdown timer (Lockdown.dc.html): lock-purple pill, top-centre, only while sealed.
+	local timer = panel(gui, "LockdownTimer", UDim2.fromOffset(250, 40), UDim2.new(0.5, -125, 0, TIMER_Y))
+	timer.Visible = false
+	timer.ZIndex = 4
+	(timer:FindFirstChildOfClass("UIStroke") :: UIStroke).Color = C.lock
+	local timerTitle = label(timer, DISPLAY_FONT, Theme.type.buttonText - 2, C.lock)
+	timerTitle.Size = UDim2.new(1, -90, 1, 0)
+	timerTitle.Position = UDim2.fromOffset(12, 0)
+	timerTitle.TextXAlignment = Enum.TextXAlignment.Left
+	timerTitle.ZIndex = 5
+	local timerClock = label(timer, DISPLAY_FONT, Theme.type.number - 4, C.ink)
+	timerClock.Size = UDim2.fromOffset(72, 40)
+	timerClock.Position = UDim2.new(1, -80, 0, 0)
+	timerClock.TextXAlignment = Enum.TextXAlignment.Right
+	timerClock.ZIndex = 5
 
 	-- Right column, above the default jump button (bottom ~150 px stays clear).
 	local column = Instance.new("Frame")
@@ -401,6 +462,13 @@ local function build(): { [string]: any }
 		toast = toast,
 		toastText = toastText,
 		toastSub = toastSub,
+		banner = banner,
+		bannerRim = bannerRim,
+		bannerTitle = bannerTitle,
+		bannerSub = bannerSub,
+		timer = timer,
+		timerTitle = timerTitle,
+		timerClock = timerClock,
 		collect = collect,
 		collectTitle = collectTitle,
 		collectSub = collectSub,
@@ -505,10 +573,16 @@ function HudController.start()
 		ui.oddsPanel.Visible = false
 	end)
 	local toastToken = 0
-	local function showToast(text: string, sub: string?)
+	-- kind picks the text colour: "gold" (default), "go", "lock" or "plain".
+	local function showToast(text: string, sub: string?, kind: string?)
 		toastToken += 1
 		local token = toastToken
 		ui.toastText.Text = text
+		ui.toastText.TextColor3 = if kind == "go"
+			then C.go
+			elseif kind == "lock" then C.lock
+			elseif kind == "plain" then C.ink
+			else C.gold
 		-- A second short line grows the toast; the main line keeps the top 40 px.
 		ui.toastSub.Text = sub or ""
 		ui.toastSub.Visible = sub ~= nil
@@ -522,10 +596,48 @@ function HudController.start()
 		end)
 	end
 
+	-- Breach banner. It pulses its rim unless Reduced motion is on; the pulse stops when it hides.
+	local bannerToken = 0
+	local pulse: Tween? = nil
+	local function showBanner(title: string)
+		bannerToken += 1
+		local token = bannerToken
+		ui.bannerTitle.Text = title
+		ui.bannerSub.Text = if DESKTOP then Strings.breachSubDesktop else Strings.breachSub
+		ui.banner.Visible = true
+		if pulse then
+			pulse:Cancel()
+			pulse = nil
+		end
+		ui.bannerRim.Color = C.night900
+		if not SettingsState.get().reducedMotion then
+			local t = TweenService:Create(
+				ui.bannerRim,
+				TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+				{ Color = C.revenge }
+			)
+			pulse = t
+			t:Play()
+		end
+		task.delay(BANNER_SECONDS, function()
+			if token == bannerToken then
+				ui.banner.Visible = false
+				if pulse then
+					pulse:Cancel()
+					pulse = nil
+				end
+			end
+		end)
+	end
+
 	-- No optimistic state: the result only picks a toast; the button follows the den attributes.
 	ui.lock.Activated:Connect(function()
 		request(LOCKDOWN_REMOTE, busy, function(result)
-			showToast(if result == true then Strings.lockdownStarted else Strings.lockdownRefused)
+			showToast(
+				if result == true then Strings.lockdownStarted else Strings.lockdownRefused,
+				nil,
+				if result == true then "lock" else nil
+			)
 		end)
 	end)
 
@@ -557,7 +669,11 @@ function HudController.start()
 		end,
 		lockdown = function()
 			request(LOCKDOWN_REMOTE, busy, function(result)
-				showToast(if result == true then Strings.lockdownStarted else Strings.lockdownRefused)
+				showToast(
+					if result == true then Strings.lockdownStarted else Strings.lockdownRefused,
+					nil,
+					if result == true then "lock" else nil
+				)
 			end)
 		end,
 	}
@@ -585,7 +701,9 @@ function HudController.start()
 				local found = Players:GetPlayerByUserId(raiderUserId)
 				name = if found then found.DisplayName else nil
 			end
-			showToast(if name then Strings.format(Strings.beingRaided, { name = name }) else Strings.beingRaidedUnknown)
+			showBanner(
+				if name then Strings.format(Strings.beingRaided, { name = name }) else Strings.beingRaidedUnknown
+			)
 		end)
 	end)
 
@@ -603,9 +721,9 @@ function HudController.start()
 			local species = if type(speciesId) == "string" then CritterCatalog.get(speciesId) else nil
 			local name = if species then species.name else "?"
 			if payload.raidId == "" then
-				showToast(Strings.format(Strings.dropped, { name = name }))
+				showToast(Strings.format(Strings.dropped, { name = name }), nil, "plain")
 			elseif payload.escaped == true then
-				showToast(Strings.format(Strings.stolen, { name = name }))
+				showToast(Strings.format(Strings.stolen, { name = name }), nil, "go")
 			else
 				showToast(Strings.stealUnconfirmed, Strings.stealUnconfirmedSub)
 			end
@@ -684,6 +802,7 @@ function HudController.start()
 		ui.carry.Visible = species ~= nil
 		if species then
 			ui.carryText.Text = Strings.format(Strings.carrying, { name = species.name, tier = species.tier })
+			ui.carryText.TextColor3 = C.tier[species.tier] or C.ink
 		end
 
 		-- Lockdown button (rail on phone, Q slot on PC).
@@ -702,6 +821,15 @@ function HudController.start()
 		else
 			ui.lockSub.Text = ""
 			setEnabled(ui.lock, true, COLOR.lock)
+		end
+		-- Lockdown timer pill; the toast slides below it so neither covers the other.
+		local sealed = status == "active"
+		ui.timer.Visible = sealed
+		ui.timer.Position = UDim2.new(0.5, -125, 0, if ui.carry.Visible then TOAST_Y else TIMER_Y)
+		ui.toast.Position = UDim2.new(0.5, -140, 0, if sealed then TOAST_Y + 48 else TOAST_Y)
+		if sealed then
+			ui.timerTitle.Text = Strings.lockdownStarted
+			ui.timerClock.Text = HudMath.clock(left)
 		end
 		local hbLock = ui.hotbar.lockdown
 		if hbLock then

@@ -7,6 +7,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local Client = script.Parent.Parent
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -16,13 +17,14 @@ local CritterCatalog = require(Shared:WaitForChild("CritterCatalog")) :: any
 local Ui = require(Client:WaitForChild("Raid"):WaitForChild("Ui"))
 local Strings = require(Client:WaitForChild("Hud"):WaitForChild("Strings"))
 local InventoryMath = require(Client:WaitForChild("Hud"):WaitForChild("InventoryMath"))
+local CritterCard = require(Client:WaitForChild("Ui"):WaitForChild("CritterCard"))
 local Request = require(Client:WaitForChild("Request"))
 local MenuController = require(script.Parent:WaitForChild("MenuController")) :: any
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
+local InventoryController = require(script.Parent:WaitForChild("InventoryController")) :: any
+local Theme = Ui.theme
 
 local DenManageController = {}
-
-local CELL = 70
 
 local function nameOf(speciesId: string): string
 	local s = CritterCatalog.get(speciesId)
@@ -34,25 +36,6 @@ local function tierOf(speciesId: string): string?
 	return if s then s.tier else nil
 end
 
-local function cell(parent: Instance, text: string, color: Color3, selected: boolean, order: number): TextButton
-	local b = Instance.new("TextButton")
-	b.LayoutOrder = order
-	b.BackgroundColor3 = color
-	b.Text = text
-	b.Font = Ui.BODY
-	b.TextSize = 13
-	b.TextWrapped = true
-	b.TextColor3 = Ui.COLOR.outline
-	b.ZIndex = 10
-	Ui.round(b, 10)
-	Ui.outline(b, if selected then 5 else 2)
-	if selected then
-		(b:FindFirstChildOfClass("UIStroke") :: UIStroke).Color = Ui.COLOR.text
-	end
-	b.Parent = parent
-	return b
-end
-
 function DenManageController.start()
 	MenuController.register({
 		id = "Den",
@@ -60,16 +43,22 @@ function DenManageController.start()
 		color = Ui.COLOR.glow,
 		title = Strings.denTitle,
 		build = function(body)
+			-- PC (DeskCollection.dc.html): a wider popup, five cards across.
+			local cap = body.Parent and body.Parent:FindFirstChildOfClass("UISizeConstraint")
+			if cap and not UserInputService.TouchEnabled then
+				cap.MaxSize = Vector2.new(720, 560)
+			end
 			local selected: string? = nil
 
-			local status = Ui.label(body, Ui.BODY, 16, Ui.COLOR.dim)
+			local status = Ui.label(body, Ui.BODY, Theme.type.body, Theme.color.inkDim)
 			status.Name = "Status"
 			status.LayoutOrder = 0
 			status.Size = UDim2.new(1, -8, 0, 24)
 			status.Text = Strings.denPickHint
 			status.ZIndex = 10
 
-			local counts = Ui.label(body, Ui.DISPLAY, 18)
+			local counts = Ui.label(body, Ui.DISPLAY, Theme.type.numberSm)
+			counts.TextXAlignment = Enum.TextXAlignment.Left
 			counts.Name = "Counts"
 			counts.LayoutOrder = 1
 			counts.Size = UDim2.new(1, -8, 0, 24)
@@ -83,7 +72,7 @@ function DenManageController.start()
 			grid.AutomaticSize = Enum.AutomaticSize.Y
 			grid.ZIndex = 9
 			local layout = Instance.new("UIGridLayout")
-			layout.CellSize = UDim2.fromOffset(CELL, CELL)
+			layout.CellSize = UDim2.fromOffset(CritterCard.WIDTH, CritterCard.HEIGHT)
 			layout.CellPadding = UDim2.fromOffset(6, 6)
 			layout.SortOrder = Enum.SortOrder.LayoutOrder
 			layout.Parent = grid
@@ -94,7 +83,7 @@ function DenManageController.start()
 			chips:ClearAllChildren()
 			chips.LayoutOrder = 3
 			local chipLayout = Instance.new("UIGridLayout")
-			chipLayout.CellSize = UDim2.fromOffset(CELL, CELL)
+			chipLayout.CellSize = UDim2.fromOffset(CritterCard.WIDTH, CritterCard.HEIGHT)
 			chipLayout.CellPadding = UDim2.fromOffset(6, 6)
 			chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
 			chipLayout.Parent = chips
@@ -150,6 +139,7 @@ function DenManageController.start()
 				if not state then
 					return
 				end
+				local rebirths = state.rebirths or 0
 				for _, parent in { grid, chips } do
 					for _, child in parent:GetChildren() do
 						if child:IsA("GuiButton") then
@@ -165,9 +155,10 @@ function DenManageController.start()
 					if c then
 						used += 1
 					end
-					local text = if c then nameOf(c.speciesId) else Strings.denPadEmpty
-					local color = if c then Ui.COLOR.glow else Ui.COLOR.disabled
-					local b = cell(grid, text, color, c ~= nil and c.uid == selected, slot.index)
+					local info = if c
+						then InventoryController.cardInfo(c, rebirths)
+						else { name = Strings.denPadEmpty, tier = nil, caption = "" }
+					local b = CritterCard.button(grid, slot.index, info, c ~= nil and c.uid == selected)
 					b.Activated:Connect(function()
 						if c and (selected == nil or selected == c.uid) then
 							pick(c.uid, nameOf(c.speciesId))
@@ -178,7 +169,7 @@ function DenManageController.start()
 				end
 				local vault = InventoryMath.inPlacement(state.critters, "Vault", tierOf)
 				for i, c in vault do
-					local b = cell(chips, nameOf(c.speciesId), Ui.COLOR.gold, c.uid == selected, i)
+					local b = CritterCard.button(chips, i, InventoryController.cardInfo(c, rebirths), c.uid == selected)
 					b.Activated:Connect(function()
 						pick(c.uid, nameOf(c.speciesId))
 					end)
