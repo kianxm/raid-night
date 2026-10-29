@@ -218,7 +218,38 @@ memory instead, so test ids never reach a real pool.
 - `Net.Requests.ReportBlocked` (RemoteEvent, `{ number }`): distinct positive whole userIds, at
   most `Config.Matchmaking.maxBlockedUserIds`; anything else is ignored.
 - Limits per 10 s: `Net.Limits.GetRaidTargets` 3 (and one call at a time per player),
-  `Net.Limits.ReportBlocked` 2.
+  `Net.Limits.ReportBlocked` 2, `Net.Limits.JoinRevengeServer` 2.
+
+Live revenge (P1.9): join the server of the raider who robbed you while they are online.
+
+- `RaidTarget.raiderOnline: boolean?` is set on revenge rows: true when the raider is in this
+  server or has a fresh `Presence` row for another server of this place (cached 15 s). A hint
+  for showing the button; missing or false means offline or unknown.
+- `Net.Requests.JoinRevengeServer` (RemoteFunction, `(revengeRaidId) -> Net.RevengeJoinStatus`),
+  one call at a time and one teleport in flight per player. The server checks, from its own
+  state only: `Escrow.canStartTransfer(Config.Flags, "Live", true)` (so `raids` and
+  `asyncRaids`), then `Matchmaking.liveRevengeToken` on the caller's own profile (token held,
+  unexpired, not self, the live pair limit `min(maxRaidsPerPairPerDay, maxStealsPerPairPerDay)`
+  not reached), and no block either way (session reports, else snapshot lists; unreadable
+  refuses as `Busy`). Raider in this server: the caller lands at once. Otherwise
+  `Matchmaking.presenceRoute` must say `Teleport` and the server calls `TeleportAsync` with
+  `TeleportOptions.ServerInstanceId` = the presence `jobId`.
+- `Net.RevengeJoinStatus` `{ state, revengeRaidId, targetUserId?, reason? }`: `Teleporting`,
+  `Arrived` or `Failed`. Reasons: `SwitchedOff`, `Invalid`, `NoToken`, `Expired`,
+  `Unavailable` (blocked, either way; never says which), `PairLimit`, `Busy`, `RaiderOffline`,
+  `ServerFull`, `ServerGone`, `TeleportFailed`. On the last five the UI offers the async revenge
+  raid (`StartRaid(targetUserId, revengeRaidId)`) instead.
+- `Net.Pushes.RevengeJoinStatus` (same payload): a `Failed` after `Teleporting`
+  (TeleportInitFailed), and the landing server's `Arrived` or `Failed`.
+- Teleport data is `{ liveRevengeRaidId }` and only a hint (`Matchmaking.readRevengeHint`):
+  clients can forge it. After the arriving player's profile loads, the landing server repeats
+  every check on that profile and needs the raider in THIS server with a loaded profile and a
+  den. Then the character lands on the street in front of the raider's den
+  (`Matchmaking.revengeLanding`, outside every den) and the revenge is active in server memory.
+- A token is never spent by any of this, including a failed teleport. It is spent only when a
+  revenge raid starts. `MatchmakingService.getLiveRevenge(player)` re-checks everything (no
+  yield) on every call. Lockdown still blocks entry (D-013) and the live loss rules apply
+  unchanged.
 
 ## Kill switches
 
