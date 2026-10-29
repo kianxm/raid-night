@@ -13,6 +13,8 @@ for _, name in
 		"HudController",
 		"MenuController", -- before the screens that register with it
 		"ShopController",
+		"InventoryController",
+		"DenManageController",
 		"RaidLogController",
 		"DenStatusController",
 		"RaidPortalController",
