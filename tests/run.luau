@@ -49,6 +49,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "AsyncRaidRules",
+		load = function()
+			return require("./specs/AsyncRaidRules.spec")
+		end,
+	},
+	{
 		name = "LiveLossRules",
 		load = function()
 			return require("./specs/LiveLossRules.spec")
@@ -58,6 +64,18 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		name = "RaidServiceSource",
 		load = function()
 			return require("./specs/RaidServiceSource.spec")
+		end,
+	},
+	{
+		name = "Replay",
+		load = function()
+			return require("./specs/Replay.spec")
+		end,
+	},
+	{
+		name = "Matchmaking",
+		load = function()
+			return require("./specs/Matchmaking.spec")
 		end,
 	},
 	{
@@ -79,6 +97,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "EscrowServiceSource",
+		load = function()
+			return require("./specs/EscrowServiceSource.spec")
+		end,
+	},
+	{
 		name = "EscrowKillSwitch",
 		load = function()
 			return require("./specs/EscrowKillSwitch.spec")
@@ -88,6 +112,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		name = "TestProfiles",
 		load = function()
 			return require("./specs/TestProfiles.spec")
+		end,
+	},
+	{
+		name = "TestSessions",
+		load = function()
+			return require("./specs/TestSessions.spec")
 		end,
 	},
 	{

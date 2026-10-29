@@ -98,13 +98,36 @@ end
 --[[
 	Studio test ids (decision D-019): whole numbers at or below TEST_USER_ID_MAX. No Roblox account
 	has one, and they stay clear of Studio's Local Server test players (Player1 is -1, Player2 is
-	-2, ...). DataService holds a test profile only in Studio with memory persistence, so a test id
-	never reaches a DataStore.
+	-2, ...). DataService holds a test profile only in Studio with memory persistence. A test id
+	reaches the place's DataStores only through a Studio test session (DataService.loadTestSession,
+	D-056), behind Studio, the StudioTestSessions switch and DataStore persistence.
 ]]
 Profile.TEST_USER_ID_MAX = -1_000_000
 
 function Profile.isTestUserId(userId: number): boolean
 	return type(userId) == "number" and userId % 1 == 0 and userId <= Profile.TEST_USER_ID_MAX
+end
+
+local function isFinite(value: any): boolean
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+end
+
+--[[
+	Marks the raid log seen at `now`: the server's clock (os.time()), never a client value.
+	Forward only: a `now` that is not a finite number, or is earlier than the stored time, is
+	ignored. A stored value that is not finite counts as never seen (0), so a bad save cannot pin
+	it. The field is optional (missing = never), so it needs no migration. Returns whether it wrote.
+]]
+function Profile.markRaidLogSeen(profile: PlayerProfile, now: number): boolean
+	if not isFinite(now) then
+		return false
+	end
+	local stored = profile.raidLogSeenAt
+	if now < (if isFinite(stored) then stored :: number else 0) then
+		return false
+	end
+	profile.raidLogSeenAt = now
+	return true
 end
 
 --[[

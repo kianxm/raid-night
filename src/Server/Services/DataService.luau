@@ -26,6 +26,8 @@
 	  getProfile(userId)      the live profile for a player in THIS server, or nil
 	  onProfileLoaded(fn)     fn(player, profile) after a load; also runs for already-loaded ones
 	  onProfileReleasing(fn)  fn(userId, profile) right before the final save; must not yield
+	  markRaidLogSeen(userId, now)  sets the loaded profile's raidLogSeenAt to the server's now
+	                          (Profile.markRaidLogSeen: forward only). No-op if not loaded here
 	  saveNow(userId, confirm)  saves now and yields until a save whose written data passes
 	                          confirm(savedData) lands: (true) or (false, reason). Bounded: 3 tries
 	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
@@ -36,10 +38,27 @@
 	                          switch below) or nil (start() has not run yet, or ProfileStore is
 	                          still checking access). nil means "not decided": never pick a mode
 	                          from it, ask again later
-	  sendMessage             Phase 1, errors until then
+	  sendMessage(userId, topic, data)  queues { topic, data } on the user's profile (ProfileStore
+	                          message), loaded anywhere or not. Yields up to 15 s: (true) once
+	                          written, else (false, reason); a write still pending may land later,
+	                          so every message must be safe to receive twice
+	  onMessage(topic, fn)    fn(userId, data) for each message of that topic to a profile loaded
+	                          here (on load for queued ones, then on its saves). It must not yield;
+	                          once it returns the message is processed, and it leaves the queue in
+	                          the same save as whatever fn changed. An error, or no listener, keeps
+	                          it queued for the profile's next load. Register in start()
+	  updateOffline(userId, fn)  fn(profile) on the saved profile of a player NO server holds, in
+	                          one atomic write that lands only while no session lock is held (see
+	                          the section near the end). For EscrowService's async debits
+	  peekOffline(userId)     Studio-only, read-only copy of a saved profile (playtests)
 	  loadTestProfile(userId, profile), releaseTestProfile(userId), guardTestRelease(guard)
 	                          Studio-only fake profiles for RaidService's single-client test hook
 	                          (decision D-019), memory persistence only. See the section at the end.
+	  loadTestSession(userId), releaseTestSession(userId), onTestSessionLoaded(fn), testSessionIds()
+	                          Studio-only test SESSIONS (P1.10d): a real ProfileStore session for a
+	                          reserved test id, held and saved like a player's, DataStore
+	                          persistence only, behind the StudioTestSessions switch. Also
+	                          ServerStorage.DataTestHook. See the last section.
 
 	Studio memory switch (D-019). To play in Studio with API access on but save NOTHING, set a
 	boolean attribute on ServerStorage before pressing Play (Properties, or the command bar in
@@ -51,15 +70,14 @@
 	DataStore. Missing or false: normal behavior. Outside Studio it is never read. Set it back to
 	false (or delete it) to test real saves again.
 
-	TODO (Phase 1, async core):
-	  [ ] Message handler: apply incoming escrow debits (Escrow.debitDefender) inside this session
-	  [ ] sendMessage via ProfileStore:MessageAsync. It retries forever internally, so call it from
-	      a background thread; the escrow record and recovery sweep stay the source of truth.
-	      The queue keeps at most 1000 messages per profile and drops the oldest.
-	  [ ] withOfflineProfile(userId, fn): load an offline profile, run fn, save, release
-	      (used by EscrowService when the defender is not online anywhere)
+	Messages (P1.1) ride ProfileStore's queue in the profile's own key: it keeps at most 1000 per
+	profile and drops the oldest, and MessageAsync retries forever, so sendMessage runs it on its
+	own thread and waits a bounded time. Messages are wake-ups, never the only record of anything:
+	EscrowService's records and recovery stay the source of truth.
 ]]
 
+local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -68,6 +86,8 @@ local ServerStorage = game:GetService("ServerStorage")
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore) :: any
 local Profile = require(ReplicatedStorage.Shared.Profile)
 local Types = require(ReplicatedStorage.Shared.Types)
+local Economy = require(ReplicatedStorage.Shared.Economy) -- Studio test-session seed only
+local CritterCatalog = require(ReplicatedStorage.Shared.CritterCatalog) -- Studio test-session seed only
 
 type PlayerProfile = Types.PlayerProfile
 type Session = any -- a ProfileStore profile; the vendored module is not strictly typed
@@ -81,6 +101,8 @@ local LOAD_TIMEOUT_SECONDS = 60
 local SAVE_NOW_ATTEMPTS = 3
 local SAVE_NOW_WAIT_SECONDS = 10
 local SAVE_NOW_FIRST_BACKOFF_SECONDS = 2
+local MESSAGE_SEND_WAIT_SECONDS = 15
+local OFFLINE_RETRY_DELAYS = { 1, 2, 4 } -- seconds between offline-write attempts
 
 local MESSAGE_LOAD_FAILED = "We couldn't load your save, so we stopped before anything changed. "
 	.. "Nothing was lost. Please rejoin in a minute."
@@ -90,6 +112,9 @@ local MESSAGE_SESSION_LOST = "Your save was opened in another server. Please rej
 
 -- Studio-only memory switch (decision D-019). Read once, in start(), and only in Studio.
 local MEMORY_SWITCH = "StudioMemoryProfiles"
+-- Studio-only test sessions (P1.10d). Read on every use, and only behind RunService:IsStudio().
+local TEST_SESSION_SWITCH = "StudioTestSessions"
+local TEST_SEED_DEFAULT = 3 -- critters a DataTestHook "seed" adds when no count is given
 
 local DataService = {}
 
@@ -105,6 +130,13 @@ local leaving: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any --
 local handled: { [Player]: true } = setmetatable({}, { __mode = "k" }) :: any -- loading or loaded
 local testProfiles: { [number]: PlayerProfile } = {} -- Studio only (D-019); never saved
 local testReleaseGuard: ((userId: number) -> string?)? = nil -- set by EscrowService
+-- Studio only (P1.10d): ProfileStore sessions for test ids, filled only by loadTestSession.
+local testSessions: { [number]: Session } = {}
+local testLoading: { [number]: true } = {}
+local testSessionListeners: { (number, PlayerProfile) -> () } = {}
+local installTestHook: () -> () -- Studio only; defined with the test sessions at the end
+local messageListeners: { [string]: (number, any) -> () } = {}
+local rawProfiles: DataStore? = nil -- the profiles DataStore itself, for updateOffline only
 local memoryOnly = false -- Studio memory switch on: every profile is in ProfileStore's mock store
 -- Set once by start(), after the switch is read. Until then persistence() is nil, so nothing
 -- (EscrowService above all) can choose a storage mode the switch would contradict.
@@ -143,6 +175,28 @@ local function runReleasing(userId: number, profile: PlayerProfile)
 			warn(`[DataService] onProfileReleasing listener failed for {userId}: {err}`)
 		end
 	end
+end
+
+-- One ProfileStore message { topic, data } for a profile loaded here (onMessage). The listener
+-- runs on this thread; processed() only once it returns, so the message leaves the queue in the
+-- same save that writes whatever the listener changed. Malformed messages are dropped.
+local function handleMessage(userId: number, message: any, processed: () -> ())
+	if type(message) ~= "table" or type(message.topic) ~= "string" then
+		warn(`[DataService] dropping a malformed message for {userId}`)
+		processed()
+		return
+	end
+	local listener = messageListeners[message.topic]
+	if listener == nil then
+		warn(`[DataService] no listener for message topic {message.topic}; kept for {userId}'s next load`)
+		return
+	end
+	local ok, err = pcall(listener, userId, message.data)
+	if not ok then
+		warn(`[DataService] {message.topic} message for {userId} failed; kept for their next load: {err}`)
+		return
+	end
+	processed()
 end
 
 local function onPlayerAdded(player: Player)
@@ -205,6 +259,10 @@ local function onPlayerAdded(player: Player)
 
 	sessions[userId] = { session = session, player = player }
 	print(`[DataService] loaded {userId} (schema {profile.schemaVersion}, glow {profile.glow})`)
+	-- Queued messages are handed over now, later ones after each save; only while active.
+	session:MessageHandler(function(message: any, processed: () -> ())
+		handleMessage(userId, message, processed)
+	end)
 	for _, fn in table.clone(loadedListeners) do
 		task.spawn(fn, player, profile)
 	end
@@ -256,12 +314,17 @@ function DataService.start()
 		end
 		print(`[DataService] shutting down; ProfileStore is saving and releasing {count} profile(s)`)
 	end)
+
+	if RunService:IsStudio() then
+		installTestHook() -- every command also needs the StudioTestSessions switch (P1.10d)
+	end
 end
 
 -- Returns the live profile for an online player in THIS server, or nil (not loaded yet, failed,
 -- or left). Mutations to the returned table are saved. Never cache it across a yield without
 -- calling getProfile again: the session can end while you wait. Also returns a Studio test
--- profile (loadTestProfile), which is never saved.
+-- profile (loadTestProfile), which is never saved, and a Studio test session's profile
+-- (loadTestSession), which saves like a player's.
 function DataService.getProfile(userId: number): PlayerProfile?
 	local test = testProfiles[userId]
 	if test then
@@ -270,6 +333,10 @@ function DataService.getProfile(userId: number): PlayerProfile?
 	local entry = sessions[userId]
 	if entry and entry.session:IsActive() then
 		return entry.session.Data
+	end
+	local studio = testSessions[userId] -- Studio only (loadTestSession); always empty in a live server
+	if studio and studio:IsActive() then
+		return studio.Data
 	end
 	return nil
 end
@@ -303,6 +370,20 @@ function DataService.onProfileReleasing(fn: (number, PlayerProfile) -> ()): () -
 			table.remove(releasingListeners, index)
 		end
 	end
+end
+
+-- RaidService's GetRaidLog: marks the player's raid log seen at `now`, which must be the
+-- server's os.time(), never a client value (Profile.markRaidLogSeen ignores a non-finite or
+-- earlier time). Does nothing when the profile is not loaded in this server. Never yields and
+-- never forces a save: a display-only time can wait for the next autosave or the leave. It leaves
+-- the RaidLogSeenAt attribute alone, since that keeps its load-time value all session
+-- (docs/contracts.md). Returns whether it wrote.
+function DataService.markRaidLogSeen(userId: number, now: number): boolean
+	local profile = DataService.getProfile(userId)
+	if profile == nil then
+		return false
+	end
+	return Profile.markRaidLogSeen(profile, now)
 end
 
 -- One save request. "saved": a save landed whose written data passes `confirm`. "lost": the
@@ -366,7 +447,8 @@ function DataService.saveNow(userId: number, confirm: (savedData: any) -> boolea
 	local backoff = SAVE_NOW_FIRST_BACKOFF_SECONDS
 	for attempt = 1, SAVE_NOW_ATTEMPTS do
 		local entry = sessions[userId]
-		local session = if entry then entry.session else nil
+		-- A Studio test session (loadTestSession) saves exactly like a player's.
+		local session = if entry then entry.session else testSessions[userId]
 		if not session or not session:IsActive() then
 			return false, `profile {userId} is not loaded in this server`
 		end
@@ -405,10 +487,128 @@ function DataService.persistence(): ("DataStore" | "Memory")?
 	return "Memory"
 end
 
--- Phase 1: sends a message to a player's profile wherever it is loaded (ProfileStore message
--- queue). Errors until implemented so no caller mistakes a no-op for a delivered transfer.
-function DataService.sendMessage(_userId: number, _message: { [string]: any })
-	error("DataService.sendMessage is not implemented until Phase 1 (async raids)")
+-- Queues { topic = topic, data = data } on a user's profile, loaded anywhere or nowhere
+-- (ProfileStore:MessageAsync; it pings a holding server to save, and so receive it, sooner).
+-- MessageAsync retries forever, so it runs on its own thread: true once written, false when
+-- refused or unconfirmed within MESSAGE_SEND_WAIT_SECONDS. A false may still land later, and
+-- DataStore can repeat a write, so receivers must treat every message as possibly repeated.
+function DataService.sendMessage(userId: number, topic: string, data: any): (boolean, string?)
+	if store == nil then
+		return false, "DataService not started"
+	end
+	local outcome: boolean? = nil
+	task.spawn(function()
+		local ok, sent = pcall(store.MessageAsync, store, keyFor(userId), { topic = topic, data = data })
+		if not ok then
+			warn(`[DataService] message {topic} to {userId} errored: {sent}`)
+		end
+		outcome = ok and sent == true
+	end)
+	local deadline = os.clock() + MESSAGE_SEND_WAIT_SECONDS
+	while outcome == nil and os.clock() < deadline do
+		task.wait(0.25)
+	end
+	if outcome then
+		return true, nil
+	elseif outcome == false then
+		return false, "message refused (the server is closing, or MessageAsync errored)"
+	end
+	return false, `message not confirmed within {MESSAGE_SEND_WAIT_SECONDS} s; it may still land`
+end
+
+-- Calls fn(userId, data) for each message of `topic` (sendMessage) to a profile loaded here.
+-- One listener per topic; fn must not yield. Returns a function that disconnects.
+function DataService.onMessage(topic: string, fn: (userId: number, data: any) -> ()): () -> ()
+	assert(messageListeners[topic] == nil, `DataService.onMessage: {topic} already has a listener`)
+	messageListeners[topic] = fn
+	return function()
+		if messageListeners[topic] == fn then
+			messageListeners[topic] = nil
+		end
+	end
+end
+
+--[[
+	Offline profiles (P1.1). updateOffline(userId, fn) runs fn on the latest saved profile of a
+	player whom NO server holds, in one UpdateAsync on the profile's own key. It lands only while
+	ProfileStore's MetaData.ActiveSession is empty, so a held profile is never written behind its
+	server's back, and it keeps ProfileStore's metadata, message queue, UserIds and RobloxMetaData.
+	It takes no session lock, so it never makes a server release (and kick) its player. The data
+	goes through Profile.prepare first, as on a load. fn(profile) must not yield and must be safe
+	to run again on a fresh copy (UpdateAsync may retry); it returns (write: boolean, result).
+	Returns:
+	  "done", result  fn ran on the latest saved data, and its write (if any) landed
+	  "held"          a server holds the profile (here too; always in Memory mode): message it
+	  "missing"       no save, or only ProfileStore's template (never played)
+	  "refused", why  the save cannot be trusted here (newer schema, wrong owner)
+	Errors when the DataStore keeps failing (4 attempts, 1/2/4 s apart) or DataService has not
+	started. Never call it from code a player's load waits on.
+]]
+local function isTemplate(data: any): boolean
+	return type(data) ~= "table" or (data.createdAt == 0 and data.userId == 0)
+end
+
+local function offlineWrite(userId: number, fn: (PlayerProfile) -> (boolean, any)): (string, any)
+	local raw = rawProfiles or DataStoreService:GetDataStore(STORE_NAME)
+	rawProfiles = raw
+	local outcome, result = "missing", nil
+	local lastError: any = nil
+	for attempt = 1, #OFFLINE_RETRY_DELAYS + 1 do
+		local ok, err = pcall(function()
+			raw:UpdateAsync(keyFor(userId), function(latest: any)
+				outcome, result = "missing", nil
+				if type(latest) ~= "table" or type(latest.MetaData) ~= "table" or isTemplate(latest.Data) then
+					return nil
+				end
+				if latest.MetaData.ActiveSession ~= nil then
+					outcome = "held"
+					return nil
+				end
+				local prepared, profile = pcall(Profile.prepare, deepCopy(latest.Data), userId, os.time())
+				if not prepared then
+					outcome, result = "refused", profile
+					return nil
+				end
+				local write, value = fn(profile)
+				outcome, result = "done", value
+				if not write then
+					return nil
+				end
+				latest.Data = profile
+				return latest, latest.UserIds, latest.RobloxMetaData
+			end)
+		end)
+		if ok then
+			return outcome, result
+		end
+		lastError = err
+		if attempt <= #OFFLINE_RETRY_DELAYS then
+			task.wait(OFFLINE_RETRY_DELAYS[attempt])
+		end
+	end
+	error(`offline write for {userId} failed after {#OFFLINE_RETRY_DELAYS + 1} attempts: {lastError}`, 0)
+end
+
+function DataService.updateOffline(userId: number, fn: (profile: PlayerProfile) -> (boolean, any)): (string, any)
+	local mode = DataService.persistence()
+	if mode == nil then
+		error("DataService not started (or still checking DataStore access)", 0)
+	end
+	-- Memory mode: the mock store is ProfileStore's own; a message reaches it (on its next load).
+	if mode == "Memory" or sessions[userId] or testProfiles[userId] or testSessions[userId] then
+		return "held", nil
+	end
+	return offlineWrite(userId, fn)
+end
+
+-- Studio only: a read-only copy of a user's saved profile, or nil (playtest checks).
+function DataService.peekOffline(userId: number): PlayerProfile?
+	if not RunService:IsStudio() then
+		error("DataService.peekOffline is Studio-only")
+	end
+	assert(store, "DataService not started")
+	local view = store:GetAsync(keyFor(userId))
+	return if view then deepCopy(view.Data) else nil
 end
 
 --[[
@@ -491,6 +691,290 @@ end
 -- Until a guard is registered, releaseTestProfile refuses every release.
 function DataService.guardTestRelease(guard: (userId: number) -> string?)
 	testReleaseGuard = guard
+end
+
+--[[
+	Studio test sessions (P1.10d), for the forced-shutdown soak in DataStore mode without a real
+	account. A test session is a real ProfileStore session on `Player_<testId>` in the profiles
+	store, held by this server: loaded with Profile.prepare, saved by autosave and saveNow,
+	sent messages, released on releaseTestSession or by ProfileStore's own BindToClose (the
+	onProfileReleasing listeners run first, as on a leave). So escrow treats it exactly as a
+	player loaded here: getProfile returns it, saveNow confirms its saves, updateOffline answers
+	"held", and EscrowService recovers it on load (onTestSessionLoaded) and in its sweep
+	(testSessionIds). What it lacks is a Player: no onProfileLoaded listeners, no den, no client.
+
+	Allowed only when all three hold, else loadTestSession errors before anything is held:
+	  - RunService:IsStudio(), and ServerStorage.StudioTestSessions == true (testSessionsOn: read
+	    on each call, never in a live server);
+	  - a reserved test id (Profile.isTestUserId, <= -1,000,000): no account, no Local Server
+	    player and no real save can ever have that key;
+	  - DataStore persistence. In Memory mode use loadTestProfile; so test profiles (Memory) and
+	    test sessions (DataStore) never meet, and a test session's escrow records are in the
+	    DataStore, like the session's own saves (D-019's one-mode rule holds).
+	The saves are real: keys Player_<testId> (and Escrow_/Open_ for their raids) stay in the
+	place's DataStores until deleted in the Data Stores manager. A test id is not an account, so
+	no write names it as a user id (ProfileStore and EscrowService both leave negatives off).
+
+	loadTestSession(userId) yields until the session starts (up to LOAD_TIMEOUT_SECONDS, which
+	covers ProfileStore's wait for a dead server's lock). (true) once held here, or already held;
+	(false, why) when not ready, closing, already loading, timed out or refused by
+	Profile.prepare (the untouched save is released again). releaseTestSession(userId) is a leave
+	(no escrow guard: a player may leave mid-transfer too, and recovery finishes it on their next
+	load); it waits up to SAVE_NOW_WAIT_SECONDS for the final save: (true) saved, or (false,
+	why) while ProfileStore still retries it.
+]]
+local function testSessionsOn(): boolean
+	return RunService:IsStudio() and ServerStorage:GetAttribute(TEST_SESSION_SWITCH) == true
+end
+
+function DataService.loadTestSession(userId: number): (boolean, string?)
+	if not testSessionsOn() then
+		error(`DataService.loadTestSession is Studio-only and needs ServerStorage.{TEST_SESSION_SWITCH} = true`)
+	end
+	if not Profile.isTestUserId(userId) then
+		error(`DataService.loadTestSession: test ids are whole numbers <= {Profile.TEST_USER_ID_MAX}, not {userId}`)
+	end
+	local mode = DataService.persistence()
+	if mode == nil then
+		return false, "DataService is not ready (not started, or ProfileStore is still checking access)"
+	elseif mode ~= "DataStore" then
+		error("DataService.loadTestSession needs DataStore persistence; in Memory mode use loadTestProfile")
+	end
+	local held = testSessions[userId]
+	if held and held:IsActive() then
+		return true, nil
+	end
+	if closing or testLoading[userId] then
+		return false, if closing then "the server is closing" else `{userId} is already loading`
+	end
+	testLoading[userId] = true
+	local began = os.clock()
+	local ok, session = pcall(store.StartSessionAsync, store, keyFor(userId), {
+		Cancel = function(): boolean
+			return closing or os.clock() - began > LOAD_TIMEOUT_SECONDS
+		end,
+	})
+	testLoading[userId] = nil
+	if not ok or session == nil then
+		return false, if ok then "no session (timed out, or the server is closing)" else `load errored: {session}`
+	end
+	local prepared, result = pcall(Profile.prepare, deepCopy(session.Data), userId, os.time())
+	if not prepared then
+		session:EndSession() -- saves the untouched original back and releases the lock
+		return false, `test session {userId} refused: {result}`
+	end
+	local profile: PlayerProfile = result
+	session.Data = profile
+	-- No AddUserId: a test id is not an account.
+	session.OnLastSave:Connect(function(reason: string)
+		runReleasing(userId, session.Data)
+		print(`[DataService] releasing test session {userId} ({reason})`)
+	end)
+	session.OnSessionEnd:Connect(function()
+		if testSessions[userId] ~= session then
+			return -- released here
+		end
+		testSessions[userId] = nil
+		if not closing and not ProfileStore.IsClosing then
+			warn(`[DataService] test session lock lost for {userId}`)
+		end
+	end)
+	testSessions[userId] = session
+	print(`[DataService] loaded test session {userId} (DataStore; saves like a player)`)
+	session:MessageHandler(function(message: any, processed: () -> ())
+		handleMessage(userId, message, processed)
+	end)
+	for _, fn in table.clone(testSessionListeners) do
+		task.spawn(fn, userId, profile)
+	end
+	return true, nil
+end
+
+function DataService.releaseTestSession(userId: number): (boolean, string?)
+	if not RunService:IsStudio() then
+		error("DataService.releaseTestSession is Studio-only")
+	end
+	local session = testSessions[userId]
+	if session == nil then
+		return true, nil -- nothing held
+	end
+	testSessions[userId] = nil
+	if not session:IsActive() then
+		return true, nil -- the lock was already lost; nothing left to save from here
+	end
+	local saved = false
+	local connection = session.OnAfterSave:Connect(function()
+		saved = true
+	end)
+	session:EndSession() -- onProfileReleasing listeners, then the final save and the lock release
+	local deadline = os.clock() + SAVE_NOW_WAIT_SECONDS
+	while not saved and os.clock() < deadline do
+		task.wait(0.25)
+	end
+	connection:Disconnect()
+	if not saved then
+		return false,
+			`released; final save not confirmed within {SAVE_NOW_WAIT_SECONDS} s (ProfileStore keeps retrying)`
+	end
+	print(`[DataService] released test session {userId}`)
+	return true, nil
+end
+
+-- EscrowService only: fn(userId, profile) after each test session load, and right away for
+-- those already held (a test session has no Player, so onProfileLoaded never fires for it).
+-- Each call runs on its own thread. Returns a function that disconnects.
+function DataService.onTestSessionLoaded(fn: (number, PlayerProfile) -> ()): () -> ()
+	table.insert(testSessionListeners, fn)
+	for userId, session in testSessions do
+		if session:IsActive() then
+			task.spawn(fn, userId, session.Data)
+		end
+	end
+	return function()
+		local index = table.find(testSessionListeners, fn)
+		if index then
+			table.remove(testSessionListeners, index)
+		end
+	end
+end
+
+-- EscrowService's rescan: the test sessions held here. Always empty in a live server.
+function DataService.testSessionIds(): { number }
+	local ids = {}
+	for userId, session in testSessions do
+		if session:IsActive() then
+			table.insert(ids, userId)
+		end
+	end
+	return ids
+end
+
+--[[
+	Studio test-session hook (P1.10d). Installed by start() only in Studio, and every command
+	refuses unless ServerStorage.StudioTestSessions == true and the id is a test id. From the
+	server command bar (or an execute_luau call) during Play:
+	  local hook = game:GetService("ServerStorage"):WaitForChild("DataTestHook")
+	  hook:Invoke("load", -1000001)          loadTestSession: a DataStore session held here
+	  hook:Invoke("seed", -1000002, 3, 500)  a held test session gets 3 Common critters on free
+	                                         pads (default 3; at most the free pads) and 500 more
+	                                         stored Glow (default 0), then a confirmed save
+	  hook:Invoke("show", -1000002)          its Glow, critters and appliedTransfers: live when
+	                                         held here, else the saved copy (peekOffline)
+	  hook:Invoke("release", -1000002)       releaseTestSession: a leave, final save waited for
+]]
+local function seedTestSession(userId: number, count: any, glow: any): string
+	local session = testSessions[userId]
+	if session == nil or not session:IsActive() then
+		return `{userId} is not a test session held here; load it first`
+	end
+	local wanted = TEST_SEED_DEFAULT
+	if type(count) == "number" and count == count then
+		wanted = math.clamp(math.floor(count), 0, 30)
+	end
+	local extra = 0
+	if type(glow) == "number" and glow >= 0 and glow < math.huge then
+		extra = math.floor(glow)
+	end
+	local profile: PlayerProfile = session.Data
+	local now = os.time()
+	Economy.accrue(profile, now) -- Money model: accrue before placements or `stored` change
+	local used: { [number]: true } = {}
+	for _, critter in profile.critters do
+		if critter.placement == "Pad" and critter.padIndex then
+			used[critter.padIndex] = true
+		end
+	end
+	local speciesId = CritterCatalog.byTier("Common")[1].id
+	local added: { string } = {}
+	for padIndex = 1, Economy.padCount(profile.denLevel) do
+		if #added >= wanted then
+			break
+		end
+		if not used[padIndex] then
+			local uid = HttpService:GenerateGUID(false)
+			profile.critters[uid] = {
+				uid = uid,
+				speciesId = speciesId,
+				mutation = "None",
+				placement = "Pad",
+				padIndex = padIndex,
+				acquiredAt = now,
+			}
+			table.insert(added, uid)
+		end
+	end
+	profile.stored += extra
+	local saved, why = DataService.saveNow(userId, function(data: any): boolean
+		if type(data) ~= "table" or type(data.critters) ~= "table" then
+			return false
+		end
+		for _, uid in added do
+			if data.critters[uid] == nil then
+				return false
+			end
+		end
+		return true
+	end)
+	local list = if #added > 0 then table.concat(added, ", ") else "none"
+	local result = if saved then "saved" else `not saved yet: {why}`
+	return `{userId} seeded {#added} critter(s) [{list}] and {extra} stored Glow; {result}`
+end
+
+local function describeTestProfile(userId: number): string
+	local session = testSessions[userId]
+	local held = session ~= nil and session:IsActive()
+	local data: any = if held then session.Data else DataService.peekOffline(userId)
+	if type(data) ~= "table" then
+		return `{userId}: no save`
+	end
+	local critters = {}
+	for uid, critter in data.critters or {} do
+		table.insert(critters, `{uid}={critter.speciesId}/{critter.placement}`)
+	end
+	table.sort(critters)
+	local applied = {}
+	for raidId, entry in data.appliedTransfers or {} do
+		local uid = if entry.critter then entry.critter.uid else "-"
+		table.insert(applied, `{raidId}={entry.role} glow {entry.glow} critter {uid}`)
+	end
+	table.sort(applied)
+	local where = if held then "held here (live)" else "saved copy"
+	local stored = math.floor(data.stored or 0)
+	local head = `{userId} {where}: glow {data.glow}, stored {stored}, lossesToday {data.lossesToday}`
+	local body = `{#critters} critter(s) [{table.concat(critters, ", ")}]; applied [{table.concat(applied, "; ")}]`
+	return `{head}; {body}`
+end
+
+local function testHook(command: string, userId: any, a: any, b: any): string
+	if not testSessionsOn() then
+		return `refused: set ServerStorage.{TEST_SESSION_SWITCH} = true (Studio only)`
+	end
+	if not Profile.isTestUserId(userId) then
+		return `refused: test ids are whole numbers <= {Profile.TEST_USER_ID_MAX}`
+	end
+	if command == "load" then
+		local ok, why = DataService.loadTestSession(userId)
+		return if ok then `{userId} held here (DataStore session)` else `refused: {why}`
+	elseif command == "seed" then
+		return seedTestSession(userId, a, b)
+	elseif command == "show" then
+		return describeTestProfile(userId)
+	elseif command == "release" then
+		local ok, why = DataService.releaseTestSession(userId)
+		return if ok then `{userId} released and saved` else `{why}`
+	end
+	return `unknown command {command}`
+end
+
+function installTestHook()
+	local bindable = Instance.new("BindableFunction")
+	bindable.Name = "DataTestHook"
+	bindable.OnInvoke = function(command: string, userId: any, a: any, b: any): string
+		local ok, result = pcall(testHook, command, userId, a, b)
+		return if ok then result else `error: {result}`
+	end
+	bindable.Parent = ServerStorage
+	print('[DataService] Studio test-session hook ready: ServerStorage.DataTestHook:Invoke("load", -1000001)')
 end
 
 return DataService
