@@ -29,6 +29,24 @@ export type RaidTarget = {
 	isRevenge: boolean,
 	revengeRaidId: string?, -- set on revenge rows; pass it to StartRaid
 	topTier: Types.Tier?, -- loot hint: highest tier on the den's pads (nil = none known); never exact Glow
+	-- Revenge rows only: true when the raider was seen online in a server of this place (P1.9), so
+	-- the UI can offer JoinRevengeServer. A hint: the join re-checks. nil/false = offline or unknown.
+	raiderOnline: boolean?,
+}
+
+-- Live revenge join (P1.9): the reply to JoinRevengeServer and the RevengeJoinStatus push.
+--   Teleporting  the server is teleporting you to the raider's server (wait for the push)
+--   Arrived      you are next to the raider's den with the revenge token active (not spent)
+--   Failed       `reason` says why; the token is still unused. Offer the async revenge raid
+--                (StartRaid(targetUserId, revengeRaidId)) unless reason is SwitchedOff,
+--                Invalid, NoToken, Expired, Unavailable or PairLimit.
+-- Reasons: "SwitchedOff" | "Invalid" | "NoToken" | "Expired" | "Unavailable" | "PairLimit" |
+-- "Busy" | "RaiderOffline" | "ServerFull" | "ServerGone" | "TeleportFailed"
+export type RevengeJoinStatus = {
+	state: "Teleporting" | "Arrived" | "Failed",
+	revengeRaidId: string, -- "" when the request named no valid raid id
+	targetUserId: number?, -- the raider, when the token is known
+	reason: string?, -- set when state == "Failed"
 }
 
 export type RaidStart = {
@@ -61,6 +79,9 @@ Net.Requests = table.freeze({
 	GrabCritter = "GrabCritter", -- RemoteEvent: (raidId, critterUid)
 	GetRaidLog = "GetRaidLog", -- () -> { RaidLogEntry }
 	GetReplay = "GetReplay", -- (raidId) -> compressed replay frames
+	-- (revengeRaidId) -> RevengeJoinStatus. Live revenge (P1.9): join the server of the raider who
+	-- robbed you, if they are online. Needs Config.Flags.raids and asyncRaids. Never spends the token.
+	JoinRevengeServer = "JoinRevengeServer",
 	-- () -> boolean (true if started). Den owner only, live raids only. Blocks entry only: raiders
 	-- inside can leave, but a carried critter drops at the border. Server enforces Config.LiveRaid.
 	Lockdown = "Lockdown",
@@ -72,6 +93,8 @@ Net.Pushes = table.freeze({
 	RaidEnded = "RaidEnded", -- (RaidEnd)
 	BeingRaidedLive = "BeingRaidedLive", -- (raiderUserId)
 	ServerAnnouncement = "ServerAnnouncement", -- (kind, payload) e.g. Mythic stolen
+	-- (RevengeJoinStatus) a live revenge join failed after Teleporting, or you arrived (P1.9)
+	RevengeJoinStatus = "RevengeJoinStatus",
 })
 
 -- Max requests per player per 10 seconds, enforced server-side.
@@ -83,6 +106,7 @@ Net.Limits = table.freeze({
 	Lockdown = 3,
 	GetRaidTargets = 3,
 	ReportBlocked = 2,
+	JoinRevengeServer = 2,
 })
 
 --[[

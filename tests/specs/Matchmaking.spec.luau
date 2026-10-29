@@ -6,6 +6,7 @@ local Matchmaking = require("../../src/Shared/Matchmaking")
 local Config = require("../../src/Shared/Config")
 local CritterCatalog = require("../../src/Shared/CritterCatalog")
 local Types = require("../../src/Shared/Types")
+local Plots = require("../../src/Shared/Plots")
 
 local NOW = 1_800_000_000
 local HOUR = 3600
@@ -199,6 +200,100 @@ tests["lastRaidedAt is the newest escaped incoming raid"] = function()
 	log("Incoming", false, NOW - 10) -- held: not robbed
 	log("Outgoing", true, NOW - 5)
 	expect.eq(Matchmaking.lastRaidedAt(owner), NOW - 500)
+end
+
+-- P1.9 live revenge ---------------------------------------------------------------------------
+
+tests["live revenge needs the caller's own unexpired token, unblocked, under the pair limit"] = function()
+	local raider = fixtures.veteran(1, NOW)
+	raider.revengeTokens.r1 = token("r1", 50, NOW + HOUR)
+	local got, why = Matchmaking.liveRevengeToken(raider, "r1", {}, NOW)
+	expect.eq(got and got.targetUserId, 50)
+	expect.eq(why, nil)
+
+	local function reason(raidId: any, blocked: { [number]: boolean }?): string?
+		local t, r = Matchmaking.liveRevengeToken(raider, raidId, blocked or {}, NOW)
+		expect.eq(t, nil, `refused {tostring(raidId)}`)
+		return r
+	end
+	expect.eq(reason(nil), "Invalid")
+	expect.eq(reason(7), "Invalid")
+	expect.eq(reason(""), "Invalid")
+	expect.eq(reason(string.rep("x", Config.Escrow.maxRaidIdLength + 1)), "Invalid")
+	expect.eq(reason("forged"), "NoToken", "a teleport hint naming a token you do not hold")
+	expect.eq(reason("r1", { [50] = true }), "Unavailable", "never says who blocked whom")
+
+	raider.revengeTokens.mismatch = token("other", 50, NOW + HOUR)
+	expect.eq(reason("mismatch"), "NoToken", "the key and the token's raidId must agree")
+	raider.revengeTokens.self = token("self", 1, NOW + HOUR)
+	expect.eq(reason("self"), "Invalid")
+	raider.revengeTokens.old = token("old", 51, NOW)
+	expect.eq(reason("old"), "Expired")
+
+	local liveLimit = math.min(Config.Limits.maxRaidsPerPairPerDay, Config.LiveRaid.maxStealsPerPairPerDay)
+	raider.pairRaidsToday["50"] = liveLimit - 1
+	expect.truthy((Matchmaking.liveRevengeToken(raider, "r1", {}, NOW)), "one steal left")
+	raider.pairRaidsToday["50"] = liveLimit
+	expect.eq(reason("r1"), "PairLimit", "revenge never bypasses the pair limit")
+
+	-- Reading never spends it.
+	expect.truthy(raider.revengeTokens.r1 ~= nil)
+	expect.eq(raider.revengeTokens.r1.shieldBypassUsed, false)
+end
+
+tests["presence routes: here, another server of this place, or offline"] = function()
+	local function row(jobId: any, placeId: any, at: any): any
+		return { jobId = jobId, placeId = placeId, at = at }
+	end
+	expect.eq(Matchmaking.presenceRoute(row("job-a", 7, NOW), "job-a", 7, NOW), "Here")
+	expect.eq(Matchmaking.presenceRoute(row("job-b", 7, NOW), "job-a", 7, NOW), "Teleport")
+	expect.eq(Matchmaking.presenceRoute(row("job-b", 8, NOW), "job-a", 7, NOW), "Offline", "another place")
+	expect.eq(Matchmaking.presenceRoute(row("", 7, NOW), "job-a", 7, NOW), "Offline", "no instance to join")
+	expect.eq(Matchmaking.presenceRoute(nil, "job-a", 7, NOW), "Offline")
+	expect.eq(Matchmaking.presenceRoute("job-b", "job-a", 7, NOW), "Offline")
+	expect.eq(Matchmaking.presenceRoute(row(5, 7, NOW), "job-a", 7, NOW), "Offline")
+	expect.eq(Matchmaking.presenceRoute(row("job-b", 7, 0 / 0), "job-a", 7, NOW), "Offline")
+	local ttl = Matchmaking.presenceTtlSeconds
+	expect.eq(ttl, math.floor(Config.Matchmaking.presenceRefreshSeconds * 2.5))
+	expect.eq(Matchmaking.presenceRoute(row("job-b", 7, NOW - ttl), "job-a", 7, NOW), "Teleport")
+	expect.eq(Matchmaking.presenceRoute(row("job-b", 7, NOW - ttl - 1), "job-a", 7, NOW), "Offline", "stale")
+	expect.eq(Matchmaking.presenceRoute(row("job-b", 7, NOW + 5), "job-a", 7, NOW), "Teleport", "clock skew")
+end
+
+tests["teleport data is only a hint naming the token"] = function()
+	local data = Matchmaking.revengeTeleportData("r1")
+	expect.eq(Matchmaking.readRevengeHint(data), "r1")
+	expect.eq(Matchmaking.readRevengeHint(nil), nil)
+	expect.eq(Matchmaking.readRevengeHint("r1"), nil)
+	expect.eq(Matchmaking.readRevengeHint({ liveRevengeRaidId = 5 }), nil)
+	expect.eq(Matchmaking.readRevengeHint({ liveRevengeRaidId = "" }), nil)
+	local long = string.rep("x", Config.Escrow.maxRaidIdLength + 1)
+	expect.eq(Matchmaking.readRevengeHint({ liveRevengeRaidId = long }), nil)
+	local count = 0
+	for _ in data do
+		count += 1
+	end
+	expect.eq(count, 1, "nothing else rides along: the target comes from the profile's token")
+end
+
+tests["revenge landing is on the street in front of the den, outside every den"] = function()
+	for plot = 1, Plots.Layout.plotCount do
+		local x, z = Matchmaking.revengeLanding(plot)
+		expect.eq(Plots.plotAt(x, z), nil, `plot {plot}: outside every den, so Lockdown still blocks entry`)
+		local cx, cz = Plots.center(plot)
+		expect.near(math.abs(x - cx), 0, 1e-9, "in line with the den's centre")
+		local edge = Plots.Layout.plotSize / 2
+		expect.near(math.abs(z - cz), edge + Matchmaking.revengeLandingMargin, 1e-9, "just past the front edge")
+		expect.truthy(math.abs(z) < math.abs(cz), "the street side")
+	end
+end
+
+tests["teleport failures map to client reasons"] = function()
+	expect.eq(Matchmaking.teleportFailReason("GameFull"), "ServerFull")
+	expect.eq(Matchmaking.teleportFailReason("GameEnded"), "ServerGone")
+	expect.eq(Matchmaking.teleportFailReason("GameNotFound"), "ServerGone")
+	expect.eq(Matchmaking.teleportFailReason("Flooded"), "Busy")
+	expect.eq(Matchmaking.teleportFailReason("Failure"), "TeleportFailed")
 end
 
 return tests
