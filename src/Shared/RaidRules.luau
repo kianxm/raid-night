@@ -1019,6 +1019,19 @@ function RaidRules.asyncEscapeOutcome(
 	return { escaped = false, pending = false, speciesId = carriedSpeciesId, glow = 0, shieldUntil = 0 }
 end
 
+-- The replay event (Shared/Replay) that closes a raid ended for `reason` (P1.4b), or nil when the
+-- end leaves no mark: Retreat, Left and Error show as the track simply stopping.
+function RaidRules.replayEndEvent(reason: string): ("Escape" | "Timeout" | "Tag")?
+	if reason == "Escaped" then
+		return "Escape"
+	elseif reason == "Timeout" then
+		return "Timeout"
+	elseif reason == "Tagged" then
+		return "Tag"
+	end
+	return nil
+end
+
 -- When the player last opened their raid log (unix seconds); 0 = never or an old save (D-005).
 function RaidRules.raidLogSeenAt(profile: PlayerProfile): number
 	local at = profile.raidLogSeenAt

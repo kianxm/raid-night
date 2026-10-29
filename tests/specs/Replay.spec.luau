@@ -222,4 +222,32 @@ tests["ReplayStore: pcall around every store call, no profile access, both parti
 	expect.truthy(string.find(handler, "ReplayStore.fetch, player.UserId, raidId", 1, true), "the caller is the player")
 end
 
+tests["AsyncRaid's 10 Hz tick with jitter and a lag spike records 5 Hz, under 3 KB for 3 minutes"] = function()
+	local r = rng.new(7)
+	local rec = Replay.newRecorder(START, ORIGIN.x, ORIGIN.y, ORIGIN.z)
+	local t, x, z = START, 0, 20
+	local written = 0
+	while t < START + 180 do
+		t += 0.1 + (r.next() - 0.5) * 0.04 -- Heartbeat-driven: about 10 Hz, never exact
+		if math.abs(t - (START + 90)) < 0.05 then
+			t += 1.3 -- one lag spike: the missed frames are interpolated
+		end
+		x = math.clamp(x + (r.next() - 0.5) * 3, -36, 36)
+		z = math.clamp(z + (r.next() - 0.5) * 3, -36, 36)
+		if Replay.recordFrame(rec, t, ORIGIN.x + x, ORIGIN.y + 3, ORIGIN.z + z) then
+			written += 1
+		end
+	end
+	for i, kind in { "Grab", "Trap", "Drop", "Grab", "Escape" } :: { Replay.EventKind } do
+		expect.truthy(Replay.recordEvent(rec, START + i * 30, kind, if kind == "Grab" then "crescent_fox" else nil))
+	end
+	expect.truthy(written < 1000, "about half the ticks write a frame")
+	expect.truthy(rec.frames >= 899 and rec.frames <= 901, `one frame per 0.2 s, got {rec.frames}`)
+	local data = Replay.encode(rec)
+	expect.truthy(#data < 3 * 1024, `{#data} bytes`)
+	local decoded = assert(Replay.decode(data))
+	expect.eq(#decoded.frames, rec.frames)
+	expect.eq(#decoded.events, 5)
+end
+
 return tests

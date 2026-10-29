@@ -307,4 +307,13 @@ tests["asyncEscapeOutcome: InFlight is on its way; Refused moved nothing"] = fun
 	end
 end
 
+tests["replayEndEvent: escape, timeout and tag close the track; other ends leave no mark"] = function()
+	expect.eq(RaidRules.replayEndEvent("Escaped"), "Escape")
+	expect.eq(RaidRules.replayEndEvent("Timeout"), "Timeout")
+	expect.eq(RaidRules.replayEndEvent("Tagged"), "Tag")
+	for _, reason in { "Retreat", "Left", "Error", "" } do
+		expect.eq(RaidRules.replayEndEvent(reason), nil, reason)
+	end
+end
+
 return tests

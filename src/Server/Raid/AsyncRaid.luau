@@ -28,7 +28,11 @@
 	Log    Net.Requests.GetRaidLog -> a copy of the player's own raid log, and asks DataService to
 	       mark it seen (markRaidLogSeen, data's, called once it exists). Player attribute
 	       RaidLogSeenAt = the profile's raidLogSeenAt when it loaded. Display only.
-	Never writes a profile. Replay frames come in P1.4.
+	Replay The raider's position at Replay.HZ (5 Hz, from the 10 Hz tick) plus Grab, Drop, Trap,
+	       Tag, Escape and Timeout events (Shared/Replay recorder, P1.4b). At every end the replay
+	       goes to ReplayStore.save, which never yields or errors; every recorder call is pcall'd,
+	       so a replay failure can never change a raid or its result.
+	Never writes a profile.
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -44,6 +48,7 @@ local CritterCatalog = require(Shared.CritterCatalog)
 local Escrow = require(Shared.Escrow)
 local Net = require(Shared.Net)
 local RaidRules = require(Shared.RaidRules)
+local Replay = require(Shared.Replay)
 local Types = require(Shared.Types)
 local Services = script.Parent.Parent.Services
 local DataService = require(Services.DataService) :: any
@@ -51,6 +56,7 @@ local DenWorldService = require(Services.DenWorldService) :: any
 local MatchmakingService = require(Services.MatchmakingService) :: any
 local SnapshotService = require(Services.SnapshotService) :: any
 local Pocket = require(script.Parent.Pocket)
+local ReplayStore = require(script.Parent.ReplayStore)
 
 type DenSnapshot = Types.DenSnapshot
 type PocketT = Pocket.Pocket
@@ -96,6 +102,7 @@ type Raid = {
 	lastAt: number,
 	settleUntil: number, -- os.clock(): no bounds check while the move into the pocket lands
 	ended: boolean,
+	replay: Replay.Recorder?, -- nil once saved, or if the recorder could not start
 }
 
 local TICK = 0.1
@@ -152,6 +159,42 @@ local function applyWalkSpeed(raid: Raid): number
 	return speed
 end
 
+-- Replay (P1.4b): recording may never affect the raid, so every call is guarded.
+local function recordFrame(raid: Raid, now: number, pos: Vector3)
+	local rec = raid.replay
+	if rec then
+		pcall(Replay.recordFrame, rec, now, pos.X, pos.Y, pos.Z)
+	end
+end
+
+local function recordEvent(raid: Raid, kind: Replay.EventKind, arg: string?)
+	local rec = raid.replay
+	if rec then
+		pcall(Replay.recordEvent, rec, workspace:GetServerTimeNow(), kind, arg)
+	end
+end
+
+local lastReplay = "" -- Studio test hook only: what the last save handed to ReplayStore
+
+-- Hands the replay to ReplayStore.save (its own thread, pcall'd, only warns). Never yields.
+local function saveReplay(raid: Raid)
+	local rec = raid.replay
+	raid.replay = nil
+	if rec == nil then
+		return
+	end
+	local ok, err = pcall(function()
+		local data = Replay.encode(rec)
+		ReplayStore.save(raid.raidId, raid.player.UserId, raid.defenderUserId, rec.startedAt, data)
+		if RunService:IsStudio() then
+			lastReplay = `raid {raid.raidId}: {#data} bytes, {rec.frames} frames, {#rec.events} events`
+		end
+	end)
+	if not ok then
+		warn(`[AsyncRaid] replay for raid {raid.raidId} not saved: {err}`)
+	end
+end
+
 local function dropCarry(raid: Raid, why: string)
 	local carry = raid.carry
 	raid.carry = nil
@@ -160,6 +203,9 @@ local function dropCarry(raid: Raid, why: string)
 	if carry then
 		Pocket.returnCritter(raid.pocket, carry.padIndex)
 		debugLog(`{raid.player.Name} dropped {carry.speciesId} ({why})`)
+		if not raid.ended then
+			recordEvent(raid, "Drop", why)
+		end
 	end
 end
 
@@ -196,6 +242,11 @@ local function endRaid(raid: Raid, reason: string)
 	end
 	local carry = raid.carry
 	local escaped = reason == "Escaped" and carry ~= nil
+	local final = RaidRules.replayEndEvent(reason)
+	if final then
+		recordEvent(raid, final, nil)
+	end
+	saveReplay(raid)
 	-- World first, each step guarded: the lock release below must always run.
 	local cleaned, cleanError = pcall(function()
 		dropCarry(raid, reason)
@@ -281,6 +332,7 @@ local function grab(player: Player, raidId: any, critterUid: any)
 	}
 	raid.lastPos, raid.lastAt = root.Position, os.clock()
 	Pocket.attachCritter(raid.pocket, padIndex, root)
+	recordEvent(raid, "Grab", species.id)
 	player:SetAttribute("CarryingUid", critter.uid)
 	player:SetAttribute("CarryingSpecies", species.id)
 	applyWalkSpeed(raid)
@@ -314,6 +366,9 @@ local function stepRaid(raid: Raid)
 		carrying = carry ~= nil,
 	})
 	raid.lastPos, raid.lastAt = pos, clock
+	if outcome ~= "OutOfBounds" then -- not while the move into the pocket lands
+		recordFrame(raid, now, pos)
+	end
 	if carry then
 		carry.budget = budget
 	end
@@ -333,6 +388,7 @@ local function stepRaid(raid: Raid)
 			end
 			raid.alertUntil = math.max(raid.alertUntil, now + effect.alertSeconds)
 			debugLog(`{player.Name} hit a {trap.kind}`)
+			recordEvent(raid, "Trap", trap.kind)
 			if effect.sendBack then
 				dropCarry(raid, trap.kind)
 				local spawn = Pocket.world(raid.pocket, raid.layout.spawn.x, raid.layout.spawn.z, 3)
@@ -403,6 +459,9 @@ local function enterPocket(
 		end
 		local spawn = Pocket.world(pocket, layout.spawn.x, layout.spawn.z, 3)
 		character:PivotTo(CFrame.lookAt(spawn, spawn - Vector3.zAxis))
+		local startedAt = workspace:GetServerTimeNow()
+		local origin = pocket.origin
+		local recOk, rec = pcall(Replay.newRecorder, startedAt, origin.X, origin.Y, origin.Z)
 		local raid: Raid = {
 			raidId = raidId,
 			player = player,
@@ -410,7 +469,8 @@ local function enterPocket(
 			snapshot = snapshot,
 			layout = layout,
 			revengeRaidId = revengeRaidId,
-			endsAt = workspace:GetServerTimeNow() + Config.Raid.durationSeconds,
+			endsAt = startedAt + Config.Raid.durationSeconds,
+			replay = if recOk then rec else nil,
 			pocket = pocket,
 			carry = nil,
 			guards = guards,
@@ -424,6 +484,7 @@ local function enterPocket(
 			ended = false,
 		}
 		raids[player] = raid
+		recordFrame(raid, startedAt, spawn)
 		player:SetAttribute("CarryingUid", "")
 		player:SetAttribute("CarryingSpecies", "")
 		return {
@@ -573,6 +634,8 @@ local function testHook(command: string, targetUserId: any, revengeRaidId: any):
 			return "teleported to the gate (a carried critter must drop: TooFast)"
 		end
 		return "not raiding"
+	elseif command == "replay" then
+		return if lastReplay == "" then "no replay saved yet" else lastReplay
 	end
 	return `unknown command {command}`
 end

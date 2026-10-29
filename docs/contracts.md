@@ -419,6 +419,11 @@ own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async ra
 
 Raid replays (`src/Shared/Replay.luau`, pure; `src/Server/Raid/ReplayStore.luau`). A replay never
 affects a raid's result: saving runs on its own thread, inside `pcall`, and a failure only warns.
+Every async raid is recorded (P1.4b, `Raid/AsyncRaid.luau`): the raider's server position from
+the 10 Hz raid tick (so one frame per 0.2 s), plus `Grab` (species id), `Drop` (why), `Trap`
+(trap kind), and a closing `Escape`, `Timeout` or `Tag` (`RaidRules.replayEndEvent`). Origin is
+the pocket den's floor-top centre and `startedAt` is server time (`workspace:GetServerTimeNow()`)
+at entry. Every end, Retreat and Left included, hands it to `ReplayStore.save` (never `saveNow`).
 
 Format version 1, `"R1.<frames>.<events>"`, printable URL-safe base64 plus `~` and `.`:
 
