@@ -92,8 +92,9 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
   stays ~1-4 egg prices instead of climbing to 12,000. The design sets no first-rebirth target:
   approve the ~3-week pace, pick another, or keep today's values. Level 30 of 50 on day 1 either way.
 
-- Rollout: turn `Config.Flags.asyncRaids` on only in a deploy after the one that ships P1.1 (#97/#98);
-  an older server could otherwise cancel an async transfer under the live rules (D-047).
+- Rollout: turn `Config.Flags.asyncRaids` on only after every pre-P1.1 server has shut down
+  (shut down old servers after the publish that ships #97/#98); an old server would void a Pending
+  async record and could lose the critter and Glow (D-049).
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
@@ -153,6 +154,7 @@ dropped based on real play.
 - A raider can block their victim after a raid to hide from revenge (reviewer #91; decide after playtest).
 - Raider's own block list is session-only until their first ReportBlocked; fall back to the last snapshot (reviewer #91; small).
 - Studio hook `targets` also skips the `raids` gate; doc says asyncRaids only (reviewer #91; Studio only, doc fix).
+- Escrow (reviewer #98): a debit finished in another server is credited only on the raider server's next retry (up to 30 min backoff); a crashed server's stale lock keeps a defender "held" until they return (consider ProfileStore's 630 s assume-dead); unbounded MessageAsync retry threads during an outage (one pending send per user+raid); the dupe alarm can't see a critter both parties own (assert at credit); an erased defender save errors forever (park it). All fail safe.
 - Finished escrow records are never deleted (D-008 cleanup deferred, D-047; storage growth only; proposal in #98).
 - ReplayStore: cap expired-replay deletes per save (~4) so a returning raider's 64-delete burst can't drain the DataStore budget; delete the dropped list even if SetAsync fails; cache fetched records; finite startedAt check (reviewer #99; small).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.

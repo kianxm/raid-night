@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-049 · 2026-10-29 · Escrow fix round on #97/#98; asyncRaids waits for old servers to die
+Context: reviewer APPROVED #97 and #98 at xhigh with suggestions. Decision: one fix round for the
+two Glow dupe/loss-adjacent items (a stale session's same-second debit writing its loot into the
+record; one sweep error stopping recovery) plus cheap lines in the same round (Refused instead of
+InFlight when nothing was written; Escrow.void refuses Async; a spec for accrue-inside-the-write).
+asyncRaids is turned on only after every pre-P1.1 server has shut down, because old servers void
+Pending records of any kind. Other suggestions go to the hardening backlog. Why: principle 1;
+the rest fails safe. Reversible: yes.
+
 ### D-048 · 2026-10-29 · Replay fetch limit and 7-day cleanup
 Context: raid on #99. Decision: GetReplay is limited to 3 per 10 s; DataStores have no expiry, so
 each raider keeps an index of their replays and every new save deletes their expired ones and
