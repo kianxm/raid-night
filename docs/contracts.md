@@ -154,6 +154,59 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
   second cross-server write to the defender's key. The older `notificationPromptedAt` field stays
   in the shape (no removal without a migration), but nothing writes it.
 
+## Analytics (P2.9, D-059)
+
+Schema: `src/Shared/Analytics.luau` (pure, tested in `Analytics.spec`). Sender:
+`src/Server/Services/AnalyticsService.luau`, the only code that calls Roblox's AnalyticsService
+(a source guard checks). Nothing new is persisted; no Types, Net or Config change.
+
+- **Calls** (server only, never yield or throw, return whether logged):
+  `AnalyticsService.track(playerOrUserId, event, fields)`,
+  `AnalyticsService.step(playerOrUserId, "RaidFlow", "TargetPicked")` (the one funnel step with no
+  event), `AnalyticsService.economy(playerOrUserId, flowId, amount, endingBalance)`, and
+  `AnalyticsService.trackNotification(event, fields)` for NotificationService's `track`. A userId
+  must be a player in this server: Roblox logs every event on a Player.
+- **Fields are closed.** `Analytics.validate` refuses an unknown event or field, a missing field, a
+  wrong type, a string outside its enum, an `id` that is not a short server identifier
+  (`^%a[%w_]*$`, at most 32), and NaN, infinite, negative, out-of-range or non-whole numbers. No
+  field carries a user id, a name, a raidId or player-typed text; the Player is the only identity.
+- **Shape on the wire.** One number (`value`) and at most three custom fields
+  (`CustomField01..03`), rendered `"<Label> - <value>"`; numbers shown in a field are bucketed so no
+  event passes Roblox's 8,000 combinations (the spec checks every event).
+- **Funnels.** Onboarding (Roblox one-time onboarding funnel, accounts under 7 days from
+  `createdAt`): Join, FirstHatch, FirstCollect, FirstSteal, FirstRaid. RaidFlow (recurring, one
+  funnel session per portal trip): Portal, TargetPicked, RaidStarted, Escaped. Steps come from
+  events (`Analytics.funnelSteps`), so callers fire only the event.
+- **Economy.** Currencies `Glow` (banked) and `DenGlow` (stored). Flow ids in `Analytics.ECONOMY`;
+  amount > 0, endingBalance >= 0 (the balance of that currency after the change).
+- **Budget.** Per player a burst of 20, then 15 a minute (`Analytics.take`), under Roblox's
+  120 + 20 x CCU per minute; `session_end` and `purchase` skip it.
+- **Studio.** Roblox records nothing from Studio. Set the ServerStorage boolean attribute
+  `StudioAnalyticsLog` to `true` to make the server call the API and print every accepted call
+  (`[Analytics] ...`); without it Studio sends and prints nothing. Refusals always warn.
+
+| Event | Fields (value first) | Fired by |
+| --- | --- | --- |
+| `onboarding_step` | secondsSinceJoin; step 1-5 | onboarding API (C6b) |
+| `egg_bought` | price; tier, denLevel | economy |
+| `critter_placed` | (count); tier, placement | economy |
+| `glow_collected` | amount; storageFill (stored / cap before the collect) | economy |
+| `raid_portal_opened` | targetsOffered; revengeAvailable | matchmaking (GetRaidTargets) |
+| `raid_started` | targetPower; mode `Async`/`Live`, revenge | raid |
+| `raid_ended` | glow; escaped, tierTaken (tier or `None`), durationSeconds, mode | raid |
+| `raided_offline` | glowLost; tierLost, revenge, attributedTo | EscrowService, Async debit saved |
+| `raid_log_opened` | entriesSinceLastVisit | DataService.markRaidLogSeen |
+| `revenge_started` | hoursSinceRaided; fromNotification, mode | raid |
+| `notification_sent` | (count); category, result `Sent`/`Throttled` | notifications |
+| `notification_join` | (count); category | notifications |
+| `optin_prompted` / `optin_result` | (count); trigger / accepted | notifications |
+| `purchase` | price (Robux); product (server key) | economy (PurchaseService) |
+| `rebirth` | count; daysSinceJoin (from `createdAt`) | economy |
+| `session_end` | sessionSeconds; raids (started), steals (escapes with a critter) | DataService / AnalyticsService on leave |
+
+`raided_offline` is logged on the defender when they are in the server that saved the debit,
+otherwise on the raider (`attributedTo = "Raider"`), since a profile no server holds has no Player.
+
 ## Money model
 
 - `stored`: Glow in the den. Accrues lazily. Stealable (25% per raid, capped by what is there).

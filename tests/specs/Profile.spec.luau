@@ -242,9 +242,13 @@ tests["DataService.markRaidLogSeen writes only a loaded profile, through the pur
 			"^function DataService%.markRaidLogSeen%(userId: number, now: number%): boolean\n"
 				.. "%s*local profile = DataService%.getProfile%(userId%)"
 				.. "%s*if profile == nil then%s*return false%s*end"
+				-- P2.9: raid_log_opened (AnalyticsService.track never yields), read before the mark.
+				.. '%s*AnalyticsService%.track%(userId, "raid_log_opened", {'
+				.. "%s*entriesSinceLastVisit = Analytics%.entriesSince%(profile%.raidLog, profile%.raidLogSeenAt%),"
+				.. "%s*}%)"
 				.. "%s*return Profile%.markRaidLogSeen%(profile, now%)%s*end\n$"
 		),
-		"loaded profiles only, then the pure forward-only rule, and nothing else (no yield, no attribute)"
+		"loaded profiles only, its analytics event, then the pure forward-only rule, and nothing else"
 	)
 	expect.eq(select(2, string.gsub(code, "raidLogSeenAt%s*=", "")), 0, "DataService never assigns the field itself")
 end
