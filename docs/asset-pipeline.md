@@ -17,7 +17,9 @@ Critters.luau ──build_prompts──▶ assets/jobs/<id>/      prompts + brie
 
 1. Generate 6-10 style exploration images from the STYLE block with 3 different critters.
 2. Pick the best 3-4 and save them as `assets/clean/_style/ref-01.png` and onward.
-3. Every later generation passes these as reference images. This is what keeps 40 critters
+3. Superseded (2026-10-29): the locked reference is a mouse and leaks its ears into other
+   critters, so only `dusk_mouse` passes it; see the style bible. Original rule: every later
+   generation passes these as reference images. This is what keeps 40 critters
    looking like one game. Pick a model that accepts multiple references.
 
 ## Stage 1: build prompts

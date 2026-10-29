@@ -36,7 +36,8 @@ Prompts.BODY_PLANS = {
 
 -- Every critter's plan and its one glowing feature (named, or the model puts the glow anywhere).
 -- A critter may also override its pose when the plan's default would fight its `look` line, and
--- (rarely, pending a catalog change by its owner) the `look` line itself.
+-- its `look` line itself: Legendary and above carry a fuller signature design (the wow ladder),
+-- and the bat hovers pending a catalog change by its owner.
 Prompts.ART = {
 	dusk_mouse = { bodyPlan = "upright", glow = "its oversized ears" },
 	lantern_snail = {
@@ -134,21 +135,40 @@ Prompts.ART = {
 		bodyPlan = "floater",
 		glow = "its lightning-bolt ears",
 		pose = "sitting on its small thundercloud, which floats above the ground",
+		look = "sleek silver-and-white hare in a daring surfer stance on a small crackling thundercloud, tall lightning-bolt ears, a streaming silver mane, tiny arcs of electricity dancing around the cloud; its body is silver, never yellow, with yellow only on the small electric arcs",
 	},
-	lunar_kitsune = { bodyPlan = "quadruped", glow = "its three moon-phase tails" },
+	lunar_kitsune = {
+		bodyPlan = "quadruped",
+		glow = "its three moon-phase tails",
+		look = "elegant spirit fox with exactly three long flowing tails, each tipped with a glowing moon phase (crescent, half and full), a small crescent mark on its forehead and wisps of pale spirit flame at its paws",
+	},
 	abyss_angler = {
 		bodyPlan = "floater",
 		glow = "its full-moon lure",
 		pose = "floating as if swimming, lure held up in front of its face",
+		look = "round deep-sea anglerfish with a sly grin of tiny rounded teeth, flowing ribbon-like fins and a tiny full-moon lure on a curling stalk",
 	},
-	king_bandit = { bodyPlan = "upright", glow = "its trash can lid crown" },
+	king_bandit = {
+		bodyPlan = "upright",
+		glow = "its trash can lid crown",
+		look = "regal raccoon wearing a crown made from a trash can lid and a tattered velvet cape, with a royal sash made from a candy wrapper",
+	},
 	nebula_owl = {
 		bodyPlan = "upright",
 		glow = "the swirling galaxy in its wings",
 		pose = "standing upright on two short feet, wings opened wide",
+		look = "majestic owl with a crest of star-tipped feathers, wings spread wide to show a swirling galaxy inside them, a small star mark on its forehead and tiny planets orbiting its head",
 	},
-	eclipse_wyrm = { bodyPlan = "serpent", glow = "the eclipse ring of its coiled body" },
-	midnight_mew = { bodyPlan = "floater", glow = "its single huge moon eye" },
+	eclipse_wyrm = {
+		bodyPlan = "serpent",
+		glow = "the eclipse ring of its coiled body",
+		look = "serpentine dragon with its own sleek horned dragon head, a crown of small swept-back horns, long whisker barbels and narrow golden eyes, no round ears; its long scaled body coils into a ring that frames a blazing solar eclipse corona behind it",
+	},
+	midnight_mew = {
+		bodyPlan = "floater",
+		glow = "its single huge crescent-moon eye",
+		look = "a creature from another world with a cat-like silhouette made of living night sky: its body is a deep starfield with drifting nebula wisps, its ears trail off into smoke, and one single huge crescent-moon eye sits in the center of its face, with a halo of tiny orbiting stars",
+	},
 }
 
 -- Rarity raises attitude: Commons stay simple, Uncommons get a touch more, Rare and above get the most.
@@ -157,6 +177,30 @@ local EXPRESSION_BY_TIER = {
 	Uncommon = "with a touch of attitude that still reads as cute and friendly",
 }
 local EXPRESSION_RARE_AND_ABOVE = "with lots of character that still reads as cute and charming"
+
+-- The wow ladder (Kian, 2026-10-29): the rarer the critter, the more spectacular it looks.
+-- Commons and Uncommons stay simple; each tier above adds spectacle.
+Prompts.TIER_WOW = {
+	Rare = "Rare tier: one signature flourish that makes it stand out from common critters.",
+	Epic = "Epic tier: a more elaborate, eye-catching silhouette with one standout flourish and a "
+		.. "slightly stronger glow.",
+	Legendary = "Legendary tier: majestic and unforgettable at a glance, a hero of the collection. A unique "
+		.. "silhouette and a face and head designed for this species, not a generic toy face. Its glowing "
+		.. "feature glows strongly, with a soft aura and a few floating light motes in the same color.",
+	Mythic = "Mythic tier: awe-inspiring and celestial, rarer than legendary. Layered, intricate details "
+		.. "that still read as one clear silhouette, a face and head designed for this species, and a "
+		.. "radiant aura with orbiting light motes in the glow color.",
+	Secret = "Secret tier: otherworldly and mysterious, unlike any ordinary animal, the single most "
+		.. "spectacular critter in the game. A one-of-a-kind silhouette, a dramatic aura and drifting light "
+		.. "effects in the glow color.",
+}
+
+-- The style reference image (assets/clean/_style/ref-01.png) is a mouse, and its round ears and face
+-- leak into every critter it is passed with (Kian, 2026-10-29). Only the mouse gets it; the STYLE
+-- block's words carry the finish for everyone else.
+function Prompts.usesStyleReference(species): boolean
+	return species.id == "dusk_mouse"
+end
 
 local HUES: { { below: number, name: string } } = {
 	{ below = 15, name = "red" },
@@ -267,6 +311,12 @@ local function colorLine(species): string
 		.. `ones named.`
 end
 
+-- The tier's wow line, with a leading space, or "" for Common and Uncommon.
+function Prompts.wowLine(species): string
+	local wow = Prompts.TIER_WOW[species.tier]
+	return if wow then ` {wow}` else ""
+end
+
 function Prompts.expressionLine(species): string
 	local tone = EXPRESSION_BY_TIER[species.tier] or EXPRESSION_RARE_AND_ABOVE
 	return `Expression: {species.personality}, {tone}.`
@@ -285,15 +335,19 @@ function Prompts.pose(species): string
 end
 
 function Prompts.view(species, view: string): string
-	return `{Prompts.STYLE} Character: {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}. `
-		.. `{Prompts.expressionLine(species)} {view} view, full body, centered and filling most of the frame, `
-		.. `orthographic camera, evenly lit, plain mid-grey background. {colorLine(species)} {Prompts.AVOID}`
+	return `{Prompts.STYLE} Character: {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}.{Prompts.wowLine(
+		species
+	)} ` .. `{Prompts.expressionLine(species)} {view} view, full body, centered and filling most of the frame, ` .. `orthographic camera, evenly lit, plain mid-grey background. {colorLine(
+		species
+	)} {Prompts.AVOID}`
 end
 
 function Prompts.icon(species): string
-	return `{Prompts.STYLE} Character portrait of {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}. `
-		.. `{Prompts.expressionLine(species)} Three-quarter view, head and body centered and filling the frame, `
-		.. `soft rim light, plain flat light-grey background. {colorLine(species)} {Prompts.AVOID}`
+	return `{Prompts.STYLE} Character portrait of {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}.{Prompts.wowLine(
+		species
+	)} ` .. `{Prompts.expressionLine(species)} Three-quarter view, head and body centered and filling the frame, ` .. `soft rim light, plain flat light-grey background. {colorLine(
+		species
+	)} {Prompts.AVOID}`
 end
 
 return Prompts

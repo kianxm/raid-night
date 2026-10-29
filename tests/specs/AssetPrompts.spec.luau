@@ -29,6 +29,17 @@ tests["prompts never contain hex codes, and always name the body and a single gl
 	end
 end
 
+tests["rarity raises the wow: Commons get no tier line, every tier from Rare up gets its own"] = function()
+	for _, species in CritterCatalog.all() do
+		local prompt = Prompts.view(species, "Front")
+		if species.tier == "Common" or species.tier == "Uncommon" then
+			expect.falsy(string.find(prompt, " tier: ", 1, true), `{species.id} has a tier line`)
+		else
+			expect.truthy(string.find(prompt, `{species.tier} tier: `, 1, true), `{species.id} lacks its tier line`)
+		end
+	end
+end
+
 tests["the icon prompt never asks for an icon frame"] = function()
 	local prompt = Prompts.icon(CritterCatalog.all()[1])
 	expect.falsy(string.find(string.lower(prompt), "inventory icon", 1, true), "icon prompt says inventory icon")
