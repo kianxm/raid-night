@@ -34,6 +34,8 @@ local list: Frame
 local message: TextLabel
 local openButton: TextButton
 local busy = false
+local desktop = false
+local shown: { any } = {} -- targets on screen, in card order (keys 1-3)
 local inRaid = false
 local REFRESH_GAP = 4 -- seconds between explicit refreshes (GetRaidTargets: 3 per 10 s)
 local lastRefresh = -math.huge
@@ -72,6 +74,7 @@ local function tryRaid(target: any)
 end
 
 local function addRow(target: any, order: number)
+	shown[order] = target
 	local isRevenge = target.isRevenge == true
 	local accent = if isRevenge then C.revenge else C.go
 	local card = Instance.new("Frame")
@@ -130,6 +133,11 @@ local function addRow(target: any, order: number)
 		tag.Position = UDim2.new(1, -Theme.space.s2, 0, Theme.space.s2 + 22)
 	end
 
+	if desktop then
+		local cap = Ui.keycap(card, tostring(order))
+		cap.Position = UDim2.fromOffset(-10, -12)
+	end
+
 	local go = Theme.button(
 		card,
 		"Go",
@@ -145,6 +153,7 @@ local function addRow(target: any, order: number)
 end
 
 local function refresh(fresh: boolean?)
+	table.clear(shown)
 	for _, child in list:GetChildren() do
 		if child:IsA("Frame") or child:IsA("TextLabel") then
 			child:Destroy()
@@ -184,7 +193,7 @@ end
 
 function RaidPortalController.start()
 	local gui = Ui.screenGui("RaidPortal", 3, Players.LocalPlayer:WaitForChild("PlayerGui"))
-	local desktop = HudLayout.mode(UserInputService.TouchEnabled, UserInputService.KeyboardEnabled) == "desktop"
+	desktop = HudLayout.mode(UserInputService.TouchEnabled, UserInputService.KeyboardEnabled) == "desktop"
 
 	-- Left edge, vertically centered: out of the thumbstick zone (bottom-left), the Glow panel
 	-- (top-left) and the den chip. On PC the hotbar's slot 3 opens the portal, so no button.
@@ -257,6 +266,26 @@ function RaidPortalController.start()
 	message.Visible = false
 
 	openButton.Activated:Connect(open)
+
+	-- PC keys while the portal is open: 1-3 raid that card, Enter raids the first, Esc closes.
+	if desktop then
+		local KEYS =
+			{ [Enum.KeyCode.One] = 1, [Enum.KeyCode.Two] = 2, [Enum.KeyCode.Three] = 3, [Enum.KeyCode.Return] = 1 }
+		UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+			if processed or not portal.Visible then
+				return
+			end
+			if input.KeyCode == Enum.KeyCode.Escape then
+				close()
+				return
+			end
+			local index = KEYS[input.KeyCode]
+			local target = if index then shown[index] else nil
+			if target then
+				tryRaid(target)
+			end
+		end)
+	end
 
 	RaidApi.raidStarted:Connect(function()
 		inRaid = true
