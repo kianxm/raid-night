@@ -25,6 +25,8 @@
 	          with server-tracked arguments (glowRequested 0, D-015). "InFlight" is retried with
 	          the identical arguments; then the lock clears and both dens are refreshed.
 
+	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
+
 	Server API:
 	  requestGrab(player, plot, padIndex) -> (ok, reason?)  start a server-timed grab hold
 	  cancelGrab(player)                                     stop a hold (prompt released)
@@ -57,6 +59,8 @@ local DataService = require(script.Parent.DataService)
 local EscrowService = require(script.Parent.EscrowService)
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 local IncomeService = require(script.Parent.IncomeService) :: any
+local RaidFolder = script.Parent.Parent.Raid
+local Lockdown = require(RaidFolder.Lockdown)
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
@@ -149,14 +153,8 @@ local function refreshUser(userId: number)
 	end
 end
 
--- Part C replaces these with the den's Lockdown state.
-local function lockdownActive(_plot: number): boolean
-	return false
-end
-
-local function lockdownBlocks(_player: Player, _plot: number): boolean
-	return false
-end
+local lockdownActive = Lockdown.isActive
+local lockdownBlocks = Lockdown.blocks
 
 -- Grab --------------------------------------------------------------------------------------------
 
@@ -505,6 +503,20 @@ function RaidService.start()
 
 	IncomeService.setCritterLock(isLocked)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	Lockdown.start(
+		remotes :: Folder,
+		function(plot: number): number?
+			return (ownerOf(plot))
+		end,
+		rootOf,
+		function(player: Player)
+			local carry = carries[player]
+			local root = rootOf(player)
+			if carry and root then
+				carry.lastPos = root.Position -- a server push-back is not a teleport by the client
+			end
+		end
+	)
 
 	local carryClock, promptClock = 0, PROMPT_TICK
 	RunService.Heartbeat:Connect(function(dt: number)
@@ -513,6 +525,7 @@ function RaidService.start()
 		promptClock += dt
 		if carryClock >= CARRY_TICK then
 			carryClock = 0
+			guard("lockdown", Lockdown.step)
 			guard("carries", stepCarries)
 		end
 		if promptClock >= PROMPT_TICK then

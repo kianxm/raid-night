@@ -12,6 +12,7 @@ local expect = require("../lib/expect")
 
 local FILES = {
 	"src/Server/Services/RaidService.luau",
+	"src/Server/Raid/Lockdown.luau",
 }
 
 local function codeOnly(source: string): string
@@ -35,6 +36,9 @@ end
 local tests = {}
 
 tests["RaidService reads Config.Flags only through Escrow.canStartTransfer"] = function()
+	for i = 2, #FILES do
+		expect.eq(count(codeOnly(fs.readFile(FILES[i])), "Flags"), 0, `{FILES[i]} reads a flag`)
+	end
 	local code = codeOnly(fs.readFile(FILES[1]))
 	expect.eq(count(code, "Flags"), 1, "exactly one flag read")
 	expect.eq(count(code, 'Escrow.canStartTransfer(Config.Flags, "Live"'), 1, "and it is the kill-switch check")
