@@ -85,3 +85,34 @@ result (Kian, 2026-10-28: 01 and 02); the notes are the assets agent's read agai
 - "Angler" pulls in fishing rods. Add "no props, no fishing gear".
 - Every critter came out bipedal with stubby humanoid legs, including the crab and the fish.
   Decide whether that is the house style or whether body plans should follow the animal.
+
+## P2.1 critter fronts (D-040)
+
+Model `seedream_v4_5`, quality high, 1:1, 1 credit each, paid from credits. Every job passes
+`assets/clean/_style/ref-01.png` (Higgsfield media `1a9b2727-4dcc-4618-a52d-3f6e4569c4f3`) as an
+image reference, and appends "Use the reference image only for the art style, surface finish and
+proportions; do not copy its character, species, colors or pose." to `front.txt`. Raw files and
+job IDs are in `assets/raw/<id>/` (`jobs.txt`). "Kept?" is Gate 1 (Kian); "pending" until then.
+
+| Date | Critter | Stage | Model | Credits | Kept? | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-29 | wick_cat | front-01 | seedream_v4_5 | 1 | pending | Quadruped, single glow (candle on tail), matte. Best of batch 1 |
+| 2026-10-29 | lantern_snail | front-01 | seedream_v4_5 | 1 | no | Arms and legs: "short stubby limbs" overrode the snail body |
+| 2026-10-29 | snooze_bat | front-01 | seedream_v4_5 | 1 | no | Hangs from strings; an eye glows (no glow named) |
+| 2026-10-29 | puddle_jelly | front-01 | seedream_v4_5 | 1 | no | Arms and legs; glow on a highlight blob |
+| 2026-10-29 | static_crab | front-01 | seedream_v4_5 | 1 | no | TV held in front again; extra forehead glow |
+| 2026-10-29 | lantern_snail | front-02 | seedream_v4_5 | 1 | pending | Limbless, sleepy. Lantern has a hanger string and a second spiral shell |
+| 2026-10-29 | snooze_bat | front-02 | seedream_v4_5 | 1 | no | Still hanging (sent before Kian chose hovering) |
+| 2026-10-29 | puddle_jelly | front-02 | seedream_v4_5 | 1 | pending | Limbless, tendrils glow. Sits in a puddle; reads grumpy, not dreamy |
+| 2026-10-29 | static_crab | front-02 | seedream_v4_5 | 1 | pending | TV on its back, screen is the only glow, suspicious face |
+| 2026-10-29 | snooze_bat | front-03 | seedream_v4_5 | 1 | pending | Hovering, eyes closed, pompom glows |
+| 2026-10-29 | puddle_newt | front-01 | seedream_v4_5 | 1 | pending | Reads as a frog (no tail), glossy rather than matte |
+| 2026-10-29 | sock_moth | front-01 | seedream_v4_5 | 1 | pending | Antenna tips glow; sock held, not worn as a cape; fluffy body |
+| 2026-10-29 | drama_possum | front-01 | seedream_v4_5 | 1 | pending | Quadruped, tail tip glows; expression mild for "dramatic" |
+| 2026-10-29 | lid_raccoon | front-01 | seedream_v4_5 | 1 | pending | Upright, lid rim glows |
+| 2026-10-29 | pocket_whale | front-01 | seedream_v4_5 | 1 | pending | Floating, constellation glow, clean silhouette |
+
+Batch 1 lessons (folded into `tools/assets/Prompts.luau`): "short stubby limbs" adds limbs to
+limbless animals, so it now applies only where the animal has limbs; unnamed glows land anywhere,
+so every critter names its glowing feature; hanging poses bring strings, so the AVOID block bans
+strings, ropes, hooks and hangers. 3D quote: Tripo H3.1 multiview 9 credits, Meshy 30.
