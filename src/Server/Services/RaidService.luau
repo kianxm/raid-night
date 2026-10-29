@@ -5,14 +5,26 @@
 	Runs raids: live steals between players in this server (P0.5), and later async raids into
 	pocket dens rebuilt from snapshots (Phase 1).
 
-	Live stealing (decisions D-002, D-003, D-014, D-015). The server decides everything; the rules
-	are pure functions in Shared/RaidRules.luau and this file only feeds them server state.
+	Live stealing (decisions D-002, D-003, D-014, D-015, D-031, D-034). The server decides
+	everything; the rules are pure functions in Shared/RaidRules.luau and this file only feeds them
+	server state.
 	  Grab    Every pad has a "StealPrompt" ProximityPrompt. Holding it asks for a grab; the
 	          server times the hold itself (Config.LiveRaid.grabHoldSeconds) and re-checks
 	          RaidRules.canGrabLive on every frame: kill switch (Escrow.canStartTransfer, the
 	          only Config.Flags read), not your den, owner online and loaded, one carry at a time,
-	          range to the server pad part. The critter is the one the owner's PROFILE has on
-	          that pad; models and attributes never decide it. The owner gets BeingRaidedLive.
+	          live protection, the pair limit, the post-loss safety window (and no other carry
+	          from that den under way), range to the server pad part. The critter is the one the
+	          owner's PROFILE has on that pad; models and attributes never decide it. The owner
+	          gets BeingRaidedLive when the hold completes.
+	          The protection base (D-034) is Economy.denRate of the owner's profile when the hold
+	          is accepted, before anything could tip the owner off; it rides with the hold and the
+	          carry into every transferLive attempt.
+	  Loss    When a live loss lands (Committed with the critter in the raider's profile, or given
+	          up while InFlight, since recovery may still land it) the den's lastLiveLossAt is set
+	          (server memory, keyed by owner userId, cleared when the owner leaves or the stand-in
+	          is removed). Display-only den attributes LiveProtected and LiveGrabReadyAt
+	          (workspace:GetServerTimeNow()) follow it, the owner's profile and the UTC day; prompts
+	          on a den that would refuse every grab are hidden.
 	  Carry   Walk speed = base * RaidRules.carrySpeedMultiplier(weight), set by the server, with
 	          a placeholder over the raider's head. The critter is locked in IncomeService
 	          (setCritterLock) so it is not drawn on its pad and the owner cannot move it.
@@ -24,14 +36,15 @@
 	          died, left, or the owner left: the lock clears and the critter is drawn on its pad
 	          again. No profile is ever written.
 	  Escape  The carrier is inside their OWN den -> EscrowService.transferLive on its own thread
-	          with server-tracked arguments (glowRequested 0, D-015). "InFlight" is retried with
-	          the identical arguments after 2, 5 and 10 s (never past 20 s); then the lock clears
-	          and both dens are refreshed.
+	          with server-tracked arguments (glowRequested 0, D-015; liveBaseRate, D-034).
+	          "InFlight" is retried with the identical arguments after 2, 5 and 10 s (never past
+	          20 s); then the lock clears and both dens are refreshed.
 	  End     Every carry ends with Net.Pushes.RaidEnded to the raider (decision D-020):
 	            raidId ""             dropped before the escape; escaped = false
 	            raidId, escaped true  Committed, and the critter is in the raider's profile
 	            raidId, escaped false NOT confirmed: Refused (nothing moved), Committed with
-	                                  nothing stolen, or still InFlight after the last retry. In
+	                                  nothing stolen (D-033: the den became live-protected
+	                                  before the debit), or still InFlight after the last retry. In
 	                                  the InFlight case recovery may still commit it later; the
 	                                  raider's DenChanged/Inventory shows the truth when it lands.
 
@@ -61,6 +74,7 @@ local StarterPlayer = game:GetService("StarterPlayer")
 local Shared = ReplicatedStorage.Shared
 local Config = require(Shared.Config)
 local CritterCatalog = require(Shared.CritterCatalog)
+local Economy = require(Shared.Economy)
 local Escrow = require(Shared.Escrow)
 local Net = require(Shared.Net)
 local Plots = require(Shared.Plots)
@@ -84,9 +98,11 @@ export type StandIn = {
 	redraw: () -> (), -- draws its pad critters (IncomeService only draws real players' dens)
 }
 
-type Hold = { plot: number, padIndex: number, critterUid: string, startedAt: number }
+-- liveBaseRate: Economy.denRate of the owner's den when the hold was accepted (decision D-034).
+type Hold = { plot: number, padIndex: number, critterUid: string, startedAt: number, liveBaseRate: number }
 type Carry = {
 	defenderUserId: number,
+	liveBaseRate: number, -- from the hold; passed unchanged to every transferLive attempt
 	plot: number,
 	padIndex: number,
 	critterUid: string,
@@ -119,8 +135,16 @@ local RaidService = {}
 local holds: { [Player]: Hold } = {}
 local carries: { [Player]: Carry } = {}
 -- "<ownerUserId>:<uid>" -> who holds it, while carried or in escrow. Also counts steals in
--- flight against the owner's loss cap and the pair limit.
+-- flight from the owner's den (any at all refuses a grab: PostLossSafety) and toward the pair limit.
 local locked: { [string]: { owner: number, raider: number } } = {}
+-- Owner userId -> when their den last lost a critter to a live steal (decision D-031): `at` in unix
+-- seconds WITH the fraction (os.time()'s clock, which canGrabLive's whole-second `now` is compared
+-- against, so grabs reopen no earlier than the LiveGrabReadyAt countdown ends), and `serverAt` on
+-- workspace:GetServerTimeNow() for LiveGrabReadyAt. Server memory only, never persisted; cleared
+-- when the owner leaves.
+local lastLoss: { [number]: { at: number, serverAt: number } } = {}
+-- What each den's LiveProtected / LiveGrabReadyAt attributes show (written on change only).
+local shownDen: { [number]: { protected: boolean?, readyAt: number? } } = {}
 local prompts: { [BasePart]: ProximityPrompt } = {}
 local windows: { [Player]: { start: number, count: number } } = {}
 local standIns: { [number]: StandIn } = {} -- plot -> stand-in; stays empty outside Studio
@@ -219,6 +243,50 @@ local function refreshUser(userId: number)
 	end
 end
 
+-- The den this user owns in this server (a stand-in counts), or nil.
+local function denOf(userId: number): number?
+	for plot = 1, Plots.Layout.plotCount do
+		if ownerOf(plot) == userId then
+			return plot
+		end
+	end
+	return nil
+end
+
+-- Display only (D-031): LiveProtected and LiveGrabReadyAt follow the den's current owner, their
+-- profile and the UTC day. Runs every PROMPT_TICK, and at once when a loss lands or a den is
+-- assigned. The server never reads them back.
+local function refreshDen(plot: number)
+	local ownerUserId, ownerProfile = ownerOf(plot)
+	local protected = if ownerProfile then RaidRules.liveProtected(ownerProfile, os.time()) else nil
+	local loss = if ownerUserId then lastLoss[ownerUserId] else nil
+	local readyAt = if loss then RaidRules.liveGrabReadyAt(loss.serverAt) else nil
+	local shown = shownDen[plot]
+	if not shown or shown.protected ~= protected or shown.readyAt ~= readyAt then
+		shownDen[plot] = { protected = protected, readyAt = readyAt }
+		local model = DenWorldService.getModel(plot)
+		model:SetAttribute("LiveProtected", protected)
+		model:SetAttribute("LiveGrabReadyAt", readyAt)
+	end
+end
+
+local function refreshDens()
+	for plot = 1, Plots.Layout.plotCount do
+		refreshDen(plot)
+	end
+end
+
+-- A live loss landed (or may still land through recovery) on this owner's den: start the
+-- post-loss safety window. An owner who already left has no den here to protect.
+local function recordLoss(defenderUserId: number)
+	local plot = denOf(defenderUserId)
+	if plot then
+		local at = DateTime.now().UnixTimestampMillis / 1000
+		lastLoss[defenderUserId] = { at = at, serverAt = workspace:GetServerTimeNow() }
+		refreshDen(plot)
+	end
+end
+
 local lockdownActive = Lockdown.isActive
 local lockdownBlocks = Lockdown.blocks
 
@@ -251,6 +319,7 @@ local function checkGrab(player: Player, plot: number, padIndex: number): (boole
 		end,
 		inFlightForOwner = forOwner,
 		inFlightForPair = forPair,
+		lastLiveLossAt = if ownerUserId and lastLoss[ownerUserId] then lastLoss[ownerUserId].at else nil,
 		distance = if pad and root then (root.Position - pad.Position).Magnitude else math.huge,
 		now = os.time(),
 	})
@@ -348,7 +417,7 @@ local function drop(player: Player, carry: Carry, why: string)
 	debugLog(`{player.Name} dropped {carry.speciesId} ({why}); back on den {carry.plot} pad {carry.padIndex}`)
 end
 
-local function startCarry(player: Player, plot: number, padIndex: number, critter: Critter)
+local function startCarry(player: Player, plot: number, padIndex: number, critter: Critter, liveBaseRate: number)
 	local ownerUserId = ownerOf(plot)
 	local species = CritterCatalog.get(critter.speciesId)
 	local root = rootOf(player)
@@ -363,6 +432,7 @@ local function startCarry(player: Player, plot: number, padIndex: number, critte
 	local walkSpeed = RaidRules.carryWalkSpeed(StarterPlayer.CharacterWalkSpeed, species.weight)
 	local carry: Carry = {
 		defenderUserId = ownerUserId,
+		liveBaseRate = liveBaseRate,
 		plot = plot,
 		padIndex = padIndex,
 		critterUid = critter.uid,
@@ -408,11 +478,20 @@ function RaidService.requestGrab(player: Player, plot: any, padIndex: any): (boo
 		return false, "BadRequest"
 	end
 	local ok, reason, critter = checkGrab(player, plot, padIndex)
-	if not ok or not critter then
+	local _, ownerProfile = ownerOf(plot)
+	if not ok or not critter or not ownerProfile then
 		debugLog(`grab refused for {player.Name} (den {plot} pad {padIndex}): {reason}`)
-		return false, reason
+		return false, reason or RaidRules.Reason.OwnerNotReady
 	end
-	holds[player] = { plot = plot, padIndex = padIndex, critterUid = critter.uid, startedAt = os.clock() }
+	-- D-034: the base is measured here, at the first server event of the grab. The owner gets no
+	-- signal before the hold completes, so they cannot shrink the den first.
+	holds[player] = {
+		plot = plot,
+		padIndex = padIndex,
+		critterUid = critter.uid,
+		startedAt = os.clock(),
+		liveBaseRate = Economy.denRate(ownerProfile),
+	}
 	return true, nil
 end
 
@@ -434,12 +513,23 @@ local function stepHolds()
 			debugLog(`grab hold cancelled for {player.Name}: {reason or "critter changed"}`)
 		elseif RaidRules.grabHoldDone(hold.startedAt, os.clock()) then
 			holds[player] = nil
-			startCarry(player, hold.plot, hold.padIndex, critter)
+			startCarry(player, hold.plot, hold.padIndex, critter, hold.liveBaseRate)
 		end
 	end
 end
 
 -- Carry, drop, escape -----------------------------------------------------------------------------
+
+-- After a Committed transferLive: is the critter now the raider's? When the raider's profile is
+-- gone (they left), it is enough that the owner's profile no longer has it.
+local function stolen(raiderUserId: number, defenderUserId: number, critterUid: string): boolean
+	local raiderProfile = DataService.getProfile(raiderUserId)
+	if raiderProfile then
+		return raiderProfile.critters[critterUid] ~= nil
+	end
+	local defenderProfile = DataService.getProfile(defenderUserId)
+	return not (defenderProfile and defenderProfile.critters[critterUid] ~= nil)
+end
 
 local function escape(player: Player, carry: Carry)
 	carries[player] = nil
@@ -453,6 +543,7 @@ local function escape(player: Player, carry: Carry)
 	local defenderUserId = carry.defenderUserId
 	local critterUid = carry.critterUid
 	local speciesId = carry.speciesId
+	local liveBaseRate = carry.liveBaseRate
 	debugLog(`{player.Name} escaped with {carry.speciesId}; raid {raidId} handed to EscrowService`)
 	task.spawn(function()
 		local status, reason = "InFlight", nil
@@ -462,14 +553,39 @@ local function escape(player: Player, carry: Carry)
 		end
 		local firstCallAt = os.clock()
 		for attempt = 1, attempts do
-			local ok, s, r =
-				pcall(EscrowService.transferLive, raidId, raiderUserId, defenderUserId, critterUid, LIVE_GLOW, false)
+			local ok, s, r = pcall(
+				EscrowService.transferLive,
+				raidId,
+				raiderUserId,
+				defenderUserId,
+				critterUid,
+				LIVE_GLOW,
+				false,
+				liveBaseRate
+			)
 			status, reason = if ok then s else "InFlight", if ok then r else tostring(s)
 			local delay = ESCAPE_RETRY_DELAYS[attempt]
 			if status ~= "InFlight" or not delay or os.clock() - firstCallAt + delay > ESCAPE_RETRY_WINDOW then
 				break
 			end
 			task.wait(delay)
+		end
+		local line = `raid {raidId}: transferLive {status}{if reason then ` ({reason})` else ""}`
+		local escaped = false
+		-- Before the lock clears, so no grab slips in between (D-031); guarded so it can never
+		-- strand the lock. Given up InFlight counts as a loss too: recovery may still land it.
+		local judged, judgeError = pcall(function()
+			escaped = status == "Committed" and stolen(raiderUserId, defenderUserId, critterUid)
+			if status == "Committed" and not escaped then
+				-- D-033: the den became live-protected before the debit, so it committed empty.
+				warn(`[RaidService] raid {raidId} committed but stole nothing: {critterUid} is not the raider's`)
+			end
+			if escaped or status == "InFlight" then
+				recordLoss(defenderUserId)
+			end
+		end)
+		if not judged then
+			warn(`[RaidService] raid {raidId}: could not record the outcome: {judgeError}`)
 		end
 		if status == "InFlight" then
 			warn(`[RaidService] raid {raidId}: gave up retrying while InFlight; EscrowService recovery settles it`)
@@ -484,16 +600,8 @@ local function escape(player: Player, carry: Carry)
 		if not refreshed then
 			warn(`[RaidService] refresh after raid {raidId} failed: {refreshError}`)
 		end
-		local line = `raid {raidId}: transferLive {status}{if reason then ` ({reason})` else ""}`
-		local escaped = status == "Committed"
-		if escaped then
+		if status == "Committed" then
 			debugLog(line)
-			local raiderProfile = DataService.getProfile(raiderUserId)
-			if raiderProfile and raiderProfile.critters[critterUid] == nil then
-				-- e.g. the owner hit the loss cap first: the raid committed with nothing in it.
-				warn(`[RaidService] raid {raidId} committed but stole nothing: {critterUid} is not the raider's`)
-				escaped = false
-			end
 		else
 			warn(`[RaidService] {line}`)
 		end
@@ -584,18 +692,28 @@ local function ensurePrompt(plot: number, padIndex: number, pad: BasePart): Prox
 	return created
 end
 
+-- Would every grab from this den be refused right now, whoever asks? Live protection, the
+-- post-loss safety window, or another carry from it under way (D-031). Display only.
+local function denClosed(ownerUserId: number, ownerProfile: PlayerProfile): boolean
+	local now = os.time()
+	local loss = lastLoss[ownerUserId]
+	return RaidRules.liveProtected(ownerProfile, now)
+		or (loss ~= nil and now < RaidRules.liveGrabReadyAt(loss.at))
+		or (inFlight(ownerUserId, 0)) > 0
+end
+
 -- Shows a pad's prompt only while raids are on and it holds a critter that can be taken. Display
--- only: every
--- grab is checked again on the server.
+-- only: every grab is checked again on the server.
 local function syncPrompts()
 	local on = liveAllowed()
 	for plot = 1, Plots.Layout.plotCount do
 		local ownerUserId, ownerProfile = ownerOf(plot)
+		local open = on and ownerUserId ~= nil and ownerProfile ~= nil and not denClosed(ownerUserId, ownerProfile)
 		for padIndex, pad in DenWorldService.getPads(plot) do
 			local prompt = ensurePrompt(plot, padIndex, pad)
 			local critter = if ownerProfile then RaidRules.padCritter(ownerProfile, padIndex) else nil
 			local species = if critter then CritterCatalog.get(critter.speciesId) else nil
-			prompt.Enabled = on and species ~= nil and not isLocked(ownerUserId :: number, (critter :: Critter).uid)
+			prompt.Enabled = open and species ~= nil and not isLocked(ownerUserId :: number, (critter :: Critter).uid)
 			prompt.ObjectText = if species then species.name else ""
 		end
 	end
@@ -608,6 +726,7 @@ local function setStandIn(plot: number, standIn: StandIn?)
 	local old = standIns[plot]
 	standIns[plot] = standIn
 	if old and old ~= standIn then
+		lastLoss[old.userId] = nil
 		for raider, carry in carries do
 			if carry.defenderUserId == old.userId then
 				drop(raider, carry, "stand-in removed")
@@ -622,7 +741,10 @@ local function describe(): string
 		table.insert(parts, `{player.Name} holding den {hold.plot} pad {hold.padIndex}`)
 	end
 	for player, carry in carries do
-		table.insert(parts, `{player.Name} carrying {carry.speciesId} from den {carry.plot} pad {carry.padIndex}`)
+		table.insert(
+			parts,
+			`{player.Name} carrying {carry.speciesId} from den {carry.plot} pad {carry.padIndex} (base {carry.liveBaseRate} Glow/s)`
+		)
 	end
 	local lockCount = 0
 	for _ in locked do
@@ -632,6 +754,16 @@ local function describe(): string
 	for plot = 1, Plots.Layout.plotCount do
 		if Lockdown.isActive(plot) then
 			table.insert(parts, `den {plot} in Lockdown`)
+		end
+		local ownerUserId, ownerProfile = ownerOf(plot)
+		local loss = if ownerUserId then lastLoss[ownerUserId] else nil
+		if ownerProfile and RaidRules.liveProtected(ownerProfile, os.time()) then
+			table.insert(parts, `den {plot} live-protected today`)
+		end
+		if loss then
+			local wait = math.max(0, math.ceil(RaidRules.liveGrabReadyAt(loss.at) - os.time()))
+			local ago = math.max(0, os.time() - math.floor(loss.at))
+			table.insert(parts, `den {plot} last live loss {ago} s ago (grabs reopen in {wait} s)`)
 		end
 	end
 	return table.concat(parts, "; ")
@@ -650,6 +782,7 @@ end
 local function onPlayerRemoving(player: Player)
 	holds[player] = nil
 	windows[player] = nil
+	lastLoss[player.UserId] = nil -- the den is freed; the next owner starts clean
 	local carry = carries[player]
 	if carry then
 		drop(player, carry, "raider left")
@@ -687,6 +820,11 @@ function RaidService.start()
 
 	IncomeService.setCritterLock(isLocked)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	DenWorldService.onPlotAssigned(function(_player: Player, plot: number)
+		guard("den attributes", function()
+			refreshDen(plot)
+		end)
+	end)
 	Lockdown.start(
 		remotes :: Folder,
 		function(plot: number): number?
@@ -725,6 +863,7 @@ function RaidService.start()
 		if promptClock >= PROMPT_TICK then
 			promptClock = 0
 			guard("prompts", syncPrompts)
+			guard("den attributes", refreshDens) -- also catches profile loads and the UTC day roll
 		end
 	end)
 end
