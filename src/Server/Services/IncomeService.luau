@@ -57,7 +57,6 @@
 	                                the old inputs, then applies { vip?, paidRandomRestricted?,
 	                                lanternNightUntil? } (Economy.changeGlowInputs)
 	  glowFactor(userId, now)       the online factor in effect now (1 = none), for display
-=======
 	  tutorialCritterAvailable(player)  true while grantTutorialCritter could still grant (the
 	                                player is in onboarding and short of its stealHome step)
 	  grantTutorialCritter(player)  the tutorial den steal (P2.6, D-064): grants one fixed Common,
