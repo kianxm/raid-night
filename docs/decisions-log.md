@@ -3,6 +3,12 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-009 · 2026-10-28 · C1 runs in parallel with the P0.3b fix round
+Context: C1 was queued behind #11 only to avoid edit conflicts in Types, Config and
+contracts.md. Decision: start C1 now with a second data agent; it stays out of Escrow,
+EscrowService and DataService and keeps its edits in separate spots; whichever merges second
+rebases. Why: C1 is on the critical path to P0.5. Reversible: yes.
+
 ### D-008 · 2026-10-28 · Deferred to Phase 1: escrow GDPR ids and record cleanup
 Context: reviewer suggestions on PR #11. Decision: return userIds from escrow UpdateAsync
 transforms for erasure tooling, and clean up terminal escrow records, in Phase 1 (P1.1).
