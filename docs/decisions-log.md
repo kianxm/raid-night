@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-051 · 2026-10-29 · Raid UI refusal and revenge-join details
+Context: ui on #102. Decision: the client doesn't check Config.Flags itself; any refused
+StartRaid shows "Can't raid that den now" (no distinct "raids are off" copy until the server
+returns a reason). On a retryable live-join failure the UI offers "Raid their den instead"
+rather than starting the async raid automatically. The block list comes from
+StarterGui:GetCore("GetBlockedUserIds") plus the block/unblock core events (the documented
+client route). Why: the server stays the only judge; the player chooses the fallback.
+Reversible: yes.
+
 ### D-050 · 2026-10-29 · Async raid details (P1.3a)
 Context: raid on #100/#101. Decision: (1) MatchmakingService.noteRaided runs on escape with the
 snapshot's power, not at StartRaid, so a failed raid doesn't hide a den for 4 h; (2) reaching the
