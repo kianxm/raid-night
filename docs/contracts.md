@@ -27,6 +27,9 @@ Profile storage: ProfileStore store `PlayerProfiles`, key `Player_<userId>` (`Da
 
 Optional `PlayerProfile.raidLogSeenAt` (unix seconds): when the player last opened their raid
 log, written by DataService when `GetRaidLog` is answered. Missing = never; no migration.
+`DataService.markRaidLogSeen(userId, now)` writes it: server `os.time()` only, forward only, a
+non-finite `now` is ignored, and only on a profile loaded in that server (`Profile.markRaidLogSeen`).
+It never changes the `RaidLogSeenAt` attribute, which keeps its load-time value all session.
 
 Studio-only memory and test profiles (decision D-019, details in `DataService.luau`):
 

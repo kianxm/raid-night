@@ -26,6 +26,8 @@
 	  getProfile(userId)      the live profile for a player in THIS server, or nil
 	  onProfileLoaded(fn)     fn(player, profile) after a load; also runs for already-loaded ones
 	  onProfileReleasing(fn)  fn(userId, profile) right before the final save; must not yield
+	  markRaidLogSeen(userId, now)  sets the loaded profile's raidLogSeenAt to the server's now
+	                          (Profile.markRaidLogSeen: forward only). No-op if not loaded here
 	  saveNow(userId, confirm)  saves now and yields until a save whose written data passes
 	                          confirm(savedData) lands: (true) or (false, reason). Bounded: 3 tries
 	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
@@ -343,6 +345,20 @@ function DataService.onProfileReleasing(fn: (number, PlayerProfile) -> ()): () -
 			table.remove(releasingListeners, index)
 		end
 	end
+end
+
+-- RaidService's GetRaidLog: marks the player's raid log seen at `now`, which must be the
+-- server's os.time(), never a client value (Profile.markRaidLogSeen ignores a non-finite or
+-- earlier time). Does nothing when the profile is not loaded in this server. Never yields and
+-- never forces a save: a display-only time can wait for the next autosave or the leave. It leaves
+-- the RaidLogSeenAt attribute alone, since that keeps its load-time value all session
+-- (docs/contracts.md). Returns whether it wrote.
+function DataService.markRaidLogSeen(userId: number, now: number): boolean
+	local profile = DataService.getProfile(userId)
+	if profile == nil then
+		return false
+	end
+	return Profile.markRaidLogSeen(profile, now)
 end
 
 -- One save request. "saved": a save landed whose written data passes `confirm`. "lost": the

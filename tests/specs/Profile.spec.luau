@@ -1,6 +1,7 @@
 --!strict
 local expect = require("../lib/expect")
 local fixtures = require("../lib/fixtures")
+local source = require("../lib/source")
 local Profile = require("../../src/Shared/Profile")
 local Config = require("../../src/Shared/Config")
 local Escrow = require("../../src/Shared/Escrow")
@@ -204,6 +205,48 @@ tests["the untradeable flag survives an escrow transfer"] = function()
 	expect.eq(escrowed and escrowed.untradeable, true, "so does the escrow record")
 	local afterLock = NOW + Config.Raid.stolenTradeLockSeconds + 1
 	expect.falsy(Profile.isTradeable(stolen, afterLock), "still untradeable after the stolen lock")
+end
+
+tests["markRaidLogSeen moves forward only and ignores non-finite times"] = function()
+	local p: any = Profile.new(7, NOW)
+	expect.eq(p.raidLogSeenAt, nil, "a new profile has never seen its log")
+	expect.truthy(Profile.markRaidLogSeen(p, NOW), "first open writes")
+	expect.eq(p.raidLogSeenAt, NOW)
+	expect.truthy(Profile.markRaidLogSeen(p, NOW), "the same time again is a harmless repeat")
+	expect.falsy(Profile.markRaidLogSeen(p, NOW - 1), "an earlier time is ignored")
+	for _, bad in { 0 / 0, math.huge, -math.huge, "1900000000" :: any } do
+		expect.falsy(Profile.markRaidLogSeen(p, bad), `{bad} is ignored`)
+	end
+	expect.falsy(Profile.markRaidLogSeen(p, nil :: any), "nil is ignored")
+	expect.eq(p.raidLogSeenAt, NOW, "nothing above moved it")
+	expect.truthy(Profile.markRaidLogSeen(p, NOW + 60), "a later open writes")
+	expect.eq(RaidRules.raidLogSeenAt(p), NOW + 60)
+
+	local never: any = Profile.new(8, NOW)
+	expect.falsy(Profile.markRaidLogSeen(never, -1), "earlier than never (0) is ignored")
+	expect.eq(never.raidLogSeenAt, nil)
+	for _, corrupt in { 0 / 0, math.huge } do
+		never.raidLogSeenAt = corrupt
+		expect.truthy(Profile.markRaidLogSeen(never, NOW), `a stored {corrupt} counts as never and is replaced`)
+		expect.eq(never.raidLogSeenAt, NOW)
+	end
+end
+
+tests["DataService.markRaidLogSeen writes only a loaded profile, through the pure rule"] = function()
+	local code = source.codeOnly(source.read("src/Server/Services/DataService.luau"))
+	local body = source.functionBody(code, "DataService.markRaidLogSeen")
+	expect.truthy(body, "markRaidLogSeen found")
+	expect.truthy(
+		string.find(
+			body :: string,
+			"^function DataService%.markRaidLogSeen%(userId: number, now: number%): boolean\n"
+				.. "%s*local profile = DataService%.getProfile%(userId%)"
+				.. "%s*if profile == nil then%s*return false%s*end"
+				.. "%s*return Profile%.markRaidLogSeen%(profile, now%)%s*end\n$"
+		),
+		"loaded profiles only, then the pure forward-only rule, and nothing else (no yield, no attribute)"
+	)
+	expect.eq(select(2, string.gsub(code, "raidLogSeenAt%s*=", "")), 0, "DataService never assigns the field itself")
 end
 
 return tests
