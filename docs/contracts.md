@@ -105,10 +105,18 @@ Defaults turn on only the features that exist. Adding a flag is a contract chang
 3. Add a test that migrates an old-shape profile.
 4. Never remove or rename a persisted field without a migration.
 
+An optional field whose absence means the old behavior needs neither a migration nor a
+`SCHEMA_VERSION` bump, but it does need an old-save test (e.g. `untradeable`, D-005).
+
 ## Live raids
 
-Live stealing happens in an online owner's den (RaidService, decision D-003). Tuning lives in
-`Config.LiveRaid`:
+Live stealing happens in an online owner's den (RaidService, decision D-003).
+
+- Carrying or dropping a critter never changes any profile; only an escape committed through
+  Escrow (`EscrowService.transferLive`) moves ownership. A dropped critter goes back to its pad.
+- Phase 0 live steals take the critter only, no stored Glow (D-015).
+
+Tuning lives in `Config.LiveRaid`:
 
 | Key | Launch value | Meaning |
 | --- | --- | --- |
@@ -123,6 +131,7 @@ Live stealing happens in an online owner's den (RaidService, decision D-003). Tu
 - Only the den's owner can start one, and it applies to live raids only.
 - It blocks ENTRY only. Raiders already inside can leave, but a carried critter drops at the
   border.
+- Lockdown blocks every live raider, revenge included (D-013).
 - The cooldown counts from the END of a Lockdown (decision D-011). For a Lockdown started at
   server time `start`: `LockdownUntil = start + lockdownSeconds` (when it ends) and
   `LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds` (the earliest the owner can start
@@ -136,8 +145,8 @@ Attributes the server sets on Instances so clients can draw state without a remo
 server-written and display-only:
 
 - The server keeps the authoritative state in its own tables. It never reads `CarryingUid`,
-  `CarryingSpecies`, `LockdownUntil` or `LockdownReadyAt`, and no server decision ever comes
-  from an attribute.
+  `CarryingSpecies`, `LockdownUntil` or `LockdownReadyAt`, and no gameplay or data decision
+  ever comes from an attribute.
 - Clients must never be trusted for them. A client can change an attribute locally; the change
   does not replicate and must never matter.
 - Times are server time from `workspace:GetServerTimeNow()`, so every client reads one clock.
@@ -163,8 +172,12 @@ built itself, only to decide what to redraw. Clients cannot change those values 
 `Config.Economy.eggMaxTier` (`"Uncommon"` at launch) is the highest tier a bought egg can hatch.
 Tiers up to it keep their `Config.EggOdds` ratios, renormalized to sum to 1
 (`Economy.rollTierUpTo`): Common 0.6875 and Uncommon 0.3125 today, tested in `Config.spec`.
-Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table and ignores
-`eggMaxTier` (decision D-004).
+Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table (from
+P0.4b) and ignores `eggMaxTier` (decision D-004).
+
+If Glow ever becomes purchasable with Robux, Glow eggs become paid random items: the
+renormalized odds must be shown before purchase and PolicyService checks must pass before that
+product ships (open question for Kian; CLAUDE.md rule 6).
 
 ## Tradeability
 
@@ -173,8 +186,9 @@ gifted, such as one from a rescue egg. Missing means tradeable, so this optional
 migration and no `SCHEMA_VERSION` bump; `Profile.spec` checks that an old save reads as
 tradeable.
 
-- `Profile.isTradeable(critter, now)` is the one check: false if `untradeable` is set, or while
-  `stolenLockUntil` is in the future.
+- `Profile.isTradeable(critter, now)` is the minimum check: false if `untradeable` is set, or
+  while `stolenLockUntil` is in the future. Trading adds its own rules when it is designed (e.g.
+  no trade back to the critter's previous owner, which would be ransom).
 - Any future trading or gifting code must refuse a critter for which `Profile.isTradeable` is
   false. The `reviewer` checks for this on every trading or gifting PR.
 - Raids are not trades: escrow moves an untradeable critter like any other, and the flag survives

@@ -9,7 +9,8 @@
 	  3. Get a review from the `reviewer` agent before merging.
 
 	Persisted types (saved to DataStore) are marked [persisted]. Never remove or rename a field on
-	a persisted type without a migration.
+	a persisted type without a migration. An optional field whose absence means the old behavior
+	needs no migration or SCHEMA_VERSION bump, but needs an old-save test (D-005).
 ]]
 
 -- Critter catalog -------------------------------------------------------------------------------
