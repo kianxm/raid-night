@@ -465,7 +465,9 @@ The last three are Kian's launch values, tuned in Phase 3 from live data (P3.9).
 - Only the den's owner can start one, and it applies to live raids only.
 - It blocks ENTRY only. Raiders already inside can leave, but a carried critter drops at the
   border.
-- Lockdown blocks every live raider, revenge included (D-013).
+- Lockdown blocks every live raider, revenge included (D-013). The one exception is a finished
+  lockpick (Gear, below): it lets that raider in for that one Lockdown, and never lets a critter
+  out (it still drops at the border).
 - The cooldown counts from the END of a Lockdown (decision D-011). For a Lockdown started at
   server time `start`: `LockdownUntil = start + lockdownSeconds` (when it ends) and
   `LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds` (the earliest the owner can start
@@ -518,6 +520,59 @@ own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async ra
   `transferAsync`'s 7th argument.
 - StartRaid fails closed when the owner's presence cannot be read (`PresenceUnknown`), and also
   honours, until the den's next snapshot, the shield of an escape this server just completed.
+
+## Gear
+
+Raider gear (P2.10, D-059): `src/Server/Raid/Gear.luau` applies it, the rules are pure in
+`src/Shared/GearRules.luau`, tuning is `Config.Gear`. Levels are the profile's `gear` field
+(`Profile.gearLevel`, 0 = not owned, C6). Raid code only reads them; buying and upgrading is
+economy's (below).
+
+- `Net.Requests.UseGear` `(gearId, target?) -> GearUseResult` (`ok`, `reason?`, `readyAt?`,
+  `charges?`), `Net.Limits.UseGear` (6 per 10 s). `target` is a Vector3 aim point, used by the
+  grapple only. The server checks, in order (`GearRules.canUse`): a known id, level >= 1, the raid
+  kind (the lockpick is refused in a pocket: `LiveOnly`), no lockpick under way, the cooldown, the
+  async raid's charges, free hands (grapple, lockpick), no trap slow on (grapple, coil). Then each
+  effect's own checks; the cooldown and a charge are spent only when the effect happened.
+  `readyAt` is server time (`workspace:GetServerTimeNow()`). `reason` is a `GearRules.Reason`.
+- `Net.Requests.GetGear` `() -> { GearSlot }` (`id`, `level`, `readyAt` (0 = ready), `charges?`
+  (in an async raid), `liveOnly`), in `Profile.GEAR_IDS` order. `Net.Limits.GetGear` 5 per 10 s.
+- `Net.Pushes.GearUsed` `(GearEvent)`, effects only: `state` `"Used"`, `"Done"` /
+  `"Interrupted"` (a lockpick), `"Ended"` (a decoy popped early); `gearId`, `userId`, `at`, and
+  per item `endsAt`, `position`, `from`, `direction`, `radius`, `plot`, `reason`. To every player
+  for the shared world, to the raider only for a pocket.
+- `Net.Requests.UpgradeGear` `(gearId) -> boolean` is reserved for economy's Glow purchase and
+  is **not served yet**. Its cost is `GearRules.upgradeCost(gearId, level)` (level 0 = buying it).
+- Cooldowns and async charges are server memory, per player, cleared on leaving. Gear works only
+  while `raids` is on (RaidService's `Escrow.canStartTransfer(Config.Flags, "Live", false)`).
+
+| Item | Live (shared world) | Async (pocket) |
+| --- | --- | --- |
+| `grapple` | Zip up to `range` studs (horizontal) to a point in server line of sight, with ground under it, at most `maxRise` higher. Never while carrying, never while trapped, never into a den whose Lockdown would push you out | Same, landing on the pocket floor only |
+| `smoke` | A cloud (`radius`, `seconds`). A carrier inside any cloud is tagged at `tagRangeShare` x `Config.LiveRaid.tagRange` | Guards cannot see a raider inside their own cloud (they still tag one they walk into) |
+| `decoy` | A dummy running ahead (`speed`, `seconds`), display only; popped by any other player within tagRange | A guard that sees it chases it instead of the raider; popped when a guard reaches it |
+| `speedCoil` | Walk speed x (1 + `speedBonus`) for `seconds`. A carrier is never sped past the normal walk speed. The carry speed checks allow the coil until `coilGraceSeconds` after it ends | Same |
+| `lockpick` | Stand outside a locked-down den, within `range` of its border, for `pickSeconds`; moving more than `moveTolerance`, the owner within tagRange or the Lockdown ending breaks it. Done: that Lockdown lets you in (`Lockdown.grantPass`) | Refused (`LiveOnly`): a pocket has no Lockdown, and the offline owner cannot answer it |
+
+`Config.Gear`: `maxLevel` (5), `upgradeCostGrowth` (1.8: level L costs `price` x 1.8^(L-1)),
+`coilGraceSeconds` (0.5) and `items.<gearId>` with `price`, `cooldownSeconds`, `asyncCharges`
+(floored; 0 for the lockpick) and the effect sizes above. A key with a `<key>PerLevel` partner is
+`key + perLevel x (level - 1)` (`GearRules.value`, level clamped to 1..maxLevel). Every effect is
+shorter than its own cooldown, so a player has at most one smoke and one decoy out (spec).
+
+| Item | Price | Cooldown (s) | Effect at level 1 | Per level |
+| --- | --- | --- | --- | --- |
+| `grapple` | 2,500 | 20 | range 24, maxRise 6 | cooldown -2, range +3 |
+| `smoke` | 1,500 | 35 | 5 s, radius 8, tagRangeShare 0.5 | cooldown -2, +0.5 s, radius +0.5 |
+| `decoy` | 2,000 | 30 | 5 s at 12 studs/s | cooldown -2, +1 s |
+| `speedCoil` | 3,000 | 40 | 4 s, +15% | cooldown -2, +0.5 s, +4% |
+| `lockpick` | 5,000 | 90 | pick 8 s, range 6, moveTolerance 2 | cooldown -5, pick -1 s |
+
+Async charges: 1 per raid, 2 from level 5 (`asyncCharges` 1 + 0.25 per level, floored). Prices
+and sizes are launch guesses: economy tunes prices, raid tunes effects.
+
+Studio only: `ServerStorage.GearTestHook` (`level <0-5>|off`, `use <gearId> [x y z]`, `reset`,
+`status`) overrides levels in server memory for playtests; it never writes a profile.
 
 ## Replays
 

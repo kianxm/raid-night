@@ -149,6 +149,75 @@ local Config = {
 		presenceRefreshSeconds = 60, -- how often a server rewrites userId -> server presence
 	},
 
+	-- Raider gear (P2.10, decision D-059). Bought (level 1) and upgraded with Glow; levels live on
+	-- the profile (PlayerProfile.gear, Profile.gearLevel). An item key with a `<key>PerLevel`
+	-- partner is worth key + perLevel x (level - 1) (GearRules.value), levels clamped to 1..maxLevel.
+	-- Every effect runs on the server (Raid/Gear.luau); the rules are pure, in GearRules. Prices
+	-- and effect sizes are launch guesses: economy tunes prices, raid tunes effects.
+	Gear = {
+		maxLevel = 5,
+		upgradeCostGrowth = 1.8, -- reaching level L costs price x upgradeCostGrowth^(L - 1)
+		-- After a speed coil ends, the carry speed checks still allow its speed this long: the
+		-- client keeps running fast until the lower WalkSpeed replicates.
+		coilGraceSeconds = 0.5,
+		items = {
+			grapple = {
+				price = 2500,
+				cooldownSeconds = 20,
+				cooldownSecondsPerLevel = -2,
+				asyncCharges = 1, -- uses per async raid (floored)
+				asyncChargesPerLevel = 0.25,
+				range = 24, -- horizontal studs from the root part to the landing
+				rangePerLevel = 3,
+				maxRise = 6, -- studs the landing may sit above the take-off: no roofs, no walls
+			},
+			smoke = {
+				price = 1500,
+				cooldownSeconds = 35,
+				cooldownSecondsPerLevel = -2,
+				asyncCharges = 1,
+				asyncChargesPerLevel = 0.25,
+				seconds = 5,
+				secondsPerLevel = 0.5,
+				radius = 8,
+				radiusPerLevel = 0.5,
+				tagRangeShare = 0.5, -- a live carrier inside smoke is tagged at this share of tagRange
+			},
+			decoy = {
+				price = 2000,
+				cooldownSeconds = 30,
+				cooldownSecondsPerLevel = -2,
+				asyncCharges = 1,
+				asyncChargesPerLevel = 0.25,
+				seconds = 5,
+				secondsPerLevel = 1,
+				speed = 12, -- studs per second it runs, straight ahead of the raider
+			},
+			speedCoil = {
+				price = 3000,
+				cooldownSeconds = 40,
+				cooldownSecondsPerLevel = -2,
+				asyncCharges = 1,
+				asyncChargesPerLevel = 0.25,
+				seconds = 4,
+				secondsPerLevel = 0.5,
+				speedBonus = 0.15, -- walk speed x (1 + bonus); a carrier never beats normal walking
+				speedBonusPerLevel = 0.04,
+			},
+			lockpick = { -- live raids only (GearRules.LIVE_ONLY)
+				price = 5000,
+				cooldownSeconds = 90,
+				cooldownSecondsPerLevel = -5,
+				asyncCharges = 0,
+				asyncChargesPerLevel = 0,
+				pickSeconds = 8, -- standing at a locked den's border; then entry is allowed
+				pickSecondsPerLevel = -1,
+				range = 6, -- studs from the den's border the picker must stand (outside it)
+				moveTolerance = 2, -- studs the picker may drift before the pick breaks
+			},
+		},
+	},
+
 	Snapshot = {
 		intervalSeconds = 120,
 	},

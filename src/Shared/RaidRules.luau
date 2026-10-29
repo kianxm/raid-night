@@ -247,6 +247,9 @@ export type CarryStep = {
 	-- The critter's OWNER to the carrier on X/Z only (height never dodges a tag; nobody else can
 	-- tag); nil when the owner has no character.
 	ownerDistance: number?,
+	-- How close the owner must be to tag; nil = Config.LiveRaid.tagRange. Smoke shrinks it
+	-- (GearRules.carrierTagRange, P2.10).
+	tagRange: number?,
 }
 
 -- The critter the owner's profile has on this pad, or nil. Models and attributes never decide
@@ -443,7 +446,7 @@ end
 	                 the owner's den: a hop across the gap between neighbouring dens never escapes
 	                 (the critter drops)
 	  Escape         inside your own den; home is safe even with the owner close behind
-	  Tagged         the owner within tagRange on X/Z
+	  Tagged         the owner within tagRange on X/Z (s.tagRange when set: smoke, P2.10)
 ]]
 function RaidRules.carryStep(s: CarryStep): (CarryOutcome, number, boolean)
 	local refill = RaidRules.Live.moveRefill * s.walkSpeed * math.max(s.dt, 0)
@@ -464,7 +467,7 @@ function RaidRules.carryStep(s: CarryStep): (CarryOutcome, number, boolean)
 	if s.insideOwnDen then
 		return if crossedStreet then "Escape" else "SkippedStreet", budget, crossedStreet
 	end
-	if s.ownerDistance and s.ownerDistance <= Config.LiveRaid.tagRange then
+	if s.ownerDistance and s.ownerDistance <= (s.tagRange or Config.LiveRaid.tagRange) then
 		return "Tagged", budget, crossedStreet
 	end
 	return "Continue", budget, crossedStreet

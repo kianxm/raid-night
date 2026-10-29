@@ -21,6 +21,14 @@
 	  isActive(plot) -> boolean
 	  blocks(player, plot) -> boolean               would this player be pushed out if in it now?
 	  step()                                        push-backs, border colour, display attributes
+	  current(plot) -> (ownerUserId?, Lockdown?)    the den's owner and Lockdown state (Gear)
+	  grantPass(player, ownerUserId, startedAt)     a finished lockpick (P2.10): this player may
+	                                                enter that owner's den during THAT Lockdown
+	  passOf(player) -> Pass?
+
+	Lockpick passes (P2.10, GearRules.passValid): a passholder is let in like the owner, but only
+	for the Lockdown it was picked in. The way out is unchanged: RaidService still drops a critter
+	carried across the border while the Lockdown lasts.
 ]]
 
 local Players = game:GetService("Players")
@@ -31,6 +39,7 @@ local Shared = ReplicatedStorage.Shared
 local Net = require(Shared.Net)
 local Plots = require(Shared.Plots)
 local RaidRules = require(Shared.RaidRules)
+local GearRules = require(Shared.GearRules)
 local DenWorldService = require(script.Parent.Parent.Services.DenWorldService) :: any
 
 type Lockdown = RaidRules.Lockdown
@@ -46,6 +55,7 @@ local lastPlot: { [Player]: number } = {} -- the den each character was in at th
 local savedColors: { [number]: { [BasePart]: Color3 } } = {} -- border colours while shown red
 local written: { [number]: Lockdown | false } = {} -- what the den attributes show
 local windows: { [Player]: { start: number, count: number } } = {}
+local passes: { [Player]: GearRules.Pass } = {} -- lockpick passes (P2.10)
 -- Set by start(); these placeholders only answer before it runs.
 local ownerUserIdOf: (number) -> number? = function(_plot: number): number?
 	return nil
@@ -107,10 +117,34 @@ function Lockdown.isActive(plot: number): boolean
 	return RaidRules.lockdownActive(lockdown, now())
 end
 
+-- The owner, or a lockpick passholder for this den's current Lockdown: never pushed out.
+local function letIn(player: Player, ownerUserId: number?, lockdown: Lockdown?): boolean
+	return ownerUserId == player.UserId or GearRules.passValid(passes[player], ownerUserId, lockdown)
+end
+
 function Lockdown.blocks(player: Player, plot: number): boolean
 	local ownerUserId, lockdown = stateOf(plot)
 	-- isRevenge is false: a live revenge (P1.9b) never bypasses a Lockdown (D-013).
-	return RaidRules.entryBlocked(lockdown, now(), ownerUserId == player.UserId, false, lastPlot[player] == plot, true)
+	return RaidRules.entryBlocked(
+		lockdown,
+		now(),
+		letIn(player, ownerUserId, lockdown),
+		false,
+		lastPlot[player] == plot,
+		true
+	)
+end
+
+function Lockdown.current(plot: number): (number?, Lockdown?)
+	return stateOf(plot)
+end
+
+function Lockdown.grantPass(player: Player, ownerUserId: number, startedAt: number)
+	passes[player] = { ownerUserId = ownerUserId, lockdownStartedAt = startedAt }
+end
+
+function Lockdown.passOf(player: Player): GearRules.Pass?
+	return passes[player]
 end
 
 function Lockdown.request(userId: number, plot: number): (boolean, string?)
@@ -154,8 +188,16 @@ function Lockdown.step()
 		local plot: number? = if root then DenWorldService.plotAt(root.Position) else nil
 		if root and plot then
 			local ownerUserId, lockdown = stateOf(plot)
-			local isOwner = ownerUserId == player.UserId
-			if RaidRules.entryBlocked(lockdown, t, isOwner, false, lastPlot[player] == plot, true) then
+			if
+				RaidRules.entryBlocked(
+					lockdown,
+					t,
+					letIn(player, ownerUserId, lockdown),
+					false,
+					lastPlot[player] == plot,
+					true
+				)
+			then
 				pushOut(player, root, plot)
 				plot = nil
 			end
@@ -197,6 +239,7 @@ function Lockdown.start(
 	Players.PlayerRemoving:Connect(function(player: Player)
 		lastPlot[player] = nil
 		windows[player] = nil
+		passes[player] = nil
 	end)
 end
 
