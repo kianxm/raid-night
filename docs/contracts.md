@@ -21,6 +21,13 @@ the why. Update it in the same commit as any contract change.
 | Escrow per raidId | `EscrowRecord` | EscrowService | Write-once create, then state moves forward only |
 | Open escrows per user | `EscrowOpenIndex` | EscrowService | Both raider and defender; added before the record, removed once terminal |
 
+Profile storage: ProfileStore store `PlayerProfiles`, key `Player_<userId>` (`DataService.luau`).
+
+**Never change the store name or the key format.** ProfileStore would find no save under the
+new name and hand every player a fresh template. Everyone silently starts over: the old saves
+still exist, but nothing reads them. The same applies to `EscrowRecords` and its keys below,
+where a rename would strand every transfer in flight.
+
 Escrow storage: DataStore `EscrowRecords`.
 
 - `Escrow_<raidId>`: the `EscrowRecord`. raidId is at most `Config.Escrow.maxRaidIdLength` (43)

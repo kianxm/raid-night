@@ -62,6 +62,16 @@ tests["prepare refuses a save that belongs to someone else"] = function()
 	end)
 end
 
+tests["prepare stamps only a true template: someone else's save with createdAt 0 is refused"] = function()
+	local saved: any = Profile.new(7, 0) -- a real save (userId 7) that happens to have createdAt 0
+	expect.throws(function()
+		Profile.prepare(saved, 42, NOW)
+	end, "never re-stamped as player 42's")
+	expect.eq(saved.userId, 7, "the ownership check ran before anything rewrote the owner")
+	local own = Profile.prepare(Profile.new(42, 0), 42, NOW)
+	expect.eq(own.createdAt, 0, "a player's own save is not treated as brand new")
+end
+
 tests["prepare refuses a save from a newer game version"] = function()
 	local saved: any = Profile.new(42, NOW)
 	saved.schemaVersion = Config.SCHEMA_VERSION + 1
