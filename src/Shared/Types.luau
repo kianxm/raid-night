@@ -50,6 +50,9 @@ export type Critter = {
 	padIndex: number?, -- set only when placement == "Pad"
 	acquiredAt: number, -- unix seconds
 	stolenLockUntil: number?, -- untradeable until this time (set when stolen)
+	-- Never tradeable or giftable (e.g. rescue-egg critters). Missing = tradeable, so no
+	-- migration. Survives escrow. Check with Profile.isTradeable (decision D-005).
+	untradeable: boolean?,
 }
 
 -- Den defenses --------------------------------------------------------------------------------

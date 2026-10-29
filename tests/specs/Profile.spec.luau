@@ -1,7 +1,9 @@
 --!strict
 local expect = require("../lib/expect")
+local fixtures = require("../lib/fixtures")
 local Profile = require("../../src/Shared/Profile")
 local Config = require("../../src/Shared/Config")
+local Escrow = require("../../src/Shared/Escrow")
 
 local NOW = 1_800_000_000
 
@@ -85,6 +87,83 @@ tests["prepare rolls the day and prunes expired tokens and transfers"] = functio
 	expect.truthy(p.revengeTokens.live, "unexpired token kept")
 	expect.eq(p.appliedTransfers.old, nil)
 	expect.truthy(p.appliedTransfers.recent, "idempotency entry inside the window kept")
+end
+
+-- Critter.untradeable (decision D-005) ---------------------------------------------------------
+
+tests["a critter saved before untradeable existed loads as tradeable, with no migration"] = function()
+	local saved: any = Profile.new(42, NOW - 1000)
+	saved.critters.old =
+		{ uid = "old", speciesId = "crescent_fox", mutation = "None", placement = "Inventory", acquiredAt = 0 }
+	local p = Profile.prepare(saved, 42, NOW)
+	expect.eq(p.schemaVersion, Config.SCHEMA_VERSION)
+	expect.eq(p.critters.old.untradeable, nil, "field stays absent")
+	expect.truthy(Profile.isTradeable(p.critters.old, NOW))
+end
+
+tests["a stolen critter is tradeable only once its stolen lock ends"] = function()
+	local critter = fixtures.critter("c", "crescent_fox", "Inventory")
+	critter.stolenLockUntil = NOW + 60
+	expect.falsy(Profile.isTradeable(critter, NOW))
+	expect.truthy(Profile.isTradeable(critter, NOW + 60))
+end
+
+tests["an untradeable critter is never tradeable, whatever the time"] = function()
+	local critter = fixtures.critter("c", "crescent_fox", "Inventory")
+	critter.untradeable = true
+	expect.falsy(Profile.isTradeable(critter, NOW))
+	expect.falsy(Profile.isTradeable(critter, NOW + 10 * 365 * 86400))
+	critter.stolenLockUntil = NOW - 1
+	expect.falsy(Profile.isTradeable(critter, NOW), "an expired stolen lock does not lift it")
+end
+
+-- DataStore-like: every load is a copy and nothing persists until saved.
+local function memoryStore(profiles: { [number]: any }, records: { [string]: any }): Escrow.Store
+	local function copy(value: any): any
+		if type(value) ~= "table" then
+			return value
+		end
+		local out = {}
+		for k, v in value do
+			out[k] = copy(v)
+		end
+		return out
+	end
+	return {
+		loadRecord = function(raidId)
+			return copy(records[raidId])
+		end,
+		saveRecord = function(record)
+			records[record.raidId] = copy(record)
+		end,
+		loadProfile = function(userId)
+			return copy(profiles[userId])
+		end,
+		saveProfile = function(profile)
+			profiles[profile.userId] = copy(profile)
+		end,
+	}
+end
+
+tests["the untradeable flag survives an escrow transfer"] = function()
+	local raider = fixtures.veteran(1, NOW)
+	local defender = fixtures.veteran(2, NOW)
+	local rescued = fixtures.give(defender, fixtures.critter("rescued", "crescent_fox", "Pad", 1))
+	rescued.untradeable = true
+	local profiles = { [1] = raider, [2] = defender }
+	local records = { ["raid-1"] = Escrow.create("raid-1", 1, 2, "rescued", 0, false, NOW) }
+
+	local record = Escrow.advance("raid-1", memoryStore(profiles, records), NOW)
+
+	expect.eq(record and record.state, "Committed")
+	expect.eq(profiles[2].critters.rescued, nil, "the defender no longer has it")
+	local stolen = profiles[1].critters.rescued
+	expect.truthy(stolen, "the raider has it")
+	expect.eq(stolen.untradeable, true, "the raider's saved copy keeps the flag")
+	local escrowed = records["raid-1"].critter :: any
+	expect.eq(escrowed and escrowed.untradeable, true, "so does the escrow record")
+	local afterLock = NOW + Config.Raid.stolenTradeLockSeconds + 1
+	expect.falsy(Profile.isTradeable(stolen, afterLock), "still untradeable after the stolen lock")
 end
 
 return tests
