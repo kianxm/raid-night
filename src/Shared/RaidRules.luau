@@ -260,6 +260,19 @@ function RaidRules.padCritter(profile: PlayerProfile, padIndex: number): Critter
 	return nil
 end
 
+-- Read-only: padIndex -> the critter padCritter(profile, padIndex) would return, for every pad
+-- at once (one pass over the critters instead of one per pad).
+function RaidRules.padCritters(profile: PlayerProfile): { [number]: Critter }
+	local byPad: { [number]: Critter } = {}
+	for _, critter in profile.critters do
+		local pad = critter.padIndex
+		if critter.placement == "Pad" and pad ~= nil and byPad[pad] == nil then
+			byPad[pad] = critter
+		end
+	end
+	return byPad
+end
+
 -- Read-only: critters this profile lost today (no reset is written).
 function RaidRules.lossesToday(profile: PlayerProfile, now: number): number
 	return if profile.lossDay == RaidRules.dayIndex(now) then profile.lossesToday else 0
