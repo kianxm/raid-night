@@ -54,6 +54,7 @@
 local Types = require("./Types")
 local Config = require("./Config")
 local RaidRules = require("./RaidRules")
+local Economy = require("./Economy")
 
 type PlayerProfile = Types.PlayerProfile
 type EscrowRecord = Types.EscrowRecord
@@ -71,9 +72,10 @@ local Escrow = {}
 -- that still holds the profile's lock has landed with NO appliedTransfers entry for `raidId`,
 -- and errors otherwise (a stale session whose lock another server took can never pass it).
 -- `debitAbsent` (Async records only) delivers the debit to a defender who is not loaded here:
--- it runs Escrow.debitDefender on their latest saved profile in one atomic write that lands only
--- while no server holds that profile, and returns the saved entry; or, when a server holds it,
--- asks that server (a message) and returns nil. It errors when it could do neither.
+-- it runs Escrow.debitAbsentProfile (accrue to the debit, then debitDefender) on their latest
+-- saved profile in one atomic write that lands only while no server holds that profile, and
+-- returns the saved entry; or, when a server holds it, asks that server (a message) and returns
+-- nil. It errors when it could do neither.
 export type Store = {
 	loadRecord: (raidId: string) -> EscrowRecord?,
 	saveRecord: (record: EscrowRecord) -> (),
@@ -237,6 +239,26 @@ function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now
 	return applied
 end
 
+--[[
+	The debit for a defender no server holds, run inside the server's one atomic write to their
+	saved profile (Store.debitAbsent). First the den's offline income up to `now` (Money model:
+	accrue before `stored` changes), so an Async debit takes its share of what is stored at the
+	debit; then debitDefender. A repeat (this raid's debit already saved) changes nothing, not
+	even the accrual. Returns (write, applied): write is false for a repeat.
+]]
+function Escrow.debitAbsentProfile(
+	defender: PlayerProfile,
+	record: EscrowRecord,
+	now: number
+): (boolean, AppliedTransfer)
+	local fresh = defender.appliedTransfers[record.raidId] == nil
+	if fresh then
+		-- P2.8: factor 1; pass Economy.glowBoostFactor once purchases ship.
+		Economy.accrue(defender, now)
+	end
+	return fresh, Escrow.debitDefender(defender, record, now)
+end
+
 -- Step 2, on the RECORD. Stores what was actually taken. Idempotent.
 function Escrow.markDebited(record: EscrowRecord, applied: AppliedTransfer, now: number)
 	if record.state == "Debited" or record.state == "Committed" then
@@ -299,12 +321,16 @@ function Escrow.markCommitted(record: EscrowRecord, now: number)
 	record.updatedAt = now
 end
 
--- Cancels a raid before anything moved. Returns false if it is too late to void.
+-- Cancels a Live raid before anything moved. Returns false if it is too late to void, and always
+-- for an Async record, which is never voided (P1.1): any server may still deliver its debit.
 -- Needs the defender's profile: a crash between saving the defender and saving the record
 -- leaves the record Pending even though the debit already landed. Voiding then would strand
 -- the loot, so the defender's appliedTransfers entry is the real "too late" signal.
 function Escrow.void(record: EscrowRecord, defender: PlayerProfile, now: number): boolean
 	assert(defender.userId == record.defenderUserId, "void: wrong profile")
+	if Escrow.kindOf(record) == "Async" then
+		return false
+	end
 	if record.state == "Voided" then
 		return true
 	end

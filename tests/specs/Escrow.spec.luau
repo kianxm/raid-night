@@ -5,6 +5,7 @@ local Escrow = require("../../src/Shared/Escrow")
 local Config = require("../../src/Shared/Config")
 local RaidRules = require("../../src/Shared/RaidRules")
 local Types = require("../../src/Shared/Types")
+local Economy = require("../../src/Shared/Economy")
 
 local NOW = 1_800_000_000
 
@@ -583,6 +584,35 @@ tests["a held defender's async debit waits for that server; it stays Pending, ne
 	Escrow.recover(record.raidId, store, NOW + 50, raiderOnly)
 	expect.eq(records[record.raidId].state, "Committed")
 	expect.truthy(raider.critters["fox"])
+end
+
+tests["an Async record can never be voided, even with no debit saved"] = function()
+	local _, defender, record = setup("Async")
+	expect.falsy(Escrow.void(record, defender, NOW), "refused")
+	expect.eq(record.state, "Pending", "left for a delivery")
+	expect.eq(defender.appliedTransfers[record.raidId], nil)
+end
+
+tests["an absent defender's debit accrues offline income to the debit inside its write, then takes its share"] = function()
+	local _, defender, record = setup("Async")
+	defender.stored = 0
+	defender.storedUpdatedAt = NOW - 6 * 3600 -- six hours offline, the fox still on its pad
+	local probe = table.clone(defender)
+	Economy.accrue(probe, NOW)
+	local atDebit = math.floor(probe.stored)
+	expect.truthy(atDebit > 0, "the den earned while offline")
+	local write, applied = Escrow.debitAbsentProfile(defender, record, NOW)
+	expect.truthy(write, "a first debit writes")
+	expect.eq(defender.storedUpdatedAt, NOW, "accrued to the debit")
+	expect.eq(applied.glow, math.floor(atDebit * Config.Loot.storedGlowShare), "the share of the accrued store")
+	expect.eq(defender.stored, probe.stored - applied.glow, "taken from it")
+	-- A repeat later changes nothing, not even the accrual.
+	local stored, at = defender.stored, defender.storedUpdatedAt
+	local again, same = Escrow.debitAbsentProfile(defender, record, NOW + 600)
+	expect.falsy(again, "a repeat writes nothing")
+	expect.eq(same, applied, "the saved entry")
+	expect.eq(defender.stored, stored)
+	expect.eq(defender.storedUpdatedAt, at)
 end
 
 tests["recover refuses an absent defender's async debit when its store cannot reach them"] = function()
