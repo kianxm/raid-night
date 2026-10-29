@@ -18,7 +18,7 @@ Current phase: 0 · Last updated: 2026-10-28 (evening)
 | P0.6 | ui | P0.4 | Done | #12, #17 | 1 | #17 fixed the top-bar overlap (issue #15); Studio recheck with P0.6b. Client only; not run in Studio yet (phone emulator check in the P0.8 session). Lockdown button disabled until the remote exists |
 | P0.6b | ui | C1 | Todo | | 0 | Swap the `LOCKDOWN_REMOTE` constant for `Net.Requests.Lockdown` |
 | P0.7 | assets | — | Done | #5 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible). Stage 1 follow-up: `tools/assets/generate.sh` STYLE_REFS still lists ref-03/ref-04, which do not exist |
-| P0.8 | integration | P0.5, P0.6, P0.6b | Todo | | 0 | |
+| P0.8 | integration | P0.5, P0.6, P0.6b | In progress | #20 | 1 | Kit merged (#20); recheck stealing/Lockdown wording and "stored Glow can be stolen" against P0.5. Multi-client session deferred to the end (see below). |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
@@ -45,9 +45,25 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
   supposed to be vendored. Fix in P0.3 (anchor the pattern to `/Packages/`).
 
 ## Blocked (needs Kian)
-- Multi-client check (Studio MCP can't start Test > Clients and Servers): run a 3-player Local
-  Server once. Each player in a different den with their name on the sign; Player2 leaving doesn't
-  affect Player1; a new join gets the freed den with empty pads. Also folded into P0.8.
+
+- None right now.
+
+## Deferred to the end-of-phase session (Kian, 2026-10-28)
+
+Kian has no testers available now; every multi-person check runs once at the end, with the
+Phase 0 gate playtest. Until then, coverage comes from single-client Studio runs, Lune tests and
+the escrow simulation. Do not ask for multi-client runs in status reports.
+
+- 3 players: each in a different den with their name on the sign; one leaving doesn't affect
+  the others; a new join gets the freed den with empty pads (P0.2).
+- 2 players: other dens' prompts hidden and refused; each den shows only its owner's critters;
+  a leaving player's den is cleared (P0.4, P0.6).
+- 2 players: transferLive between two loaded profiles, repeat raidId, refusals, rejoin check
+  (P0.3b playtest plan, with API access on and off).
+- 2 servers: session-steal kick (P0.3).
+- 2+ players: live stealing end to end (P0.5) and the friends playtest (Phase 0 gate).
+- Phone emulator: HUD layout and the top-bar fix (P0.6, #17); "Free" egg label on a wiped
+  profile.
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
