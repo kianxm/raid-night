@@ -495,7 +495,27 @@ local function build(): { [string]: any }
 		end
 	end
 
+	-- PC: the egg is its own screen (design: PC egg conveyor + odds). The odds column stays on
+	-- the same screen as the buy button; a wider panel, key 1 opens it.
+	local oddsBuy: TextButton? = nil
+	if DESKTOP then
+		oddsPanel.Size = UDim2.new(0, 560, 0.86, 0)
+		oddsTitle.Text = Strings.shopEggTitle
+		oddsScroll.Size = UDim2.new(1, -16, 1, -198)
+		local buyBtn = Theme.button(oddsPanel, "Buy", "", C.gold, UDim2.new(1, -16, 0, 56))
+		buyBtn.AnchorPoint = Vector2.new(0.5, 1)
+		buyBtn.Position = UDim2.new(0.5, 0, 1, -64)
+		buyBtn.ZIndex = 9
+		for _, d in buyBtn:GetDescendants() do
+			if d:IsA("GuiObject") then
+				d.ZIndex = 10
+			end
+		end
+		oddsBuy = buyBtn
+	end
+
 	return {
+		oddsBuy = oddsBuy,
 		hotbar = if DESKTOP then buildHotbar(gui) else {},
 		glowText = glowText,
 		rateText = rateText,
@@ -611,6 +631,14 @@ function HudController.start()
 	ui.oddsChip.Activated:Connect(function()
 		ui.oddsPanel.Visible = not ui.oddsPanel.Visible
 	end)
+	if ui.oddsBuy then
+		ui.oddsBuy.Activated:Connect(function()
+			request(Net.Requests.BuyEgg, busy, function(result)
+				ui.oddsPanel.Visible = false
+				showHatch(result)
+			end)
+		end)
+	end
 	ui.oddsClose.Activated:Connect(function()
 		ui.oddsPanel.Visible = false
 	end)
@@ -643,7 +671,7 @@ function HudController.start()
 		pop.AnchorPoint = Vector2.new(0.5, 0.5)
 		local ribbon, ribbonText = Theme.chip(pop, "Ribbon", Strings.freeEggRibbon, C.gold, C.onAccent)
 		ribbon.AnchorPoint = Vector2.new(0.5, 0.5)
-		ribbon.Position = UDim2.new(0.5, 0, 0, 0)
+		ribbon.Position = UDim2.fromScale(0.5, 0)
 		ribbon.Size = UDim2.fromOffset(220, 28)
 		ribbonText.Font = DISPLAY_FONT
 		local blob = Instance.new("Frame")
@@ -711,7 +739,7 @@ function HudController.start()
 			request(Net.Requests.Collect, busy)
 		end,
 		eggs = function()
-			request(Net.Requests.BuyEgg, busy)
+			ui.oddsPanel.Visible = not ui.oddsPanel.Visible
 		end,
 		raid = function()
 			(require(script.Parent:WaitForChild("RaidPortalController")) :: any).open()
@@ -825,6 +853,13 @@ function HudController.start()
 
 			-- Egg odds for THIS egg: compact tier lines always visible, species in the panel.
 			lastFree = free
+			if ui.oddsBuy then
+				local title = ui.oddsBuy:FindFirstChild("Title") :: TextLabel
+				title.Text = if free
+					then Strings.shopBuyFree
+					else Strings.format(Strings.shopBuyFor, { price = HudMath.abbreviate(price) })
+				setEnabled(ui.oddsBuy, free or state.glow >= price, COLOR.buy)
+			end
 			local tiers, labels = nextOdds(free)
 			local isCompact = ui.isCompact()
 			local chipText
