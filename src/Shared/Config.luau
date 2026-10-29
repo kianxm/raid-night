@@ -108,6 +108,44 @@ local Config = {
 		lanternNightSeconds = 15 * 60, -- how long one Lantern Night lasts
 	},
 
+	--[[
+		The Robux catalog (P2.8; decisions D-028, D-029, D-030, D-061). Nothing here is random and
+		nothing grants Glow for Robux. Ids are placeholders: 0 = not created yet, and an item with
+		id 0 is never offered, granted or checked. Prices are in Robux, ranges until the Phase 3
+		price tests. Per item:
+		  robuxLinked      it raises or protects Glow (D-061): its effect never applies to a player
+		                   whose PolicyService info restricts paid random items, or whose policy is
+		                   unknown (fail closed). For VIP only the Glow bonus is linked.
+		  offerRestricted  offered to such a player at all (false = hidden, receipt never granted).
+		Reversing a D-061 default is one value: an item's robuxLinked or offerRestricted, or
+		vipBoostsOffline.
+	]]
+	Purchases = {
+		-- D-061 (2): VIP's Glow bonus counts online only; offline income accrues unboosted.
+		vipBoostsOffline = false,
+		autoCollectSeconds = 30, -- auto-collect pass: banks stored Glow this often while online
+		-- The weekly event the event pass is sold for. "" = no event running: not offered.
+		currentEventId = "",
+		-- Game passes: ownership is a MarketplaceService check, never saved.
+		passes = {
+			vip = { id = 0, price = 399, robuxLinked = true, offerRestricted = true },
+			vaultSlot = { id = 0, price = 199, robuxLinked = true, offerRestricted = false },
+			autoCollect = { id = 0, price = 149, robuxLinked = true, offerRestricted = false },
+			raidScout = { id = 0, price = 249, robuxLinked = true, offerRestricted = false },
+			denTheme = { id = 0, price = 149, robuxLinked = false, offerRestricted = true },
+			gearSkin = { id = 0, price = 99, robuxLinked = false, offerRestricted = true },
+			escapeEmote = { id = 0, price = 49, robuxLinked = false, offerRestricted = true },
+		},
+		-- Developer products, granted through ProcessReceipt with a receipt on the profile. `kind`
+		-- picks the grant: "shield", "lanternNight", "eventPass" or "accessory" (with
+		-- `accessoryId`, a permanent save key). Timer skips are not built (nothing to skip yet).
+		products = {
+			shield = { kind = "shield", id = 0, price = 49, robuxLinked = true, offerRestricted = false },
+			lanternNight = { kind = "lanternNight", id = 0, price = 149, robuxLinked = true, offerRestricted = false },
+			eventPass = { kind = "eventPass", id = 0, price = 399, robuxLinked = true, offerRestricted = false },
+		},
+	},
+
 	Mutations = {
 		None = 1,
 		Shiny = 1.5,

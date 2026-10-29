@@ -235,9 +235,19 @@ line 7 (notification opt-in) is not onboarding.
   `storedUpdatedAt` as they were.
 - `Net.DenState.ratePerSecond` and `storageCap` are unboosted (`denRate`, `storageCap`).
   Showing a boosted rate would be a contract change.
-- **P2.8 gate.** `EscrowService` and `Matchmaking` still accrue at factor 1. Both must pass
-  the player's factor, or accrue after a call that did, before `Config.Flags.purchases` turns
-  on. This is a hard gate for P2.8, not an optional TODO.
+- **The Glow-factor helper (P2.8).** Server code accrues and collects only through
+  `IncomeService.accrue(profile, now)` and `IncomeService.collect(profile, now)`, and a player's
+  factor changes only through `IncomeService.setGlowInputs(userId, change, now)`, which accrues
+  at the old factor first (see Purchases below). A profile that is not the one loaded in this
+  server for its player accrues at factor 1 (offline income is unboosted). A source guard
+  (`PurchaseSource.spec`) fails if `Economy.accrue`, `Economy.collect` or their boosted forms
+  appear in `src/Server` outside the helper's markers.
+- **P2.8 gate.** Three factor-1 accrues of online players remain, each a handoff listed in the
+  guard's `PENDING` (the guard fails when one lands until it is removed from the list):
+  `EscrowService` (the escrow store's `loadProfile`), `DataService.seedTestSession` (Studio
+  only), and snapshots (`SnapshotService` building through `Matchmaking.buildSnapshot`). The
+  guard also fails if `Config.Flags.purchases` is on while any remain. `Escrow.debitAbsentProfile`
+  accrues an absent (offline) defender at factor 1, which is correct while VIP is online-only.
 
 ## Escrow
 
@@ -448,7 +458,7 @@ EscrowService and RaidService must call it before starting any raid or transfer.
 | --- | --- | --- |
 | `raids` | Master switch: starting any raid or escrow transfer of any kind (live, async, revenge) | `true` |
 | `asyncRaids` | Additionally gates async raids and revenge raids (new `Async` transfers, and any transfer with `isRevenge`); needs `raids` on too | `false` |
-| `purchases` | Robux products (PurchaseService), and Robux-linked Glow multipliers (`Economy.glowBoostFactor`'s `purchasesEnabled`, D-032) | `false` |
+| `purchases` | Robux products and passes (PurchaseService: offers, perks, receipts), and Robux-linked Glow multipliers (`Economy.glowBoostFactor`'s `purchasesEnabled`, D-032) | `false` |
 | `trading` | Trading (post-launch) | `false` |
 | `notifications` | Experience notifications (NotificationService) | `false` |
 
@@ -769,6 +779,76 @@ Values live in `Config.Boosts`:
 
 Additive means VIP plus Lantern Night is 1 + 0.5 + 0.5 = 2.0×, not 1.5 × 1.5. Adding or removing
 a key is a contract change; `Config.spec` checks the keys and that every value is non-negative.
+
+## Purchases
+
+P2.8 (decisions D-028, D-029, D-030, D-032, D-061). Nothing sold is random, nothing grants Glow
+for Robux, and nothing sells back a stolen critter. Everything is off while
+`Config.Flags.purchases` is false.
+
+### Catalog: `Config.Purchases` (additive Config table, D-059)
+
+| Key | Meaning |
+| --- | --- |
+| `vipBoostsOffline` | `false` (D-061 (2)): VIP's Glow bonus counts online only; the offline gap accrues at 1. `true` pays the gap at the VIP factor on join (never Lantern Night) |
+| `autoCollectSeconds` | 30: how often the auto-collect pass banks stored Glow while online |
+| `currentEventId` | the event the event pass is sold for; `""` = none, so not offered |
+| `passes.<key>` | `{ id, price, robuxLinked, offerRestricted }`: `vip`, `vaultSlot`, `autoCollect`, `raidScout`, `denTheme`, `gearSkin`, `escapeEmote` |
+| `products.<key>` | the same plus `kind` (`Economy.PRODUCT_KINDS`: `shield`, `lanternNight`, `eventPass`, `accessory`) and, for accessories, `accessoryId` (a permanent save key in `PlayerProfile.accessories`) |
+
+- `id` 0 = not created in the Creator Dashboard: never offered, granted or checked.
+- `robuxLinked`: the item raises or protects Glow. Its effect applies only to a player whose
+  PolicyService `ArePaidRandomItemsRestricted` is known `false`; restricted or unknown fails
+  closed. For VIP only the Glow bonus is linked (`glowBoostFactor`).
+- `offerRestricted`: whether a restricted (or unknown) player is offered it at all. A receipt for
+  an item the player may not get answers `NotProcessedYet` and grants nothing.
+- Reversing a D-061 default is one value: an item's `robuxLinked` or `offerRestricted`, or
+  `vipBoostsOffline`. `Purchases.spec` pins the audit: every Glow-raising item is `robuxLinked`,
+  Lantern Night is not offered to restricted players, no product kind is random or grants Glow.
+
+Pure rules (Economy): `purchaseOffered(item, policy)`, `perkActive(item, owns, policy)`
+(policy = `{ paidRandomRestricted?, purchasesEnabled }`), `productById(productId)`,
+`vaultCapacity(profile, extraVaultSlots?)` and `place(..., isLocked?, extraVaultSlots?)` (the
+vault slot pass adds an unsaved slot; a lower capacity never moves a critter out of the Vault),
+`extendLanternNight(endsAt, now)` (a purchase extends a running Lantern Night by
+`lanternNightSeconds`; the bonus never stacks).
+
+### Glow factor state
+
+`Economy.GlowFactorState` = `{ inputs = { vip, paidRandomRestricted?, lanternNightUntil }, joined }`,
+one per player in IncomeService. The factor is derived from the inputs at each moment, never
+stored. `Economy.changeGlowInputs` (only called by `IncomeService.setGlowInputs`) accrues at the
+old inputs, then applies a change; a bad value fails closed (`vip` false, restriction unknown, no
+Lantern Night). `Economy.accrueBoosted`: the first accrue of a newly loaded profile pays the
+offline gap at `offlineGlowFactor` (1 at launch) and marks it joined; later ones pay the online
+factor, split at `lanternNightUntil` when the period spans it, so Lantern Night ends without a
+timer. A new state starts with the restriction unknown, so the factor is 1 until PolicyService
+answers. IncomeService does the final accrue in `DataService.onProfileReleasing`.
+
+### ProcessReceipt
+
+`Economy.processReceipt(steps)` orders the steps; PurchaseService supplies them:
+
+1. `Profile.hasReceipt`: a redelivery grants nothing, and answers `PurchaseGranted` only after
+   `DataService.saveNow` confirms saved data holding the receipt, else `NotProcessedYet`.
+2. May it be granted now (known product, `purchaseOffered`, the grant possible: a shield below
+   the stack cap, an event running and its pass not owned, a valid accessory id)? No:
+   `NotProcessedYet`, nothing written.
+3. `Profile.recordReceipt`: false here is bad input (step 1 caught redeliveries):
+   `NotProcessedYet`, nothing granted.
+4. The grant, in the same step as the record, no yield between.
+5. `DataService.saveNow` confirming `receipts[PurchaseId]` in the saved data, then
+   `PurchaseGranted`; a failed save is `NotProcessedYet`.
+
+The player not in the server, the profile not loaded, or an error anywhere: `NotProcessedYet`.
+`Purchases.spec` simulates forced shutdowns at every step with redeliveries: each purchase is
+granted exactly once.
+
+### Lantern Night announcement
+
+`Net.Pushes.ServerAnnouncement` fired to all clients with kind `"LanternNight"` and payload
+`{ buyerUserId: number, buyerName: string (display name), endsAt: number (unix seconds) }` on
+every purchase (start or extension). The boost lives in the server's memory; a shutdown ends it.
 
 ## Tradeability
 
