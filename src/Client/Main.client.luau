@@ -15,6 +15,8 @@ for _, name in
 		"ShopController",
 		"InventoryController",
 		"DenManageController",
+		"SettingsController",
+		"SoundController",
 		"RaidLogController",
 		"DenStatusController",
 		"RaidPortalController",

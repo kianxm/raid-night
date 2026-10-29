@@ -37,6 +37,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "SettingsState",
+		load = function()
+			return require("./specs/SettingsState.spec")
+		end,
+	},
+	{
 		name = "ShopMath",
 		load = function()
 			return require("./specs/ShopMath.spec")

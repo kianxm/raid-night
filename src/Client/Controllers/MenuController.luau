@@ -11,6 +11,7 @@ local Players = game:GetService("Players")
 local Client = script.Parent.Parent
 local Ui = require(Client:WaitForChild("Raid"):WaitForChild("Ui"))
 local Strings = require(Client:WaitForChild("Hud"):WaitForChild("Strings"))
+local Audio = require(Client:WaitForChild("Sound"):WaitForChild("Audio"))
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
 local MenuController = {}
@@ -41,6 +42,8 @@ function MenuController.show(id: string)
 	if entry then
 		entry.refresh()
 		entry.frame.Visible = true
+		Ui.pop(entry.frame)
+		Audio.play("uiClick")
 		current = id
 	end
 end
