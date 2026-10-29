@@ -58,6 +58,11 @@
 	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
 	  Studio only: Raid/TestHook.luau seeds a stand-in den for single-client tests (D-010)
 
+	Gear (P2.10): Raid/Gear.luau runs UseGear / GetGear. Here a carry's walk speed and movement
+	budget follow the carrier's speed coil (Gear.speeds) and the owner's tag range follows smoke
+	(Gear.liveTagRange); Lockdown honours lockpick passes. Grapple and lockpick never run while
+	carrying, so a carry's budget and street checks never see a server move from gear.
+
 	Async raids (P1.3a): Raid/AsyncRaid.luau runs StartRaid, pocket dens (Raid/Pocket.luau), traps,
 	guards, the timer, grabs and GetRaidLog. An escape ends in RaidService.onAsyncEscape below,
 	which hands it to EscrowService.transferAsync (P1.3b).
@@ -100,6 +105,7 @@ local MatchmakingService = require(script.Parent.MatchmakingService) :: any
 local RaidFolder = script.Parent.Parent.Raid
 local Lockdown = require(RaidFolder.Lockdown)
 local AsyncRaid = require(RaidFolder.AsyncRaid)
+local Gear = require(RaidFolder.Gear)
 local ReplayStore = require(RaidFolder.ReplayStore)
 
 type PlayerProfile = Types.PlayerProfile
@@ -672,11 +678,18 @@ local function stepCarry(player: Player, carry: Carry)
 	local delta = pos - carry.lastPos
 	local myPlot = DenWorldService.getPlot(player)
 	local insideDefenderDen = DenWorldService.isInsideDen(carry.plot, pos)
+	-- Gear (P2.10): a speed coil raises the set speed and the budget's allowance (until its grace
+	-- ends); smoke shrinks the owner's tag range.
+	local setSpeed, allowedSpeed = Gear.speeds(player, carry.walkSpeed, true)
+	local humanoid = humanoidOf(player)
+	if humanoid and humanoid.WalkSpeed ~= setSpeed then
+		humanoid.WalkSpeed = setSpeed
+	end
 	local ownerGap = if ownerRoot then ownerRoot.Position - pos else nil
 	local outcome, budget, crossedStreet = RaidRules.carryStep({
 		moved = Vector3.new(delta.X, 0, delta.Z).Magnitude,
 		dt = now - carry.lastAt,
-		walkSpeed = carry.walkSpeed,
+		walkSpeed = allowedSpeed,
 		budget = carry.budget,
 		height = pos.Y - carry.floorY,
 		insideOwnDen = myPlot ~= nil and DenWorldService.isInsideDen(myPlot, pos),
@@ -685,6 +698,7 @@ local function stepCarry(player: Player, carry: Carry)
 		crossedStreet = carry.crossedStreet,
 		lockdownActive = lockdownActive(carry.plot),
 		ownerDistance = if ownerGap then Vector3.new(ownerGap.X, 0, ownerGap.Z).Magnitude else nil,
+		tagRange = Gear.liveTagRange(pos),
 	})
 	carry.lastPos, carry.lastAt, carry.wasInsideDefenderDen = pos, now, insideDefenderDen
 	carry.budget, carry.crossedStreet = budget, crossedStreet
@@ -955,6 +969,23 @@ function RaidService.start()
 		remotes = remotes :: Folder,
 		onEscape = RaidService.onAsyncEscape,
 	})
+	-- Gear (P2.10). A throw here must never stop raids.
+	local gearStarted, gearError = pcall(Gear.start, {
+		remotes = remotes :: Folder,
+		rootOf = rootOf,
+		liveAllowed = function(): boolean
+			return liveAllowed(false)
+		end,
+		isCarryingLive = RaidService.isCarrying,
+		asyncOf = AsyncRaid.gearContext,
+		ownerRootOf = function(plot: number): BasePart?
+			local _, _, root = ownerOf(plot)
+			return root
+		end,
+	})
+	if not gearStarted then
+		warn(`[RaidService] gear failed to start (raids go on, no gear): {gearError}`)
+	end
 	if RunService:IsStudio() then
 		local TestHook = require(RaidFolder.TestHook)
 		TestHook.install({

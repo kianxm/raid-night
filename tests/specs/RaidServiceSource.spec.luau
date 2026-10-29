@@ -19,6 +19,7 @@ local FILES = {
 	"src/Server/Raid/TestHook.luau",
 	"src/Server/Raid/AsyncRaid.luau",
 	"src/Server/Raid/Pocket.luau",
+	"src/Server/Raid/Gear.luau",
 }
 -- TestHook builds its own in-memory stand-in profile, which no player owns, so it is the one
 -- file allowed to fill a critters table. It must still never save anything.
@@ -266,6 +267,66 @@ tests["replays: started with RaidService, recorded under pcall, saved without yi
 	expect.truthy(saveAt and spawnAt and saveAt < spawnAt, "saved at the end, before (and apart from) escrow")
 	local save = string.sub(code, string.find(code, "local function saveReplay", 1, true) :: number, endFirst :: number)
 	expect.truthy(string.find(save, "pcall(function()", 1, true), "encode and save are guarded")
+end
+
+tests["gear: server-validated, never spends or writes, and the carry checks know the coil (P2.10)"] = function()
+	local gear = codeOnly(fs.readFile("src/Server/Raid/Gear.luau"))
+	-- Every use: rate limit, then the pure rule, then the effect, and only then the cooldown.
+	local first = string.find(gear, "local function useGear", 1, true)
+	local last = string.find(gear, "local function getGear", 1, true)
+	expect.truthy(first and last, "useGear found")
+	local use = string.sub(gear, first :: number, last :: number)
+	local canUse = string.find(use, "GearRules.canUse(", 1, true)
+	local effect = string.find(use, "EFFECTS[id](", 1, true)
+	local cooldown = string.find(use, "state.readyAt[id] = GearRules.readyAfter(", 1, true)
+	expect.truthy(canUse and effect and cooldown, "canUse, effect and cooldown found")
+	expect.truthy((canUse :: number) < (effect :: number), "the rule decides before anything happens")
+	expect.truthy((effect :: number) < (cooldown :: number), "a refused effect costs no cooldown")
+	expect.truthy(string.find(use, "levelOf(profile, gearId)", 1, true), "level from the profile")
+	local levelFirst = string.find(gear, "local function levelOf", 1, true)
+	local levelBody =
+		string.sub(gear, levelFirst :: number, string.find(gear, "\nend\n", levelFirst :: number) :: number)
+	expect.truthy(
+		string.find(levelBody, "if studioLevel ~= nil and RunService:IsStudio() then", 1, true),
+		"the level override is Studio-only"
+	)
+	expect.truthy(string.find(levelBody, "return Profile.gearLevel(profile, gearId)", 1, true), "else the profile's")
+	expect.eq(count(gear, "studioLevel = "), 2, "the override is set only by the hook (level n / off)")
+	expect.truthy(
+		string.find(gear, 'if RunService:IsStudio%(%) then%s+local bindable = Instance%.new%("BindableFunction"%)'),
+		"the test hook installs in Studio only"
+	)
+	expect.truthy(string.find(use, "api.liveAllowed()", 1, true), "behind the raids kill switch")
+	expect.truthy(string.find(gear, 'if not allow(player, "UseGear") then', 1, true), "rate limited")
+	-- The client's target only ever reaches the grapple, which re-checks it on the server.
+	expect.eq(count(gear, "u.target"), 2, "grapple reads the target (type check + use)")
+	expect.truthy(string.find(gear, 'typeof(u.target) ~= "Vector3"', 1, true), "and checks its type")
+	expect.eq(count(gear, "GearRules.checkGrapple("), 2, "aim point and landing are both checked")
+	expect.truthy(string.find(gear, "Lockdown.blocks(u.player, plot)", 1, true), "never into a locked den")
+	expect.truthy(string.find(gear, "GearRules.pocketLandingOk(", 1, true), "never off the pocket floor")
+	-- Gear never buys, upgrades or spends: that is economy's (handoff).
+	for _, path in FILES do
+		local code = codeOnly(fs.readFile(path))
+		expect.eq(count(code, "setGearLevel"), 0, `{path} writes a gear level`)
+		expect.eq(count(code, "UpgradeGear"), 0, `{path} serves the upgrade`)
+	end
+	-- The carry checks follow the coil and the smoke.
+	local service = codeOnly(fs.readFile(FILES[1]))
+	expect.truthy(
+		string.find(service, "local setSpeed, allowedSpeed = Gear.speeds(player, carry.walkSpeed, true)", 1, true),
+		"live carry speeds"
+	)
+	expect.truthy(string.find(service, "walkSpeed = allowedSpeed,", 1, true), "the budget allows the coil")
+	expect.truthy(string.find(service, "tagRange = Gear.liveTagRange(pos),", 1, true), "smoke shrinks the tag range")
+	local async = codeOnly(fs.readFile("src/Server/Raid/AsyncRaid.luau"))
+	expect.truthy(string.find(async, "Gear.speeds(raid.player, speed, carry ~= nil)", 1, true), "pocket speeds")
+	expect.truthy(string.find(async, "return allowed", 1, true), "the pocket budget allows the coil")
+	expect.truthy(string.find(async, "GearRules.pocketGuardStep(", 1, true), "guards see smoke and decoys")
+	expect.eq(count(async, "RaidRules.guardStep("), 0, "and only through it")
+	-- Lockdown lets a passholder in through the pure pass check, nothing else.
+	local lockdown = codeOnly(fs.readFile("src/Server/Raid/Lockdown.luau"))
+	expect.eq(count(lockdown, "GearRules.passValid(passes[player], ownerUserId, lockdown)"), 1, "one pass check")
+	expect.eq(count(lockdown, "letIn(player, ownerUserId, lockdown)"), 2, "used for blocks and push-backs")
 end
 
 return tests
