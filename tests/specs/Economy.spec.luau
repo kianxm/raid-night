@@ -4,6 +4,7 @@ local fixtures = require("../lib/fixtures")
 local rngLib = require("../lib/rng")
 local Economy = require("../../src/Shared/Economy")
 local Config = require("../../src/Shared/Config")
+local Types = require("../../src/Shared/Types")
 
 local NOW = 1_800_000_000
 
@@ -133,6 +134,192 @@ tests["rebirth resets Glow and level, keeps critters, unseats overflow pads"] = 
 	expect.eq(p.vaultSlots, 2)
 	expect.eq(p.critters["low"].placement, "Pad", "pad 2 still exists")
 	expect.eq(p.critters["high"].placement, "Inventory", "pad 25 no longer exists")
+end
+
+-- P0.4: capped egg rolls, placement, upgrades, egg purchases, DenState ------------------------
+
+local CritterCatalog = require("../../src/Shared/CritterCatalog")
+
+local function egg(uid: string, tierRoll: number?, speciesRoll: number?): Economy.EggRoll
+	return {
+		tierRoll = tierRoll or 0,
+		speciesRoll = speciesRoll or 0,
+		uid = uid,
+		maxTier = "Uncommon",
+		physicalPads = 6,
+	}
+end
+
+local function tierOf(speciesId: string): string
+	local species = CritterCatalog.get(speciesId)
+	return if species then species.tier else "?"
+end
+
+tests["capped tier rolls renormalise Common and Uncommon"] = function()
+	local commonShare = 0.55 / (0.55 + 0.25)
+	expect.eq(Economy.rollTierUpTo(0, "Uncommon"), "Common")
+	expect.eq(Economy.rollTierUpTo(commonShare - 1e-9, "Uncommon"), "Common")
+	expect.eq(Economy.rollTierUpTo(commonShare, "Uncommon"), "Uncommon")
+	expect.eq(Economy.rollTierUpTo(0.999999, "Uncommon"), "Uncommon")
+	expect.eq(Economy.rollTierUpTo(1, "Uncommon"), "Uncommon", "rounding sliver")
+	expect.eq(Economy.rollTierUpTo(0.99, "Common"), "Common")
+	expect.eq(Economy.rollTierUpTo(0.9999, "Mythic"), "Mythic", "uncapped matches rollTier")
+end
+
+tests["capped eggs never hatch above the cap over 100,000 rolls"] = function()
+	local rng = rngLib.new(7)
+	local n = 100_000
+	local commons = 0
+	for _ = 1, n do
+		local tier = Economy.rollTierUpTo(rng.next(), "Uncommon")
+		expect.truthy(tier == "Common" or tier == "Uncommon", `got {tier}`)
+		if tier == "Common" then
+			commons += 1
+		end
+	end
+	local p = 0.55 / 0.8
+	expect.near(commons / n, p, 5 * math.sqrt(p * (1 - p) / n), "Common share")
+end
+
+tests["usable pads are capped by the pads built in the world"] = function()
+	expect.eq(Economy.usablePadCount(1, 6), 6)
+	expect.eq(Economy.usablePadCount(20, 6), 6, "level unlocks more than exist")
+	expect.eq(Economy.usablePadCount(1, 4), 4)
+end
+
+tests["placing on a pad accrues first, then moves"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 1)) -- 1/s
+	fixtures.give(p, fixtures.critter("b", "crumb_rat", "Inventory")) -- 3/s once placed
+	local ok = Economy.place(p, "b", "Pad", 2, 6, NOW + 10)
+	expect.truthy(ok)
+	expect.eq(p.stored, 10, "the 10 s before the move paid the old rate")
+	expect.eq(p.critters["b"].padIndex, 2)
+	expect.eq(Economy.denRate(p), 4)
+end
+
+tests["placing on an occupied pad swaps the two critters"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 1))
+	fixtures.give(p, fixtures.critter("b", "crumb_rat", "Pad", 3))
+	fixtures.give(p, fixtures.critter("c", "pebble_toad", "Inventory"))
+	expect.truthy(Economy.place(p, "b", "Pad", 1, 6, NOW))
+	expect.eq(p.critters["a"].padIndex, 3, "occupant took the mover's pad")
+	expect.truthy(Economy.place(p, "c", "Pad", 1, 6, NOW))
+	expect.eq(p.critters["b"].placement, "Inventory", "occupant took the mover's Inventory spot")
+	expect.eq(p.critters["b"].padIndex, nil)
+end
+
+tests["placement rejects bad pads, foreign uids, full vaults and guards"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Inventory"))
+	fixtures.give(p, fixtures.critter("v", "dusk_mouse", "Vault"))
+	local later = NOW + 10
+	for _, pad in { 0, 7, 1.5, -1 } do
+		expect.falsy(Economy.place(p, "a", "Pad", pad, 6, later), `pad {pad}`)
+	end
+	expect.falsy(Economy.place(p, "a", "Pad", nil, 6, later), "missing pad")
+	expect.falsy(Economy.place(p, "nope", "Pad", 1, 6, later), "not owned")
+	expect.falsy(Economy.place(p, "a", "Vault", nil, 6, later), "vault has 1 slot, already used")
+	expect.falsy(Economy.place(p, "a", "Guard", nil, 6, later), "no guard slots yet")
+	expect.falsy(Economy.place(p, "a", "Nonsense" :: any, nil, 6, later))
+	expect.eq(p.critters["a"].placement, "Inventory", "nothing changed")
+	expect.eq(p.storedUpdatedAt, NOW, "rejected moves do not accrue")
+	expect.truthy(Economy.place(p, "v", "Vault", nil, 6, later), "re-placing in the vault is fine")
+end
+
+tests["upgrading spends banked Glow and accrues at the old level first"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
+	local cost = Economy.upgradeCost(1) :: number
+	p.glow = cost - 1
+	expect.falsy(Economy.upgradeDen(p, NOW + 5), "short by 1")
+	expect.eq(p.denLevel, 1)
+	p.glow = cost + 7
+	expect.truthy(Economy.upgradeDen(p, NOW + 5))
+	expect.eq(p.denLevel, 2)
+	expect.eq(p.glow, 7)
+	expect.eq(p.stored, 5, "accrued before the level changed")
+	p.denLevel = Config.Economy.maxDenLevel
+	p.glow = math.huge
+	expect.falsy(Economy.upgradeDen(p, NOW + 5), "max level")
+end
+
+tests["a player with nothing gets a free rescue egg, and only then"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	expect.truthy(Economy.isRescueEgg(p), "no critters, no Glow")
+	expect.eq(Economy.eggCost(p), 0)
+	local critter = Economy.buyEgg(p, NOW, egg("first"))
+	expect.truthy(critter, "free egg hatched")
+	expect.eq(p.glow, 0)
+	expect.falsy(Economy.isRescueEgg(p), "owns a critter now")
+	expect.eq(Economy.eggCost(p), Economy.eggPrice(1))
+	expect.falsy(Economy.buyEgg(p, NOW, egg("second")), "second egg is not free")
+
+	local rich = fixtures.veteran(2, NOW)
+	rich.denLevel = 1
+	rich.stored = Economy.eggPrice(1) -- can afford it after collecting
+	expect.falsy(Economy.isRescueEgg(rich), "collect first instead")
+end
+
+tests["buying an egg pays, hatches a capped critter and fills the first free pad"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 1))
+	local price = Economy.eggPrice(1)
+	p.glow = price * 2
+	local critter = Economy.buyEgg(p, NOW + 3, egg("new", 0.99, 0.99)) :: Types.Critter
+	expect.eq(p.glow, price)
+	expect.eq(tierOf(critter.speciesId), "Uncommon", "top roll is capped at Uncommon")
+	expect.eq(critter.placement, "Pad")
+	expect.eq(critter.padIndex, 2)
+	expect.eq(critter.acquiredAt, NOW + 3)
+	expect.eq(critter.mutation, "None")
+	expect.eq(p.stored, 3, "accrued before the rate changed")
+	expect.eq(p.critters["new"], critter)
+	expect.falsy(Economy.buyEgg(p, NOW, egg("new")), "duplicate uid is refused")
+	expect.eq(p.glow, price, "refusal charged nothing")
+end
+
+tests["eggs go to Inventory once every usable pad is taken"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	p.glow = 1_000_000
+	for i = 1, 7 do
+		local critter = Economy.buyEgg(p, NOW, egg(`e{i}`, i / 10, i / 10)) :: Types.Critter
+		local tier = tierOf(critter.speciesId)
+		expect.truthy(tier == "Common" or tier == "Uncommon", `egg {i} tier {tier}`)
+		if i <= 6 then
+			expect.eq(critter.padIndex, i)
+		else
+			expect.eq(critter.placement, "Inventory")
+			expect.eq(critter.padIndex, nil)
+		end
+	end
+	expect.eq(Economy.firstFreePad(p, 6), nil)
+end
+
+tests["DenState reflects the profile with a stable, copied critter list"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 2
+	p.glow = 12
+	p.stored = 3.5
+	local b = fixtures.give(p, fixtures.critter("b", "crumb_rat"))
+	local a = fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 2))
+	b.acquiredAt, a.acquiredAt = 5, 5
+	local state = Economy.denState(p)
+	expect.eq(state.glow, 12)
+	expect.eq(state.stored, 3.5)
+	expect.eq(state.ratePerSecond, 4)
+	expect.eq(state.storageCap, 4 * Economy.storageCapSeconds(2))
+	expect.eq(state.denLevel, 2)
+	expect.eq(#state.critters, 2)
+	expect.eq(state.critters[1].uid, "a", "same time: ordered by uid")
+	state.critters[1].padIndex = 99
+	expect.eq(a.padIndex, 2, "the client copy cannot change the profile")
 end
 
 return tests
