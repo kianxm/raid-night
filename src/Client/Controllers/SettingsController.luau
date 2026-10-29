@@ -133,7 +133,7 @@ function SettingsController.start()
 			local row = Ui.card(body, "ReducedMotion", 3, 64)
 			local name = Ui.label(row, Ui.DISPLAY, 22)
 			name.Text = Strings.settingsReducedMotion
-			name.Size = UDim2.new(0.55, 0, 1, 0)
+			name.Size = UDim2.fromScale(0.55, 1)
 			name.Position = UDim2.fromOffset(8, 0)
 			name.TextXAlignment = Enum.TextXAlignment.Left
 			name.ZIndex = 10
