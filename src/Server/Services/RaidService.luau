@@ -137,9 +137,11 @@ local carries: { [Player]: Carry } = {}
 -- "<ownerUserId>:<uid>" -> who holds it, while carried or in escrow. Also counts steals in
 -- flight from the owner's den (any at all refuses a grab: PostLossSafety) and toward the pair limit.
 local locked: { [string]: { owner: number, raider: number } } = {}
--- Owner userId -> when their den last lost a critter to a live steal (decision D-031): `at` on
--- os.time() for RaidRules, `serverAt` on workspace:GetServerTimeNow() for LiveGrabReadyAt. Server
--- memory only, never persisted; cleared when the owner leaves.
+-- Owner userId -> when their den last lost a critter to a live steal (decision D-031): `at` in unix
+-- seconds WITH the fraction (os.time()'s clock, which canGrabLive's whole-second `now` is compared
+-- against, so grabs reopen no earlier than the LiveGrabReadyAt countdown ends), and `serverAt` on
+-- workspace:GetServerTimeNow() for LiveGrabReadyAt. Server memory only, never persisted; cleared
+-- when the owner leaves.
 local lastLoss: { [number]: { at: number, serverAt: number } } = {}
 -- What each den's LiveProtected / LiveGrabReadyAt attributes show (written on change only).
 local shownDen: { [number]: { protected: boolean?, readyAt: number? } } = {}
@@ -279,7 +281,8 @@ end
 local function recordLoss(defenderUserId: number)
 	local plot = denOf(defenderUserId)
 	if plot then
-		lastLoss[defenderUserId] = { at = os.time(), serverAt = workspace:GetServerTimeNow() }
+		local at = DateTime.now().UnixTimestampMillis / 1000
+		lastLoss[defenderUserId] = { at = at, serverAt = workspace:GetServerTimeNow() }
 		refreshDen(plot)
 	end
 end
@@ -758,8 +761,9 @@ local function describe(): string
 			table.insert(parts, `den {plot} live-protected today`)
 		end
 		if loss then
-			local wait = math.max(0, RaidRules.liveGrabReadyAt(loss.at) - os.time())
-			table.insert(parts, `den {plot} last live loss {os.time() - loss.at} s ago (grabs reopen in {wait} s)`)
+			local wait = math.max(0, math.ceil(RaidRules.liveGrabReadyAt(loss.at) - os.time()))
+			local ago = math.max(0, os.time() - math.floor(loss.at))
+			table.insert(parts, `den {plot} last live loss {ago} s ago (grabs reopen in {wait} s)`)
 		end
 	end
 	return table.concat(parts, "; ")

@@ -6,6 +6,8 @@
 	  - No server decision reads an attribute (docs/contracts.md, Replicated attributes; D-014).
 	  - Raid code never writes a profile or saves one (golden rule 4): no critter, placement, pad,
 	    Glow, stored or loss-counter assignment, no Economy.place, no escrow debit or credit.
+	  - The live protection base is measured with Economy.denRate when the grab is accepted and
+	    reaches transferLive as its 7th argument on every attempt (D-034).
 ]]
 
 local fs = require("@lune/fs")
@@ -118,6 +120,31 @@ tests["raid server code never writes or saves a profile"] = function()
 			expect.falsy(assigns, `{path} assigns {field}`)
 		end
 	end
+end
+
+tests["the grab-time protection base reaches transferLive as its 7th argument (D-034)"] = function()
+	local code = codeOnly(fs.readFile(FILES[1]))
+	expect.eq(count(code, "EscrowService.transferLive"), 1, "one transferLive call site")
+	local call = string.match(code, "pcall%(%s*EscrowService%.transferLive%s*,([^%)]*)%)")
+	expect.truthy(call, "transferLive is called through pcall")
+	local args = {}
+	for arg in string.gmatch(call :: string, "[^,]+") do
+		table.insert(args, (string.gsub(arg, "%s", "")))
+	end
+	expect.eq(#args, 7, "transferLive gets 7 arguments")
+	expect.eq(args[7], "liveBaseRate", "the 7th is the grab-time base")
+	expect.truthy(string.find(code, "local liveBaseRate = carry%.liveBaseRate"), "taken from the carry")
+	expect.truthy(string.find(code, "liveBaseRate = liveBaseRate,"), "the carry keeps the hold's value")
+	expect.truthy(string.find(code, "startCarry%([^%)]*hold%.liveBaseRate%)"), "the hold's value starts the carry")
+	local first = string.find(code, "function RaidService.requestGrab", 1, true)
+	local last = string.find(code, "function RaidService.cancelGrab", 1, true)
+	expect.truthy(first and last, "requestGrab found")
+	local requestGrab = string.sub(code, first :: number, last :: number)
+	expect.truthy(
+		string.find(requestGrab, "liveBaseRate = Economy%.denRate%(ownerProfile%)"),
+		"measured with Economy.denRate in requestGrab"
+	)
+	expect.eq(count(code, "Economy.denRate"), 1, "and nowhere else")
 end
 
 return tests
