@@ -3,6 +3,14 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-028 · 2026-10-28 · Glow is earn-only at launch; egg odds on screen from Phase 0 (Kian)
+Decision: no Glow packs at launch; no product grants Glow for Robux. Glow packs move to the
+Phase 2 paid-randomness mini-phase, shipped with PolicyService region checks and a reviewer
+audit. Egg odds are shown on screen for every egg from Phase 0, read from Config.EggOdds after
+the eggMaxTier renormalization (rescue egg: Common 100%). Updated design-summary, decision
+0005, contracts.md, playbook, PurchaseService header. Why: Glow buys eggs, so selling Glow would
+make eggs paid random items (CLAUDE.md rule 6). Reversible: yes, in the Phase 2 mini-phase.
+
 ### D-027 · 2026-10-28 · Phase 0: Inventory critters auto-fill free pads; fix steal feedback before the gate
 Context: the P0.8 Studio pass found stolen critters (and eggs bought with full pads) land in
 Inventory, which has no UI in Phase 0 (#43), and the raider sees no steal result (#41).

@@ -23,6 +23,8 @@ Current phase: 0 (at the Phase 0 gate) · Last updated: 2026-10-28
 | P0.4d | economy | — | Done | #47 | 1 | Fixes #43. Inventory critters auto-fill free pads (D-027). Studio-verified. 176 tests |
 | P0.6c | ui | — | Done | #46 | 1 | Fixes #41. Raider toast on RaidEnded (stolen / dropped / not confirmed). Studio-verified |
 | P0.8 | integration | P0.5, P0.6, P0.6b | Done | #20, #44 | 2 | Kit ready (corrected against the build, #44). Single-client Studio pass passed twice, output clean (stand-in for the 2-client exit check). Private publish and the multi-client session are Kian's, at the gate |
+| P0.9 | economy | — | In progress | agent/economy/P0.9 | 1 | Egg odds helpers (tier, rescue, species, next egg) matching the real rolls; Glow packs out of PurchaseService (D-028) |
+| P0.10 | ui | P0.9 | Todo | | 0 | Egg odds on screen before every egg purchase, from P0.9's helpers (D-028) |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
@@ -50,9 +52,7 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 
 ## Blocked (needs Kian)
 
-- Not urgent (Phase 2 planning): the design lists "Glow packs" for Robux. If Glow can be bought
-  with Robux, Glow eggs become paid random items (odds on screen, PolicyService), which clashes
-  with CLAUDE.md rule 6. Keep Glow non-purchasable, or plan the odds UI? (reviewer on #22)
+- None right now.
 
 ## Deferred to the end-of-phase session (Kian, 2026-10-28)
 
