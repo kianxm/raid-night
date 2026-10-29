@@ -9,6 +9,7 @@
 
 local Types = require("./Types")
 local Config = require("./Config")
+local Economy = require("./Economy")
 
 type PlayerProfile = Types.PlayerProfile
 type DenSnapshot = Types.DenSnapshot
@@ -43,6 +44,9 @@ RaidRules.Reason = table.freeze({
 	OutOfRange = "OutOfRange",
 	LockdownActive = "LockdownActive",
 	LockdownCooldown = "LockdownCooldown",
+	-- Live loss rules (decision D-031)
+	LiveProtected = "LiveProtected", -- the den lost enough Glow/s to live steals today
+	PostLossSafety = "PostLossSafety", -- a live loss just landed (or a carry from the den is under way)
 })
 
 function RaidRules.dayIndex(now: number): number
@@ -56,6 +60,8 @@ function RaidRules.resetDailyIfNeeded(profile: PlayerProfile, now: number)
 		profile.lossDay = today
 		profile.lossesToday = 0
 		profile.pairRaidsToday = {}
+		profile.liveLossBaseRate = nil
+		profile.liveLossRateToday = nil
 	end
 end
 
@@ -197,12 +203,17 @@ export type LiveGrab = {
 	padIndex: number,
 	carrying: boolean, -- the raider already carries a critter
 	isLocked: (uid: string) -> boolean, -- critter already carried or in escrow
-	-- Steals already under way (carried or in escrow) that would count against the owner's daily
-	-- loss cap, and against this raider-owner pair's daily limit, once they land.
+	-- Steals from this den already under way (carried, or in escrow and not settled). Any at all
+	-- refuses the grab (PostLossSafety): each may land as a loss, and a crowd must not beat the
+	-- post-loss safety window or the protection check by grabbing together (decision D-031).
 	inFlightForOwner: number,
+	-- Of those, the ones by this raider: they count against the pair's daily limit once they land.
 	inFlightForPair: number,
+	-- When this den last lost a critter to a live steal, on the same clock as `now`. Server memory
+	-- (RaidService), never persisted: live steals are same-server. nil = none this server session.
+	lastLiveLossAt: number?,
 	distance: number, -- raider root part to the pad, server positions
-	now: number, -- unix seconds, for the owner's daily loss counter
+	now: number, -- unix seconds: the owner's daily counters and the post-loss safety window
 }
 
 export type CarryOutcome = "Continue" | "TooFast" | "TooHigh" | "SkippedStreet" | "Escape" | "Tagged" | "DropAtBorder"
@@ -240,6 +251,49 @@ function RaidRules.lossesToday(profile: PlayerProfile, now: number): number
 	return if profile.lossDay == RaidRules.dayIndex(now) then profile.lossesToday else 0
 end
 
+--[[
+	Live loss rules (decision D-031). Live steals only; async raids keep maxLossesPerDay.
+	  - A den's live losses are valued in Glow/s: each stolen critter's Economy.critterRate at the
+	    debit (mutation, rebirths, its placement before the steal).
+	  - The base is Economy.denRate of the den just before its first live loss of the UTC day.
+	  - Once today's losses reach Config.LiveRaid.protectionLossShare of the base, the den is
+	    protected from live steals for the rest of the UTC day. The debit that crosses the line
+	    lands; nothing after it does (canGrabLive refuses, and Escrow.debitDefender takes nothing).
+	  - After any live loss nobody can grab from the den for postLossSafetySeconds.
+	Both fields live on the profile, belong to lossDay and reset with it, so stealing a few cheap
+	critters from a rich den never protects it, and losing the den's best critter does.
+]]
+
+-- Read-only: is this den protected from live steals for the rest of today? A profile without the
+-- fields (no live loss today, or a save from before D-031) is not. A NaN counts as protected.
+function RaidRules.liveProtected(profile: PlayerProfile, now: number): boolean
+	local base, lost = profile.liveLossBaseRate, profile.liveLossRateToday
+	if profile.lossDay ~= RaidRules.dayIndex(now) or base == nil or lost == nil then
+		return false
+	end
+	return not (lost < Config.LiveRaid.protectionLossShare * base)
+end
+
+--[[
+	Records one live loss on the defender: the base on the day's first, and the critter's Glow/s.
+	Call it from the escrow debit BEFORE the critter leaves the profile, so the base still counts
+	it and its rate is the one it earned where it sat. Errors if the critter is already gone.
+]]
+function RaidRules.recordLiveLoss(defender: PlayerProfile, critter: Critter, now: number)
+	assert(defender.critters[critter.uid] ~= nil, "recordLiveLoss: call before the critter leaves the profile")
+	RaidRules.resetDailyIfNeeded(defender, now)
+	if defender.liveLossBaseRate == nil then
+		defender.liveLossBaseRate = Economy.denRate(defender)
+	end
+	defender.liveLossRateToday = (defender.liveLossRateToday or 0) + Economy.critterRate(critter, defender.rebirths)
+end
+
+-- When grabs from a den reopen after a live loss at `lastLiveLossAt` (any clock; the answer is on
+-- the same one). RaidService also shows it as the den's LiveGrabReadyAt attribute.
+function RaidRules.liveGrabReadyAt(lastLiveLossAt: number): number
+	return lastLiveLossAt + Config.LiveRaid.postLossSafetySeconds
+end
+
 -- Can this raider grab the critter on this pad? Returns the critter on success.
 function RaidRules.canGrabLive(g: LiveGrab): (boolean, string?, Critter?)
 	if not g.flagsAllow then
@@ -271,13 +325,19 @@ function RaidRules.canGrabLive(g: LiveGrab): (boolean, string?, Critter?)
 	if g.isLocked(critter.uid) then
 		return false, RaidRules.Reason.CritterBusy, nil
 	end
-	if RaidRules.lossesToday(profile, g.now) + g.inFlightForOwner >= Config.Limits.maxLossesPerDay then
-		return false, RaidRules.Reason.DefenderLossCap, nil
+	-- Live loss rules (decision D-031): no daily count cap for live steals. The longest-lasting
+	-- refusal comes first, so the raider sees the reason that matters.
+	if RaidRules.liveProtected(profile, g.now) then
+		return false, RaidRules.Reason.LiveProtected, nil
 	end
-	-- Same-pair daily limit (decision D-022), read from the owner's counters for this raider.
+	-- Same-pair daily limit (decisions D-022, D-031), read from the owner's counters for this raider.
 	local pairRaids = RaidRules.pairCount(profile, g.raiderUserId, g.now) + g.inFlightForPair
-	if pairRaids >= Config.Limits.maxRaidsPerPairPerDay then
+	if pairRaids >= Config.LiveRaid.maxStealsPerPairPerDay then
 		return false, RaidRules.Reason.PairLimit, nil
+	end
+	local lastLoss = g.lastLiveLossAt
+	if g.inFlightForOwner > 0 or (lastLoss ~= nil and not (g.now >= RaidRules.liveGrabReadyAt(lastLoss))) then
+		return false, RaidRules.Reason.PostLossSafety, nil -- `not >=` also refuses NaN
 	end
 	if not (g.distance <= Config.LiveRaid.grabRange) then -- also refuses NaN
 		return false, RaidRules.Reason.OutOfRange, nil

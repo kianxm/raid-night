@@ -4,6 +4,7 @@ local fixtures = require("../lib/fixtures")
 local Profile = require("../../src/Shared/Profile")
 local Config = require("../../src/Shared/Config")
 local Escrow = require("../../src/Shared/Escrow")
+local RaidRules = require("../../src/Shared/RaidRules")
 
 local NOW = 1_800_000_000
 
@@ -98,6 +99,34 @@ tests["prepare rolls the day and prunes expired tokens, but never escrow entries
 	-- Only EscrowService prunes appliedTransfers, after reading the open-escrow index.
 	expect.truthy(p.appliedTransfers.old, "old entry kept: its raid may still be open")
 	expect.truthy(p.appliedTransfers.recent, "idempotency entry inside the window kept")
+end
+
+-- Live loss fields (decision D-031) --------------------------------------------------------------
+
+tests["a save from before the live loss fields loads unprotected, with no migration"] = function()
+	local saved: any = Profile.new(42, NOW - 1000)
+	saved.liveLossBaseRate, saved.liveLossRateToday = nil, nil -- never written by older servers
+	local p = Profile.prepare(saved, 42, NOW)
+	expect.eq(p.schemaVersion, Config.SCHEMA_VERSION)
+	expect.eq(Config.SCHEMA_VERSION, 1, "an optional field needs no SCHEMA_VERSION bump")
+	expect.eq(p.liveLossBaseRate, nil, "fields stay absent")
+	expect.eq(p.liveLossRateToday, nil)
+	expect.falsy(RaidRules.liveProtected(p, NOW))
+end
+
+tests["prepare clears yesterday's live loss fields and keeps today's"] = function()
+	local saved: any = Profile.new(42, NOW - 3 * 86400)
+	saved.lossDay = RaidRules.dayIndex(NOW) - 1
+	saved.liveLossBaseRate, saved.liveLossRateToday = 100, 60
+	local p = Profile.prepare(saved, 42, NOW)
+	expect.eq(p.liveLossBaseRate, nil, "a new day")
+	expect.eq(p.liveLossRateToday, nil)
+	local today: any = Profile.new(42, NOW - 3 * 86400)
+	today.lossDay = RaidRules.dayIndex(NOW)
+	today.liveLossBaseRate, today.liveLossRateToday = 100, 60
+	local kept = Profile.prepare(today, 42, NOW)
+	expect.eq(kept.liveLossBaseRate, 100, "a rejoin the same day keeps its protection")
+	expect.truthy(RaidRules.liveProtected(kept, NOW))
 end
 
 -- Critter.untradeable (decision D-005) ---------------------------------------------------------

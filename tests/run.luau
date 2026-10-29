@@ -49,6 +49,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "LiveLossRules",
+		load = function()
+			return require("./specs/LiveLossRules.spec")
+		end,
+	},
+	{
 		name = "RaidServiceSource",
 		load = function()
 			return require("./specs/RaidServiceSource.spec")
