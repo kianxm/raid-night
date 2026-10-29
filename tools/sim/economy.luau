@@ -51,7 +51,8 @@ local PROPOSED = {
 	["Economy.eggPriceGrowth"] = 1.32,
 	["Economy.eggPriceBase"] = 150,
 }
-local PHASE2 = { ["Economy.eggMaxTier"] = "Mythic" } -- D-003: Phase 2 raises the egg cap
+local PHASE2 = { ["Economy.eggMaxTier"] = "Mythic" } -- D-003: Phase 2 raises the egg cap (live from P2.4)
+local PHASE1_CAP = { ["Economy.eggMaxTier"] = "Uncommon" } -- the Phase 0-1 cap, for before/after rows
 
 local function merge(...: { [string]: any }): { [string]: any }
 	local out = {}
@@ -64,10 +65,15 @@ local function merge(...: { [string]: any }): { [string]: any }
 end
 
 local SCENARIOS = {
-	{ name = "current", note = "Config as it is (eggMaxTier Uncommon)", overrides = {} },
+	{ name = "current", note = "Config as it is (eggMaxTier Mythic since P2.4)", overrides = {} },
+	{ name = "phase1-cap", note = "Config + eggMaxTier Uncommon (Phase 0-1, before P2.4)", overrides = PHASE1_CAP },
 	{ name = "phase2", note = "Config + eggMaxTier Mythic (D-003)", overrides = PHASE2 },
 	{ name = "proposed", note = "phase2 + proposed values", overrides = merge(PHASE2, PROPOSED) },
-	{ name = "proposed-p1", note = "current + proposed values (Phase 1 egg cap)", overrides = PROPOSED },
+	{
+		name = "proposed-p1",
+		note = "proposed values with the Phase 1 egg cap",
+		overrides = merge(PHASE1_CAP, PROPOSED),
+	},
 }
 
 -- Module loading --------------------------------------------------------------------------------

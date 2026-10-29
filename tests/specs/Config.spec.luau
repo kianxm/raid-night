@@ -76,8 +76,15 @@ tests["eggMaxTier is a tier eggs can hatch"] = function()
 	expect.truthy(found, `eggMaxTier {Config.Economy.eggMaxTier} is in EggOdds`)
 end
 
-tests["capped egg odds renormalize to Common 0.6875 / Uncommon 0.3125 and never exceed the cap"] = function()
-	local cap = Config.Economy.eggMaxTier :: Types.Tier
+tests["eggMaxTier is Mythic from Phase 2 and Secret never hatches from an egg"] = function()
+	expect.eq(Config.Economy.eggMaxTier, "Mythic", "Phase 2 raised the cap (D-003, P2.4)")
+	for _, entry in Config.EggOdds do
+		expect.truthy(entry.tier ~= "Secret", "Secret critters are event-only, never in EggOdds")
+	end
+end
+
+-- Rolls `cap` over a fine grid and checks every tier against `expected` (and nothing above the cap).
+local function checkCappedOdds(cap: Types.Tier, expected: { [string]: number })
 	local capRank = CritterCatalog.tierRank(cap)
 	local steps = 100_000
 	local counts: { [string]: number } = {}
@@ -91,8 +98,21 @@ tests["capped egg odds renormalize to Common 0.6875 / Uncommon 0.3125 and never 
 	for tier in counts do
 		expect.truthy(CritterCatalog.tierRank(tier :: Types.Tier) <= capRank, `{tier} is above the cap`)
 	end
-	expect.near((counts.Common or 0) / steps, 0.6875, 1e-3, "Common")
-	expect.near((counts.Uncommon or 0) / steps, 0.3125, 1e-3, "Uncommon")
+	for tier, share in expected do
+		expect.near((counts[tier] or 0) / steps, share, 1e-3, tier)
+	end
+end
+
+tests["the Config cap hatches at the published EggOdds weights and never above Mythic"] = function()
+	local expected: { [string]: number } = {}
+	for _, entry in Config.EggOdds do
+		expected[entry.tier] = entry.weight
+	end
+	checkCappedOdds(Config.Economy.eggMaxTier :: Types.Tier, expected)
+end
+
+tests["an Uncommon cap still renormalizes to Common 0.6875 / Uncommon 0.3125"] = function()
+	checkCappedOdds("Uncommon", { Common = 0.6875, Uncommon = 0.3125 })
 end
 
 return tests
