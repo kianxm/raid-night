@@ -15,6 +15,7 @@ local fs = require("@lune/fs")
 local expect = require("../lib/expect")
 local source = require("../lib/source")
 local Config = require("../../src/Shared/Config")
+local Analytics = require("../../src/Shared/Analytics")
 
 local INCOME = "src/Server/Services/IncomeService.luau"
 local PURCHASE = "src/Server/Services/PurchaseService.luau"
@@ -172,6 +173,101 @@ tests["PurchaseService never touches Glow balances or sells randomness"] = funct
 		expect.eq(count(code, pattern), 0, `no {pattern} in PurchaseService`)
 	end
 	expect.truthy(string.find(code, "IncomeService%.setGlowInputs%("), "factor inputs go through the helper")
+end
+
+-- P2.8c ------------------------------------------------------------------------------------------
+
+tests["UpgradeGear is served by IncomeService: guarded, Glow only, through Economy.buyGear"] = function()
+	local rest = splitHelper()
+	expect.truthy(
+		string.find(rest, "UpgradeGear = guarded%(Net%.Requests%.UpgradeGear, false, upgradeGear%)"),
+		"rate-limited and accrued by guarded, refusals are false"
+	)
+	local upgrade = source.functionBody(rest, "upgradeGear") or ""
+	expect.truthy(string.find(upgrade, 'type%(gearId%) ~= "string"'), "the client's id is type-checked")
+	expect.eq(count(upgrade, "Economy%.buyGear%("), 1, "one buyGear call")
+	expect.truthy(string.find(rest, "GearRules%.switchedOn%(Config%.Gear, gearId%)"), "the gear kill switches")
+	expect.truthy(string.find(rest, "upgradeCost = GearRules%.upgradeCost"), "GearRules' price")
+	expect.truthy(string.find(rest, "setLevel = Profile%.setGearLevel"), "C6's level writer")
+	local income = source.codeOnly(source.read(INCOME))
+	for _, pattern in { "MarketplaceService", "ProcessReceipt", "Robux" } do
+		expect.eq(count(income, pattern), 0, `no Robux in IncomeService ({pattern})`)
+	end
+	expect.eq(count(source.codeOnly(source.read(PURCHASE)), "buyGear"), 0, "PurchaseService never sells gear")
+end
+
+tests["DenState carries vaultSlots with the pass's slot, in the push and GetDenState"] = function()
+	local rest = splitHelper()
+	expect.eq(count(rest, "Economy%.denState%(profile, perks%.extraVaultSlots%("), 2, "push and GetDenState")
+	expect.eq(count(rest, "Economy%.denState%(profile%)"), 0, "no DenState without the pass's slot")
+end
+
+tests["GetShopOffers is rate-limited, waits for the policy and uses Economy.shopOffers"] = function()
+	local code = source.codeOnly(source.read(PURCHASE))
+	local get = source.functionBody(code, "getShopOffers") or ""
+	expect.truthy(
+		string.find(get, "RateLimit%.take%(state%.limits, Net%.Requests%.GetShopOffers, Net%.Limits%.GetShopOffers"),
+		"rate-limited by its own limit"
+	)
+	expect.truthy(string.find(get, "state%.policyDone"), "waits for loadPolicy")
+	expect.truthy(string.find(get, "policyKnown = state%.restricted ~= nil"), "reports an unknown policy")
+	local offers = source.functionBody(code, "PurchaseService.offers") or ""
+	expect.truthy(
+		string.find(offers, "Economy%.shopOffers%(Config%.Purchases, PurchaseService%.policyOf%(userId%)"),
+		"pure rules"
+	)
+	expect.truthy(string.find(code, "pcall%(getShopOffers, player%)"), "errors never reach the client")
+end
+
+tests["purchase analytics: only a first grant or a confirmed pass, never a redelivery"] = function()
+	local code = source.codeOnly(source.read(PURCHASE))
+	local decide = source.functionBody(code, "decide") or ""
+	expect.truthy(string.find(decide, "granted = ok"), "grant marks the first grant")
+	local trackAt = string.find(decide, 'AnalyticsService%.track%(player, "purchase"')
+	local guardAt = string.find(decide, "if granted and key and item then")
+	expect.truthy(trackAt and guardAt and guardAt < trackAt, "logged only when this call granted")
+	expect.eq(count(code, 'AnalyticsService%.track%(player, "purchase"'), 2, "products and passes")
+end
+
+tests["Lantern Night: every player hears the buyer, late joiners too, with whether it boosts them"] = function()
+	local code = source.codeOnly(source.read(PURCHASE))
+	local one = source.functionBody(code, "announceLanternNight") or ""
+	expect.truthy(string.find(one, 'announce:FireClient%(player, "LanternNight"'), "per player")
+	expect.truthy(
+		string.find(one, "boosted = policy%.purchasesEnabled == true and policy%.paidRandomRestricted == false"),
+		"boosted fails closed"
+	)
+	expect.eq(count(code, "FireAllClients"), 0, "no shared payload: boosted differs per player")
+	local added = source.functionBody(code, "onPlayerAdded") or ""
+	local policyAt = string.find(added, "loadPolicy%(player%)")
+	local announceAt = string.find(added, "announceLanternNight%(player%)")
+	expect.truthy(policyAt and announceAt and policyAt < announceAt, "late joiners hear it after their policy")
+end
+
+-- Every analytics call in the economy services names a real event and economy flow.
+tests["economy analytics call points use the P2.9 schema's events and flows"] = function()
+	local wanted = {
+		events = { "egg_bought", "critter_placed", "glow_collected", "purchase" },
+		flows = { "Egg", "DenUpgrade", "GearUpgrade", "Collect", "DenCollect", "DenIncome", "DenOfflineIncome" },
+	}
+	local seenEvents, seenFlows = {}, {}
+	for _, path in { INCOME, PURCHASE } do
+		local code = source.codeOnly(source.read(path))
+		for event in string.gmatch(code, 'AnalyticsService%.track%([^,]+, "([%w_]+)"') do
+			expect.truthy(Analytics.EVENTS[event], `{path}: unknown event {event}`)
+			seenEvents[event] = true
+		end
+		for flowId in string.gmatch(code, 'AnalyticsService%.economy%([^,]+, "(%w+)"') do
+			expect.truthy((Analytics.ECONOMY :: any)[flowId], `{path}: unknown flow {flowId}`)
+			seenFlows[flowId] = true
+		end
+	end
+	for _, event in wanted.events do
+		expect.truthy(seenEvents[event], `{event} is logged`)
+	end
+	for _, flowId in wanted.flows do
+		expect.truthy(seenFlows[flowId], `{flowId} is logged`)
+	end
 end
 
 return tests

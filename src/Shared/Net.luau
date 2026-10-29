@@ -19,7 +19,28 @@ export type DenState = {
 	denLevel: number,
 	rebirths: number,
 	shieldUntil: number,
+	-- Vault slots the player can fill now (P2.8c): saved slots (1 + rebirths) plus the vault slot
+	-- pass's while its perk is active (Economy.vaultCapacity). Critters already in the Vault stay
+	-- when it drops, so the Vault can hold more than this.
+	vaultSlots: number,
 	critters: { Types.Critter },
+}
+
+-- One row of GetShopOffers (P2.8c): something the shop may show this player. `kind` is "pass" or
+-- the product's Config.Purchases kind ("shield", "lanternNight", "eventPass", "accessory").
+-- `key` is the Config.Purchases key, `id` the Creator Dashboard id to prompt, `price` in Robux.
+export type ShopOffer = {
+	key: string,
+	kind: string,
+	id: number,
+	price: number,
+}
+
+-- GetShopOffers' answer. `policyKnown` false: PolicyService has not answered for this player, so
+-- the list fails closed (no Robux-linked item unless offered to restricted players).
+export type ShopOffers = {
+	policyKnown: boolean,
+	offers: { ShopOffer },
 }
 
 export type RaidTarget = {
@@ -195,13 +216,19 @@ Net.Requests = table.freeze({
 	-- Lockdown, and moves or spawns everything itself (P2.10).
 	UseGear = "UseGear",
 	GetGear = "GetGear", -- () -> { GearSlot }
-	-- (gearId) -> boolean. Buy (level 0 -> 1) or upgrade one gear item with Glow. Not served yet:
-	-- economy owns the Glow spend (handoff, P2.10); clients must not call it until it ships.
+	-- (gearId) -> boolean. Buy (level 0 -> 1) or upgrade one gear item with banked Glow, never
+	-- Robux (IncomeService, Economy.buyGear). false = refused, nothing spent: unknown id, gear
+	-- switched off (Config.Gear), max level, or not enough Glow. Fires DenChanged on success; ask
+	-- GetGear again for the new level.
 	UpgradeGear = "UpgradeGear",
 	-- RemoteEvent: ({ shown: boolean, accepted: boolean }). After the client tried
 	-- ExperienceNotificationService:PromptOptIn for a PromptNotificationOptIn push. Accepted only
 	-- once per push (one pending prompt per player); the 30-day clock starts only when shown = true.
 	ReportOptInResult = "ReportOptInResult",
+	-- () -> ShopOffers. What the shop may show this player (PurchaseService). Waits (up to 10 s)
+	-- for the player's PolicyService answer; restricted or still unknown players never see a
+	-- Robux-linked item (D-061, D-065). Owned passes are left out. Ask again after a purchase.
+	GetShopOffers = "GetShopOffers",
 })
 
 -- Server -> client pushes (RemoteEvents).
@@ -240,6 +267,7 @@ Net.Limits = table.freeze({
 	GetGear = 5,
 	UpgradeGear = 5,
 	ReportOptInResult = 3,
+	GetShopOffers = 3,
 })
 
 --[[

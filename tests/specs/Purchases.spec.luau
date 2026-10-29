@@ -559,4 +559,112 @@ tests["a receipt redelivered before the profile loads is granted once the server
 	expect.truthy(stuck > 0, "without the wait, some purchase is never acknowledged")
 end
 
+-- P2.8c: GetShopOffers (Economy.shopOffers) --------------------------------------------------------
+
+-- A created catalog: every Config.Purchases entry with a real id, so the policy rules decide.
+local function createdCatalog(eventId: string): any
+	local catalog = { currentEventId = eventId, passes = {}, products = {} }
+	local nextId = 100
+	for _, group in { "passes", "products" } do
+		for key, item in (Config.Purchases :: any)[group] do
+			local copy = table.clone(item)
+			nextId += 1
+			copy.id = nextId
+			catalog[group][key] = copy
+		end
+	end
+	return catalog
+end
+
+local function keysOf(offers: { any }): { [string]: boolean }
+	local set = {}
+	for _, offer in offers do
+		set[offer.key] = true
+	end
+	return set
+end
+
+local KNOWN = { paidRandomRestricted = false, purchasesEnabled = true }
+local RESTRICTED = { paidRandomRestricted = true, purchasesEnabled = true }
+local UNKNOWN = { paidRandomRestricted = nil, purchasesEnabled = true }
+
+tests["shopOffers: restricted and unknown players never see a Robux-linked offer (D-061, D-065)"] = function()
+	local catalog = createdCatalog("week1")
+	for _, policy in { RESTRICTED, UNKNOWN } do
+		local offers = Economy.shopOffers(catalog, policy :: any)
+		expect.truthy(#offers > 0, "cosmetics are still offered")
+		for _, offer in offers do
+			local group = if offer.kind == "pass" then catalog.passes else catalog.products
+			local item = group[offer.key]
+			expect.truthy(item.robuxLinked ~= true or item.offerRestricted == true, `{offer.key} hidden`)
+		end
+		local shown = keysOf(offers)
+		for _, key in { "vip", "vaultSlot", "autoCollect", "raidScout", "lanternNight", "shield", "eventPass" } do
+			expect.falsy(shown[key], `{key} never shown to a restricted or unknown player`)
+		end
+	end
+end
+
+tests["shopOffers: a known unrestricted player sees every created item, owned passes left out"] = function()
+	local catalog = createdCatalog("week1")
+	local offers = Economy.shopOffers(catalog, KNOWN :: any, function(key: string): boolean
+		return key == "vip"
+	end)
+	local shown = keysOf(offers)
+	expect.falsy(shown.vip, "owned pass left out")
+	for key in catalog.passes do
+		if key ~= "vip" then
+			expect.truthy(shown[key], `pass {key}`)
+		end
+	end
+	for key in catalog.products do
+		expect.truthy(shown[key], `product {key}`)
+	end
+	for _, offer in offers do
+		local group = if offer.kind == "pass" then catalog.passes else catalog.products
+		local item = group[offer.key]
+		expect.eq(offer.id, item.id, "id")
+		expect.eq(offer.price, item.price, "price")
+		if offer.kind ~= "pass" then
+			expect.eq(offer.kind, item.kind, "product kind")
+		end
+	end
+end
+
+tests["shopOffers: passes first, then products, each sorted by key"] = function()
+	local offers = Economy.shopOffers(createdCatalog("week1"), KNOWN :: any)
+	local seenProduct = false
+	local last: { [string]: string } = {}
+	for _, offer in offers do
+		local group = if offer.kind == "pass" then "pass" else "product"
+		if group == "product" then
+			seenProduct = true
+		else
+			expect.falsy(seenProduct, "no pass after a product")
+		end
+		expect.truthy(last[group] == nil or last[group] < offer.key, "sorted by key")
+		last[group] = offer.key
+	end
+end
+
+tests["shopOffers: nothing with purchases off, placeholder ids, or a bad catalog; no event, no event pass"] = function()
+	local catalog = createdCatalog("week1")
+	expect.eq(#Economy.shopOffers(catalog, { paidRandomRestricted = false, purchasesEnabled = false }), 0, "off")
+	expect.eq(#Economy.shopOffers(Config.Purchases, KNOWN :: any), 0, "launch ids are all 0")
+	expect.eq(#Economy.shopOffers(nil, KNOWN :: any), 0, "no catalog")
+	expect.eq(#Economy.shopOffers({ passes = 5, products = "x" }, KNOWN :: any), 0, "malformed groups")
+	expect.falsy(keysOf(Economy.shopOffers(createdCatalog(""), KNOWN :: any)).eventPass, "no event running")
+	expect.truthy(keysOf(Economy.shopOffers(catalog, KNOWN :: any)).eventPass, "event running")
+end
+
+tests["shopOffers never offers what purchaseOffered refuses"] = function()
+	local catalog = createdCatalog("week1")
+	for _, policy in { KNOWN, RESTRICTED, UNKNOWN } do
+		for _, offer in Economy.shopOffers(catalog, policy :: any) do
+			local group = if offer.kind == "pass" then catalog.passes else catalog.products
+			expect.truthy(Economy.purchaseOffered(group[offer.key], policy :: any), offer.key)
+		end
+	end
+end
+
 return tests
