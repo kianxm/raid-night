@@ -21,13 +21,35 @@ What you will find:
   the Buy Egg, Collect Glow and Upgrade Den prompts.
 - **A free starter egg** to get you going.
 - **Glow**, the currency your critters earn over time. It fills a storage bar. Collect it to
-  bank it safely. Uncollected Glow in storage can be stolen.
+  bank it. In this build a steal takes the **critter only**, never Glow (stealing stored Glow
+  comes later, with offline raids).
 - **Buttons on screen:** Collect, Buy Egg and Lockdown.
-- **Real stealing:** walk into another player's den, hold to grab a critter, then carry it
-  home across your own border. Heavier critters slow you down. The den's owner can tag you
-  to make you drop it.
-- **Lockdown:** the owner can lock their den for 45 seconds. New raiders cannot enter, but
-  anyone already inside can still leave. Then it needs 120 seconds to recharge.
+- **Real stealing:** walk into another player's den and stand near a pad (within about 10
+  studs). Hold the Steal prompt (F on PC, hold the button on a phone) for about a second until
+  you pick the critter up. Only one critter at a time. You now carry it, and heavier critters
+  slow you down (Light 90% of normal speed, Medium 75%, Heavy 60%, Very Heavy 45%). Carry it
+  out of that den and across your own border to keep it.
+  - **Dropping it:** if the den's owner gets within about 6 studs of you, you drop it and it
+    goes back on its pad. You also drop it if you die or leave, or move impossibly fast or high
+    (teleport, speed hack, flying). Walking and jumping normally never drops it.
+  - **Seeing the result:** while you carry, a "Carrying <critter>" label sits at the top of the
+    screen and a name floats over your head. When the carry ends you get a message at the top:
+    "You stole <critter>! It's in your den." if you got it home, "Dropped <critter>!" if you
+    lost it, or "Steal not confirmed" (with "If it went through, it'll show up in your den.")
+    if the game could not confirm it.
+  - **Where it lands:** a stolen critter appears on a free pad in your den right away. If all 6
+    pads are full it waits in storage and moves onto a pad as soon as one frees up (for
+    example when you put a critter in the Vault). Critters in the Vault are never moved.
+  - **What you get:** the critter only. No Glow moves, in either direction.
+- **Lockdown:** the den's owner presses Lockdown to lock their den for 45 seconds.
+  - New raiders cannot walk in: the game pushes them back out.
+  - Raiders already inside when it starts can stay or leave, but if they leave while carrying a
+    critter, they drop it at the border and it returns to its pad. Once out, they cannot come
+    back in until it ends.
+  - It only affects live stealing, never the owner.
+  - After it ends the owner must wait 2 minutes before locking again (so at most 45 s locked
+    in every 165 s). The button shows "Locked 0:45" counting down, then "Ready in 2:00"
+    counting down, then goes back to normal.
 
 ## 2. What to do
 
@@ -37,7 +59,7 @@ No script. Do what sounds fun, and try some of these:
 2. Try to steal the rarest critter you see.
 3. Get a stolen critter all the way home without dropping it.
 4. Defend your den: tag someone who is carrying your critter, or try Lockdown.
-5. Get a critter back from whoever took it.
+5. Steal back a critter that someone took from you (it has to be on a pad in their den).
 
 ## 3. What we watch
 
@@ -75,9 +97,16 @@ Not for testers.
       only the test place, never a live one). Join link and access method filled in above.
 - [ ] Want a fresh start? Delete the test profiles (store `PlayerProfiles`) in Creator Hub's
       Data Stores manager for the test universe. Otherwise old progress carries over.
+- [ ] **`StudioMemoryProfiles` is NOT set** on the published test place: open
+      ServerStorage in the place and make sure the attribute is absent or false. It is a
+      Studio-only switch for single-client testing (it makes every profile a throwaway mock). A
+      live server ignores it, but keep it off in the file so nobody is confused later.
 - [ ] Kill switches: `Config.Flags.raids = true` (stealing is off without it). Leave
       `asyncRaids`, `purchases`, `trading` and `notifications` as they are (off in Phase 0).
 - [ ] You joined once yourself and saw your den, the starter egg and the three HUD buttons.
+- [ ] Known limits: the same two players can only steal from each other 2 times a day (D-022)
+      and a player can lose at most 3 critters a day; the refusal shows no message. If a
+      tester says "it won't let me", look at the Output for `PairLimit` or the daily cap.
 - [ ] 4 or 5 friends invited, with at least one on a phone.
 
 **During**
