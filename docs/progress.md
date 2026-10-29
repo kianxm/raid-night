@@ -9,13 +9,16 @@ Current phase: 0 · Last updated: 2026-10-28 (evening)
 | P0.1 | integration | — | Done | #1 | 1 | CI green (tests, StyLua, selene, luau-analyze via rokit). Baseline StyLua diffs fixed |
 | P0.2 | raid | — | Done | #3, #4 | 1 | 107 parts, 48 lights. Studio (1 client): own den + sign, respawn, walkable border, leave clears den. Multi-client spawn/reassign verified by Lune tests only; 3-client Studio check pending (Kian) |
 | P0.3 | data | — | Done | #2 | 1 | Reviewer APPROVED. Studio: survives rejoin on real DataStore, fresh-save stamping, flags. Not verified: 2-player leave, session-steal kick (needs 2 servers) |
-| P0.3a | data | P0.3b | Todo | | 0 | Reviewer follow-ups on #2: S3 stamp only true templates, S4 session/Player guard, S6-S8 docs. S1 moved into P0.3b (same file). Runs after P0.3b to avoid DataService conflicts |
-| P0.3b | data | P0.3 | In progress | agent/data/P0.3b | 1 | Kill-switch contract change (approved 2026-10-28): `raids` is the master switch, async/revenge also need `asyncRaids`, recovery never gated; pure check + flag-combination and recovery-while-off tests; reviewer pass. Reviewer S5 + S1 + S2 (enforce flag inside the entry point): DataService save-now-and-confirm + same-server Escrow.Store so P0.5 live steals go through Escrow durably. Prerequisite for P0.5 |
-| P0.4 | economy | P0.3 | In progress | agent/economy/P0.4 | 1 | |
-| P0.5 | raid | P0.2, P0.4, P0.3b | Todo | | 0 | P0.3b added: live steals are cross-profile moves (golden rule 4) |
-| P0.6 | ui | P0.4 | Todo | | 0 | |
+| P0.3a | data | P0.3b, C1 | Todo | | 0 | Reviewer follow-ups on #2: S3 stamp only true templates, S4 session/Player guard, S6-S8 docs. S1 moved into P0.3b (same file). Runs after P0.3b to avoid DataService conflicts |
+| P0.3b | data | P0.3 | In review | #11 | 1 | Reviewer running. ~700 lines accepted (EscrowService is one unit). Kill-switch contract change (approved 2026-10-28): `raids` is the master switch, async/revenge also need `asyncRaids`, recovery never gated; pure check + flag-combination and recovery-while-off tests; reviewer pass. Reviewer S5 + S1 + S2 (enforce flag inside the entry point): DataService save-now-and-confirm + same-server Escrow.Store so P0.5 live steals go through Escrow durably. Prerequisite for P0.5 |
+| P0.4 | economy | P0.3 | Done | #9, #10 | 1 | 86 tests. Rescue egg (free egg with no critters and not enough Glow). Studio playtest (integration agent) running |
+| C1 | data | P0.3b | Todo | | 0 | Approved contract batch (2026-10-28, see Decisions): Net `Lockdown` + limit 3; display-only attributes; `Config.LiveRaid`; `Config.Economy.eggMaxTier`; `Critter.untradeable`. Reviewer pass |
+| P0.4b | economy | C1 | Todo | | 0 | eggMaxTier from Config; rescue egg rolls Common-only from its own table, sets `untradeable`; accrue before the rescue check (uncollected Glow counts) |
+| P0.5 | raid | P0.2, P0.4, P0.3b, C1, P0.4b | Todo | | 0 | P0.3b added: live steals are cross-profile moves (golden rule 4) |
+| P0.6 | ui | P0.4 | Done | #12 | 1 | Client only; not run in Studio yet (phone emulator check in the P0.8 session). Lockdown button disabled until the remote exists |
+| P0.6b | ui | C1 | Todo | | 0 | Swap the `LOCKDOWN_REMOTE` constant for `Net.Requests.Lockdown` |
 | P0.7 | assets | — | Done | #5 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible). Stage 1 follow-up: `tools/assets/generate.sh` STYLE_REFS still lists ref-03/ref-04, which do not exist |
-| P0.8 | integration | P0.5, P0.6 | Todo | | 0 | |
+| P0.8 | integration | P0.5, P0.6, P0.6b | Todo | | 0 | |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
@@ -56,6 +59,19 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
   revenge) starts only if `raids` is on; async and revenge raids also need `asyncRaids`. Switches
   block new raids only; escrow recovery and in-flight transfers always complete. Implemented in
   P0.3b; RaidService must call the same check (hand-off to `raid` for P0.5).
+
+- 2026-10-28 (Kian): live-stealing contract batch approved with conditions. Lockdown blocks
+  entry only (raiders already inside can leave; a carried critter drops at the border), applies to
+  live raids only, duration/cooldown enforced server-side. `CarryingUid`, `CarryingSpecies`,
+  `LockdownUntil`, `LockdownReadyAt` attributes are display-only: the server keeps its own state
+  and never reads them. `eggMaxTier` renormalizes allowed tiers' odds (tested); Phase 2 raises it
+  to Mythic. `Config.LiveRaid` = {lockdownSeconds 45, lockdownCooldownSeconds 120, tagRange 6,
+  grabHoldSeconds 1}.
+- 2026-10-28 (Kian): keep the rescue egg, with guards: Common-only fixed table (independent of
+  eggMaxTier); rescue critters get `untradeable = true`; "can't afford" uses banked + stored Glow
+  after accruing. `Critter.untradeable: boolean?` approved (missing = tradeable, no migration);
+  any future trading or gifting code must refuse it (reviewer checks).
+- Live revenge needs `asyncRaids` too (follows the 2026-10-28 kill-switch wording literally).
 
 ## Gate history
 - G0: cleared 2026-10-27 (Kian, in chat)
