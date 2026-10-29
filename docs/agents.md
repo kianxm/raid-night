@@ -38,7 +38,8 @@ Running many agents multiplies token usage. Start with 3-4 parallel tasks, not 1
 
 1. **Contracts first.** Before a parallel round, settle any new types or remotes yourself (or
    with one agent), merge them, then fan out. Parallel agents drift when the schema moves.
-2. **One task, one PR, under ~400 lines.** Small PRs review fast and revert cleanly.
+2. **One task, one PR, under ~400 lines** (up to ~800 when it must be reviewed as one unit).
+   Small PRs review fast and revert cleanly.
 3. **Merge daily into `integration`, playtest daily.** Integration pain grows with time.
 4. **Gates are real.** Do not start the next phase until its gate passes (see design summary).
 5. **Never let an agent grade its own work.** The reviewer and the tests decide.

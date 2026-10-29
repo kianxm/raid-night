@@ -3,6 +3,21 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-039 · 2026-10-29 · Process speed-ups (Kian)
+Context: ~24 h of Phase 0 produced 77 PRs, 25 of them ledger-only; the live-protection chain
+(P0.5g to C5, ~3,200 lines, D-033 to D-037) was reviewer rounds on edge cases that lose nothing,
+before any multiplayer playtest. Decision: (1) pre-playtest scope: until a phase's human
+playtest, fix only duplication or loss, client trust and policy; other exploit or fairness edge
+cases go to the hardening backlog in progress.md. Principle 6 now means "a few lines in an open
+PR". (2) Reviewer severity bar: only those classes, or a broken change, block; suggestions never
+start a fix round; re-reviews check only earlier blockers; one fix round per PR unless it's a loss
+path; no review for UI, copy, assets or docs-only PRs. (3) Effort: `reviewer` and `data` default to
+high, spawned at xhigh only for Escrow, Profile, DataService, EscrowService or purchases. (4) One
+ledger PR per merge wave, auto-merged. (5) PRs up to ~800 lines when they must be reviewed as one
+unit. (6) Studio once per merge wave, single client; escrow and profile PRs still get their own
+run. (7) contracts.md keeps rules, not reasons; agents read only the sections they touch. Why:
+same safety on the risky code, much less churn everywhere else. Reversible: yes (process).
+
 ### D-038 · 2026-10-28 · Critter personalities and the three-animation set (Kian)
 Context: art direction change before Asset Gate 1 (no concept images generated yet). Decision:
 every critter has a distinct personality expression that still reads as cute; Commons simple and

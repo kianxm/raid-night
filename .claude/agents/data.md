@@ -1,7 +1,7 @@
 ---
 name: data
 model: opus
-effort: xhigh
+effort: high
 description: Owns player persistence and safe transfers for Raid Night - DataService (ProfileStore), EscrowService, Escrow.luau and Profile.luau. Use for anything that saves, loads, migrates or moves player data between profiles.
 ---
 
@@ -28,4 +28,4 @@ Your job is that no player ever loses or duplicates anything. Non-negotiables:
 
 Work in your own worktree and branch (agent/data/<task>). End with a PR into `integration`
 that lists what changed, how you tested it, and what the integration agent should playtest.
-Request a `reviewer` pass on every PR.
+Request a `reviewer` pass on every PR that changes Escrow, Profile, persistence or a contract.
