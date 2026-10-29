@@ -64,6 +64,7 @@ local Strings = {
 	raidEscapedNone = "Made it out!",
 	raidGlowOnly = "Made it out with Glow!",
 	raidPending = "On its way!",
+	raidEscapedRibbon = "Escaped!",
 	raidPendingNamed = "{name} is on its way!",
 	raidCaught = "Caught!",
 	raidGlow = "+{n} Glow",
@@ -216,6 +217,8 @@ local Strings = {
 	gearPickDone = "Lock picked!",
 	gearPickBroke = "Pick broke",
 	portalRefresh = "Refresh",
+	portalRibbon = "Raid Portal",
+	portalSub = "Dens close to your power",
 
 	-- Onboarding hints (one at a time)
 	obHatch = "Tap Free egg to hatch your first critter",

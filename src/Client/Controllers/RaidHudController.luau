@@ -24,7 +24,8 @@ local RaidApi = require(Raid:WaitForChild("RaidApi"))
 local RaidMath = require(Raid:WaitForChild("RaidMath"))
 local Ui = require(Raid:WaitForChild("Ui"))
 
-local COLOR = Ui.COLOR
+local Theme = Ui.theme
+local C = Theme.color
 local URGENT_SECONDS = 30
 local RESULT_SECONDS = 5
 
@@ -35,38 +36,50 @@ local player = Players.LocalPlayer
 function RaidHudController.start()
 	local gui = Ui.screenGui("RaidHud", 2, player:WaitForChild("PlayerGui"))
 
-	local timerPanel = Ui.panel(gui, "RaidTimer", UDim2.fromOffset(150, 62), UDim2.new(1, -12, 0, 8))
-	timerPanel.AnchorPoint = Vector2.new(1, 0)
+	-- Timer pill, top-center (RaidHud.dc.html): the clock in a night pill, urgent red under 30 s.
+	local timerPanel = Theme.panel(gui, "RaidTimer", UDim2.fromOffset(120, 44), UDim2.new(0.5, 0, 0, Theme.space.s2))
+	timerPanel.AnchorPoint = Vector2.new(0.5, 0)
 	timerPanel.Visible = false
-	local clock = Ui.label(timerPanel, Ui.DISPLAY, 34, COLOR.glow)
-	clock.Size = UDim2.new(1, -12, 0, 38)
-	clock.Position = UDim2.fromOffset(6, 2)
-	local carryLine = Ui.label(timerPanel, Ui.BODY, 14, COLOR.dim)
-	carryLine.Size = UDim2.new(1, -12, 0, 18)
-	carryLine.Position = UDim2.fromOffset(6, 40)
+	local clock = Theme.text(timerPanel, Theme.type.number, C.glow)
+	clock.Size = UDim2.new(1, -Theme.space.s3, 1, -Theme.space.s1)
+	clock.Position = UDim2.fromOffset(Theme.space.s2, 2)
 
-	-- Arrow: a round chip whose caret rotates to point at the gate.
-	local arrowChip = Ui.panel(gui, "GateArrow", UDim2.fromOffset(74, 86), UDim2.new(1, -12, 0, 78))
+	-- Carried critter / objective line, under the timer.
+	local carryChip, carryLine = Theme.chip(gui, "RaidCarry", "", C.panelRaised, C.ink)
+	carryChip.AnchorPoint = Vector2.new(0.5, 0)
+	carryChip.Size = UDim2.fromOffset(200, 26)
+	carryChip.Position = UDim2.new(0.5, 0, 0, 56)
+	carryChip.Visible = false
+
+	-- Arrow: a round chip whose caret rotates to point at the gate (top-right).
+	local arrowChip = Theme.panel(gui, "GateArrow", UDim2.fromOffset(74, 86), UDim2.new(1, -12, 0, 8))
 	arrowChip.AnchorPoint = Vector2.new(1, 0)
 	arrowChip.Visible = false
-	local arrow = Ui.label(arrowChip, Ui.DISPLAY, 60, COLOR.go)
+	local arrow = Theme.text(arrowChip, 60, C.go)
 	arrow.Text = "^"
 	arrow.Size = UDim2.fromOffset(60, 60)
 	arrow.AnchorPoint = Vector2.new(0.5, 0)
 	arrow.Position = UDim2.new(0.5, 0, 0, 2)
-	local dist = Ui.label(arrowChip, Ui.BODY, 14)
+	local dist = Theme.bodyText(arrowChip, Theme.type.label, C.go)
 	dist.Size = UDim2.new(1, -8, 0, 18)
 	dist.Position = UDim2.fromOffset(4, 64)
 
-	local result = Ui.panel(gui, "RaidResult", UDim2.fromOffset(280, 76), UDim2.fromScale(0.5, 0.3))
+	-- Outcome card (RaidEscaped / RaidCaught): popup with a ribbon in the outcome's accent.
+	local result = Theme.panel(gui, "RaidResult", UDim2.fromOffset(300, 110), UDim2.fromScale(0.5, 0.3))
 	result.AnchorPoint = Vector2.new(0.5, 0.5)
 	result.Visible = false
-	local resultTitle = Ui.label(result, Ui.DISPLAY, 28)
-	resultTitle.Size = UDim2.new(1, -16, 0, 40)
-	resultTitle.Position = UDim2.fromOffset(8, 6)
-	local resultSub = Ui.label(result, Ui.DISPLAY, 20, COLOR.glow)
-	resultSub.Size = UDim2.new(1, -16, 0, 24)
-	resultSub.Position = UDim2.fromOffset(8, 46)
+	local resultRim = result:FindFirstChildOfClass("UIStroke") :: UIStroke
+	resultRim.Thickness = Theme.stroke.heavy
+	local ribbon, ribbonText = Theme.chip(result, "Ribbon", "", C.go, C.onAccent)
+	ribbon.AnchorPoint = Vector2.new(0.5, 0.5)
+	ribbon.Position = UDim2.fromScale(0.5, 0)
+	ribbon.Size = UDim2.fromOffset(150, 26)
+	local resultTitle = Theme.text(result, Theme.type.title, C.ink)
+	resultTitle.Size = UDim2.new(1, -16, 0, 36)
+	resultTitle.Position = UDim2.fromOffset(8, 22)
+	local resultSub = Theme.text(result, Theme.type.numberSm + 10, C.go)
+	resultSub.Size = UDim2.new(1, -16, 0, 34)
+	resultSub.Position = UDim2.fromOffset(8, 62)
 
 	local active: { raidId: string, endsAt: number, gate: Vector3?, critters: number, isRevenge: boolean }? = nil
 	local conn: RBXScriptConnection? = nil
@@ -79,6 +92,7 @@ function RaidHudController.start()
 			conn = nil
 		end
 		timerPanel.Visible = false
+		carryChip.Visible = false
 		arrowChip.Visible = false
 	end
 
@@ -89,7 +103,7 @@ function RaidHudController.start()
 		end
 		local left = raid.endsAt - workspace:GetServerTimeNow()
 		clock.Text = RaidMath.clock(left)
-		clock.TextColor3 = if left <= URGENT_SECONDS then COLOR.revenge else COLOR.glow
+		clock.TextColor3 = if left <= URGENT_SECONDS then C.revenge else C.glow
 
 		local carrying = player:GetAttribute("CarryingSpecies")
 		local species = if type(carrying) == "string" and carrying ~= "" then CritterCatalog.get(carrying) else nil
@@ -98,7 +112,7 @@ function RaidHudController.start()
 			elseif raid.isRevenge then Strings.raidRevengeGrab
 			elseif raid.critters > 0 then Strings.format(Strings.raidCritters, { n = tostring(raid.critters) })
 			else Strings.raidFindCritter
-		arrow.TextColor3 = if species then COLOR.go else COLOR.dim
+		arrow.TextColor3 = if species then C.go else C.inkDim
 
 		local gate = raid.gate
 		local camera = workspace.CurrentCamera
@@ -128,6 +142,7 @@ function RaidHudController.start()
 			-- endsAt is server time; tick() compares it against workspace:GetServerTimeNow().
 			active = { raidId = raidId, endsAt = endsAt, gate = gate, critters = critters, isRevenge = isRevenge }
 			timerPanel.Visible = true
+			carryChip.Visible = true
 			conn = RunService.Heartbeat:Connect(tick)
 			tick()
 		end
@@ -152,13 +167,20 @@ function RaidHudController.start()
 		else
 			resultTitle.Text = (Strings :: any)[key]
 		end
-		resultTitle.TextColor3 = if escaped or pending then COLOR.go else COLOR.revenge
+		local good = escaped or pending
+		local accent = if good then C.go else C.lock
+		resultTitle.TextColor3 = C.ink
+		resultRim.Color = C.night900
+		ribbon.BackgroundColor3 = accent
+		ribbonText.Text = Theme.upper(
+			if pending then Strings.raidPending elseif escaped then Strings.raidEscapedRibbon else Strings.raidCaught
+		)
 		resultSub.Text = if type(payload.glow) == "number" and payload.glow > 0
 			then Strings.format(Strings.raidGlow, { n = tostring(payload.glow) })
 			else ""
 		local hasSub = resultSub.Text ~= ""
 		resultSub.Visible = hasSub
-		result.Size = UDim2.fromOffset(280, if hasSub then 76 else 52)
+		result.Size = UDim2.fromOffset(300, if hasSub then 110 else 74)
 		result.Visible = true
 		resultToken += 1
 		local token = resultToken
