@@ -182,6 +182,10 @@ dropped based on real play.
 - While a revenge transfer is InFlight the lock is released and the token still exists, so a second revenge raid on the same token is possible (bounded by the pair limit; refuse tokens named by an open escrow) (reviewer #109; small). RaidRules.recordOutgoing doc comment is stale vs D-053 (raid; tiny).
 - A credit still in flight doesn't count toward the raider's pair limit yet (data #109; small).
 - Soak tooling: Studio test sessions added in #112 (D-056); docs/playtests/phase1.md part 3 should switch the soak to `DataTestHook` load/seed/release with test ids only (integration; small). Seeded test stored jumps 1000 → ~36900 on first raid from an old storedUpdatedAt (kit text stale).
+- (Phase 1 soak, P1.10e, 2026-10-29) ~15 of 30 min with #112 test sessions: 4 cycles, 0 dupes, 0
+  losses, 0 game errors; Studio wedged on the first forced stop with StudioEscrowPause active (same
+  as D-055's run). Issue #114 (data) investigating; retry needs a Studio restart. Test keys left:
+  Player_-1000001..5, Escrow_soak-1..4 (soak-4 Pending: the recovery evidence), Open_-1000001/5.
 - releaseTestSession can report "saved" from an autosave already in flight (reviewer #112; cosmetic). ReplayStore SetAsync passes raw {raider, defender} ids; apply the accounts filter if a test id can reach it (raid; tiny).
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 - Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
