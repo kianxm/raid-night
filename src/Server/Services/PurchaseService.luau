@@ -3,8 +3,12 @@
 	PurchaseService (owner: economy agent)
 
 	ProcessReceipt for developer products and pass ownership checks. Launch catalog per the
-	design doc: VIP, extra vault slot, auto-collect, raid scout, cosmetics; shields, Glow packs,
-	timer skips, event pass.
+	design doc: VIP, extra vault slot, auto-collect, raid scout, cosmetics; shields, timer skips,
+	event pass.
+
+	Glow is earn-only at launch (D-028). Glow packs ship only in the Phase 2 paid-randomness
+	mini-phase (Glow buys eggs, so Glow for Robux makes eggs paid random items): odds on screen,
+	PolicyService region checks, reviewer audit.
 
 	Hard rules:
 	  - NO paid randomness at launch (eggs and luck boosts bought with Robux are paid random
