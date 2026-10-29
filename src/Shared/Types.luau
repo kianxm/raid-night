@@ -209,8 +209,9 @@ export type EscrowRecord = {
 	-- before it existed is a Phase 0 live steal, so no migration (decision D-031).
 	kind: TransferKind?,
 	-- Live only (decision D-034): the defender den's Glow/s (Economy.denRate) when the raider's
-	-- grab was accepted, before the owner could react. The base for the day's first live loss.
-	-- Set by Escrow.create (checked by Escrow.checkLiveBaseRate, rounded to 0.001 Glow/s) and never
+	-- grab was accepted, before the owner could react. The base for the day's first live loss,
+	-- and a floor of the protection line at this record's own debit (decision D-037), so a shrink
+	-- during the carry cannot refuse it. Set by Escrow.create (checked by Escrow.checkLiveBaseRate, rounded to 0.001 Glow/s) and never
 	-- changed; part of the transfer's identity (Escrow.sameTransfer). Missing = no grab-time
 	-- measurement (records written before it existed, Async): the debit measures the den instead.
 	-- No migration.

@@ -113,10 +113,15 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 2. Glow is conserved.
 3. Repeating any step changes nothing after the first success.
 4. Daily loss limits hold at the debit, by the record's `kind` (decision D-031):
-   - Live: no live debit takes a critter from a den that is already protected
-     (`RaidRules.liveProtected`). The debit that crosses the threshold lands, so today's live
-     losses never pass it by more than one critter's rate. The day's first live loss sets the
-     base from the record's `liveBaseRate` when it has one (D-034, below).
+   - Live: a live debit takes a critter that is still on its pad exactly when the den is not
+     protected at that debit (`RaidRules.liveProtectedAtDebit`, read with the critter still in
+     the den). The line is `protectionLossShare` of the largest of the day's base, the den's
+     Glow/s just before the debit (D-036) and the record's `liveBaseRate` when it is a finite
+     number >= 0 (D-037). The debit that crosses the line lands, so the losses before any live
+     steal were always under the line measured at that steal. Refilling the den moves the line
+     up and reopens it, and shrinking it during a carry cannot make that carry's debit refuse.
+     The day's first live loss sets the base from the record's `liveBaseRate` when it has one
+     (D-034, below).
    - Async: no async debit takes a critter once the defender has lost
      `Config.Limits.maxLossesPerDay` critters that UTC day (live losses count toward it too).
 5. An empty live commit grants nothing (decision D-033). A Live debit that takes no critter
@@ -133,7 +138,8 @@ is a Phase 0 live steal, so it needed no migration. `EscrowService.transferLive`
 
 `EscrowRecord.liveBaseRate: number?` (decision D-034) is the defender den's Glow/s
 (`Economy.denRate`) when the raider's grab was accepted, before the owner could be alerted.
-It is the base for the defender's first live loss of the day (Live loss rules, below).
+It is the base for the defender's first live loss of the day, and at its own debit it is a
+floor of the protection line (D-037; Live loss rules, below).
 
 - **Set once.** `Escrow.create` takes it as an optional last argument, for Live records only.
   It must be nil or a finite number >= 0: NaN, inf, negatives and non-numbers fail
@@ -181,8 +187,8 @@ only by EscrowService after reading the player's `Open_` index, and never for a 
 listed there. `Profile.prepare` does not prune them.
 
 If you change `Escrow.luau`, `RaidRules.recordIncoming`, `RaidRules.recordLiveLoss`,
-`RaidRules.liveProtected` or anything in `appliedTransfers`, the simulation must still pass, and
-the `reviewer` agent must sign off.
+`RaidRules.liveProtected`, `RaidRules.liveProtectedAtDebit` or anything in `appliedTransfers`,
+the simulation must still pass, and the `reviewer` agent must sign off.
 
 ## Kill switches
 
@@ -240,7 +246,7 @@ Tuning lives in `Config.LiveRaid`:
 | `grabRange` | 10 | Studs from the raider's root part to the pad centre: how close a raider must be to start a grab and to keep holding it (D-018) |
 | `postLossSafetySeconds` | 60 | After a live loss, nobody can grab from that den this long (D-031) |
 | `maxStealsPerPairPerDay` | 2 | Live steals between the same two players per UTC day (D-031) |
-| `protectionLossShare` | 0.5 | Share of the den's Glow/s that, once lost to live steals today, protects it for the rest of the UTC day (D-031) |
+| `protectionLossShare` | 0.5 | Share of the den's Glow/s that, while today's live losses reach it, protects the den from live steals. Measured against the larger of the day's base and the den's Glow/s now; at the escrow debit, also the record's grab-time rate (D-031, D-036, D-037) |
 
 The last three are Kian's launch values, tuned in Phase 3 from live data (P3.9).
 
@@ -279,24 +285,58 @@ async, for the raid log and the async cap. Values live in `Config.LiveRaid` (tab
    the day's first live loss, measured when that steal's grab was accepted, before the owner
    could be alerted (decision D-034, Kian). It travels in the record's `liveBaseRate`. So an
    owner who moves high earners to Inventory or the Vault during the carry cannot shrink the
-   base and buy a whole day of protection with one cheap loss. A record without
+   base and buy protection with one cheap loss. A record without
    `liveBaseRate` falls back to `denRate` just before the debit, with the stolen critter
-   still in the den. Once today's live losses reach `protectionLossShare` (50%) of that base,
-   the den is protected from live steals for the rest of the UTC day. The steal that crosses
-   the line lands, and nothing after it does. The base never changes during the day, whatever
-   later records carry or the den does. Stealing a few Commons from a rich den never protects
-   it, while losing its best critter does at once.
+   still in the den. The base never changes during the day, whatever later records carry or
+   the den does.
+
+   The den is protected from live steals while today's live losses reach
+   `protectionLossShare` (50%) of the larger of the base and the den's Glow/s right now
+   (`Economy.denRate`, decision D-036, Kian):
+
+   `liveLossRateToday >= protectionLossShare × max(liveLossBaseRate, Economy.denRate(den now))`
+
+   - **The base is a floor.** Shrinking the den (moving critters to Inventory, Guard or the
+     Vault) never lowers the line below the base, so it cannot buy protection after a small
+     loss.
+   - **Refilling lifts protection.** The line rises with the den's rate. A planned shrink buys
+     nothing: an owner who empties the den but one Common before the grab gets an honest but
+     tiny base. After they lose that Common (to an alt, or a dropped carry they let land),
+     they are protected only while the den stays that small. Putting the earners back lifts
+     protection, and so can any other refill, such as an egg that `Economy.autoPlace` puts on
+     a free pad (D-027). After a real loss, a refill lifts it once the den earns more than
+     `1 / protectionLossShare` (twice) what it lost today.
+   - **A real loss still protects.** The den's rate drops with the stolen critter, so losing
+     the den's best critter protects it at once. Stealing a few Commons from a rich den never
+     does.
+   - **The rate is the den's whole `denRate`:** pad critters, plus Vault critters at
+     `Config.Income.vaultMultiplier`. Inventory and Guard critters earn nothing and count for
+     nothing. It is the unboosted rate (D-032), so a boost starting or ending never changes
+     protection.
+   - **It can switch off and on during the day,** as the den is refilled or shrunk. The steal
+     that crosses the line lands, and nothing after it does while the line holds. Only the UTC
+     day roll clears it for good (both fields reset).
+   - **A shrink during the carry cannot refuse the steal** (decision D-037). At the escrow
+     debit the line also counts the record's grab-time rate (`liveBaseRate`, measured when
+     the grab was accepted, before the owner could be alerted):
+     `liveLossRateToday >= protectionLossShare × max(liveLossBaseRate, Economy.denRate(den now), record.liveBaseRate)`.
+     The grab was accepted only while the den was open against the den as it was then. So an
+     owner who refilled, was alerted by the grab and moved earners off during the carry cannot
+     make the debit take nothing. The grab-time rate only raises the line. A record without a
+     valid one is checked against the den as it is at the debit.
+     `canGrabLive` and the den attribute are unchanged: at a grab, the den's rate now is the
+     grab-time rate.
 4. **Escrow.** Live steals keep moving critters through `Escrow.luau`, on the two profiles
    loaded in one server, via `EscrowService.transferLive`. They switch to the cross-server
    path when P1.1 adds it. The rules are checked when the grab starts and again at the debit,
-   where a `"Live"` record takes no critter from a protected den. A live debit that takes
+   where a `"Live"` record takes no critter from a den protected at the debit (D-037 line). A live debit that takes
    nothing at all grants the defender nothing (Escrow invariant 5, D-033).
 
 The state is stored on the profile as two optional `PlayerProfile` fields:
 
 | Field | Meaning |
 | --- | --- |
-| `liveLossBaseRate: number?` | The den's Glow/s for its first live loss today: at that steal's grab (the record's `liveBaseRate`), or just before its debit when the record has none |
+| `liveLossBaseRate: number?` | The den's Glow/s for its first live loss today: at that steal's grab (the record's `liveBaseRate`), or just before its debit when the record has none. It is the protection line's floor (D-036) |
 | `liveLossRateToday: number?` | The summed Glow/s of the critters lost to live steals today |
 
 Both belong to `lossDay` and are set back to nil when the day rolls
@@ -307,7 +347,17 @@ there has been no live loss today, so there is no migration and no `SCHEMA_VERSI
 The pure rules live in `RaidRules`, and the server always decides:
 
 - `liveProtected(profile, now)` is read-only. It is true when the profile's `lossDay` is today and
-  `liveLossRateToday >= protectionLossShare * liveLossBaseRate`. A NaN counts as protected.
+  `liveLossRateToday >= protectionLossShare * max(liveLossBaseRate, Economy.denRate(profile))`
+  (D-036). It reads the profile as it is at the call, so every caller sees a refill or a shrink
+  at once: `canGrabLive` (every hold frame) and RaidService's `LiveProtected` attribute and steal
+  prompts (every 0.5 s). A NaN in either field, or in the den's rate, counts as protected. A
+  missing field (no live loss today, or a save from before D-031) means not protected, however
+  small the den.
+- `liveProtectedAtDebit(profile, now, grabRate?)` is the same check with `grabRate` (the record's
+  `liveBaseRate`) also in the `max` (D-037). Only `Escrow.debitDefender` calls it, with the
+  targeted critter still in the den. A `grabRate` that is nil, or anything but a finite number
+  >= 0, counts as none (`Escrow.create` refuses those anyway), and the answer is then
+  `liveProtected`'s. The NaN and missing-field rules for the profile fields are unchanged.
 - `recordLiveLoss(defender, critter, now, grabBaseRate?)` is called by `Escrow.debitDefender` for
   a Live debit that takes a critter, before the critter leaves the profile, with the record's
   `liveBaseRate`. On the day's first loss it sets the base to `grabBaseRate`. When that is nil,
@@ -353,7 +403,7 @@ server-written and display-only:
 | Den Model | `OwnerUserId` | number | Owner's userId; 0 when unowned |
 | Den Model | `LockdownUntil` | number | When the current Lockdown ends; absent or past = none active |
 | Den Model | `LockdownReadyAt` | number | When the owner can start the next Lockdown; absent or past = ready |
-| Den Model | `LiveProtected` | boolean | `RaidRules.liveProtected` for the owner today: no live steals until the UTC day ends (D-031); absent = false |
+| Den Model | `LiveProtected` | boolean | `RaidRules.liveProtected` for the owner right now: no live steals while it is true (D-031). It can turn false and true again during the day as the owner refills or shrinks the den (D-036), and is false from the UTC day roll; absent = false |
 | Den Model | `LiveGrabReadyAt` | number | When grabs reopen after the den's last live loss (`RaidRules.liveGrabReadyAt`, D-031); absent or past = open |
 | Pad Part | `PadIndex` | number | The pad's number |
 | Critter Model | `CritterUid`, `SpeciesId`, `Tier` | string | Which critter this model draws |
