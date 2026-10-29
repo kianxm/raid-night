@@ -12,12 +12,24 @@
 local Types = require("./Types")
 local Config = require("./Config")
 local CritterCatalog = require("./CritterCatalog")
+local Net = require("./Net")
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
 type Tier = Types.Tier
 type Mutation = Types.Mutation
+type Placement = Types.Placement
 type CritterSpecies = Types.CritterSpecies
+
+-- Everything an egg purchase needs from outside the pure world. The server fills it from a
+-- server Random and HttpService; tests fill it by hand.
+export type EggRoll = {
+	tierRoll: number, -- uniform in [0, 1)
+	speciesRoll: number, -- uniform in [0, 1)
+	uid: string, -- fresh globally unique id for the new critter
+	maxTier: Tier, -- highest tier this egg can hatch (Phase 0: "Uncommon")
+	physicalPads: number, -- pads that exist in the den world (6)
+}
 
 local Economy = {}
 
@@ -126,6 +138,31 @@ function Economy.rollTier(roll: number): Tier
 	return last.tier :: Tier
 end
 
+-- Like rollTier, but only tiers up to `maxTier` can hatch. Their weights keep their published
+-- ratios (renormalised to sum to 1), so the capped egg is the launch egg minus the top tiers.
+function Economy.rollTierUpTo(roll: number, maxTier: Tier): Tier
+	local maxRank = CritterCatalog.tierRank(maxTier)
+	local total = 0
+	for _, entry in Config.EggOdds do
+		if CritterCatalog.tierRank(entry.tier :: Tier) <= maxRank then
+			total += entry.weight
+		end
+	end
+	local cumulative = 0
+	local last: Tier = "Common"
+	for _, entry in Config.EggOdds do
+		local tier = entry.tier :: Tier
+		if CritterCatalog.tierRank(tier) <= maxRank then
+			cumulative += entry.weight / total
+			last = tier
+			if roll < cumulative then
+				return tier
+			end
+		end
+	end
+	return last -- rounding sliver at the top
+end
+
 -- Picks a species uniformly within a tier from a uniform random number in [0, 1).
 -- Event-only species are never returned.
 function Economy.rollSpecies(tier: Tier, roll: number): CritterSpecies?
@@ -140,6 +177,177 @@ function Economy.rollSpecies(tier: Tier, roll: number): CritterSpecies?
 	end
 	local index = math.clamp(math.floor(roll * #pool) + 1, 1, #pool)
 	return pool[index]
+end
+
+-- Storage cap in Glow (not seconds) at the den's current rate and level.
+function Economy.storageCap(profile: PlayerProfile): number
+	return Economy.denRate(profile) * Economy.storageCapSeconds(profile.denLevel)
+end
+
+-- Pads a player can actually use: unlocked by level AND built in the world.
+function Economy.usablePadCount(denLevel: number, physicalPads: number): number
+	return math.max(0, math.min(Economy.padCount(denLevel), physicalPads))
+end
+
+function Economy.padOccupant(profile: PlayerProfile, padIndex: number): Critter?
+	for _, critter in profile.critters do
+		if critter.placement == "Pad" and critter.padIndex == padIndex then
+			return critter
+		end
+	end
+	return nil
+end
+
+-- Lowest usable pad with nothing on it, or nil when every usable pad is taken.
+function Economy.firstFreePad(profile: PlayerProfile, physicalPads: number): number?
+	for pad = 1, Economy.usablePadCount(profile.denLevel, physicalPads) do
+		if not Economy.padOccupant(profile, pad) then
+			return pad
+		end
+	end
+	return nil
+end
+
+function Economy.vaultCount(profile: PlayerProfile): number
+	local count = 0
+	for _, critter in profile.critters do
+		if critter.placement == "Vault" then
+			count += 1
+		end
+	end
+	return count
+end
+
+--[[
+	Moves an owned critter to a Pad (with `padIndex`), the Vault or Inventory. A critter moved
+	onto an occupied pad swaps with the occupant, which takes the mover's old spot, so no slot
+	limit can be broken by a swap. Guard placement is not available yet (no guard slots exist).
+	Accrues first. Returns false and a reason, without changing anything, if the move is invalid.
+]]
+function Economy.place(
+	profile: PlayerProfile,
+	uid: string,
+	placement: Placement,
+	padIndex: number?,
+	physicalPads: number,
+	now: number
+): (boolean, string?)
+	local critter = profile.critters[uid]
+	if not critter then
+		return false, "not your critter"
+	end
+	local occupant: Critter? = nil
+	if placement == "Pad" then
+		local usable = Economy.usablePadCount(profile.denLevel, physicalPads)
+		if type(padIndex) ~= "number" or padIndex % 1 ~= 0 or padIndex < 1 or padIndex > usable then
+			return false, "pad is locked or does not exist"
+		end
+		occupant = Economy.padOccupant(profile, padIndex)
+	elseif placement == "Vault" then
+		if critter.placement ~= "Vault" and Economy.vaultCount(profile) >= profile.vaultSlots then
+			return false, "vault is full"
+		end
+	elseif placement ~= "Inventory" then
+		return false, "placement not available"
+	end
+
+	Economy.accrue(profile, now)
+	if occupant and occupant ~= critter then
+		occupant.placement = critter.placement
+		occupant.padIndex = critter.padIndex
+	end
+	critter.placement = placement
+	critter.padIndex = if placement == "Pad" then padIndex else nil
+	return true, nil
+end
+
+-- Spends banked Glow to raise the den one level. Accrues first so the old storage cap applies
+-- to time already earned.
+function Economy.upgradeDen(profile: PlayerProfile, now: number): (boolean, string?)
+	local cost = Economy.upgradeCost(profile.denLevel)
+	if cost == nil then
+		return false, "den is at max level"
+	end
+	if profile.glow < cost then
+		return false, "not enough Glow"
+	end
+	Economy.accrue(profile, now)
+	profile.glow -= cost
+	profile.denLevel += 1
+	return true, nil
+end
+
+--[[
+	Rescue egg: a player with no critters at all and not enough Glow (banked plus stored) for an
+	egg gets their next egg free. This is how a new player starts (Profile.new gives 0 Glow and
+	no critters), and it means nobody can be raided into a dead end. It cannot be farmed: nothing
+	sells critters, so the only way back to zero critters is losing them all.
+]]
+function Economy.isRescueEgg(profile: PlayerProfile): boolean
+	return next(profile.critters) == nil
+		and math.floor(profile.glow + profile.stored) < Economy.eggPrice(profile.denLevel)
+end
+
+-- What the next egg costs this player in banked Glow (0 for a rescue egg).
+function Economy.eggCost(profile: PlayerProfile): number
+	return if Economy.isRescueEgg(profile) then 0 else Economy.eggPrice(profile.denLevel)
+end
+
+-- Buys and hatches one egg: pays from banked Glow, rolls a tier (capped at roll.maxTier) and a
+-- species, and puts the new critter on the first free usable pad, or in Inventory if none.
+-- Returns the new critter, or nil and a reason with nothing changed.
+function Economy.buyEgg(profile: PlayerProfile, now: number, roll: EggRoll): (Critter?, string?)
+	local cost = Economy.eggCost(profile)
+	if profile.glow < cost then
+		return nil, "not enough Glow"
+	end
+	if profile.critters[roll.uid] ~= nil then
+		return nil, "uid already exists" -- never overwrite a critter
+	end
+	local species = Economy.rollSpecies(Economy.rollTierUpTo(roll.tierRoll, roll.maxTier), roll.speciesRoll)
+	if not species then
+		return nil, "no species for that tier"
+	end
+
+	Economy.accrue(profile, now)
+	profile.glow -= cost
+	local pad = Economy.firstFreePad(profile, roll.physicalPads)
+	local critter: Critter = {
+		uid = roll.uid,
+		speciesId = species.id,
+		mutation = "None",
+		placement = if pad then "Pad" else "Inventory",
+		padIndex = pad,
+		acquiredAt = now,
+		stolenLockUntil = nil,
+	}
+	profile.critters[critter.uid] = critter
+	return critter, nil
+end
+
+-- The client's view of a den. Call accrue first so `stored` is current. Critters are copies,
+-- ordered oldest first (then by uid) so the client gets a stable list.
+function Economy.denState(profile: PlayerProfile): Net.DenState
+	local critters: { Critter } = {}
+	for _, critter in profile.critters do
+		table.insert(critters, table.clone(critter))
+	end
+	table.sort(critters, function(a: Critter, b: Critter): boolean
+		if a.acquiredAt ~= b.acquiredAt then
+			return a.acquiredAt < b.acquiredAt
+		end
+		return a.uid < b.uid
+	end)
+	return {
+		glow = profile.glow,
+		stored = profile.stored,
+		storageCap = Economy.storageCap(profile),
+		ratePerSecond = Economy.denRate(profile),
+		denLevel = profile.denLevel,
+		rebirths = profile.rebirths,
+		shieldUntil = profile.shieldUntil,
+		critters = critters,
+	}
 end
 
 function Economy.canRebirth(profile: PlayerProfile): boolean
