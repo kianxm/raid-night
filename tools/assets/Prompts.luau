@@ -172,7 +172,7 @@ Prompts.ART = {
 	midnight_mew = {
 		bodyPlan = "floater",
 		glow = "its single huge crescent-moon eye",
-		look = "a creature from another world with a cat-like silhouette made of living night sky: its body is a deep starfield with drifting nebula wisps, its ears trail off into smoke, and one single huge crescent-moon eye sits in the center of its face, with a halo of tiny orbiting stars",
+		look = "a creature from another world with a cat-like silhouette made of living night sky: its body is a deep starfield with drifting nebula wisps, its ears trail off into smoke, and one single huge crescent-moon eye sits in the center of its face and it has no other eyes, with a halo of tiny orbiting stars",
 	},
 }
 
