@@ -180,6 +180,17 @@ local Strings = {
 	gearPickDone = "Lock picked!",
 	gearPickBroke = "Pick broke",
 	portalRefresh = "Refresh",
+
+	-- Onboarding hints (one at a time)
+	obHatch = "Tap Free egg to hatch your first critter",
+	obPlace = "Open Bag and put your critter on a pad",
+	obCollect = "Tap Collect to bank your Glow",
+	obBuyEgg = "Tap Buy Egg to get a second critter",
+	obSteal = "Walk to the glowing den and hold F to grab",
+	obRaidLog = "Raids on your den show up in the Raid Log. Tap Revenge to get even.",
+	obGotIt = "Got it",
+	obStealDone = "Your first steal!",
+	obDistance = "{n} studs",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string
