@@ -100,8 +100,8 @@ merging it (D-058, D-067). Gate report: `docs/gate-report-phase2.md`.
 | P2.12a | integration | — | Done | preview/phase2 802513e | 1 | Every PR folded in order; 657 pass, 0 fail |
 | P2.12b | integration | P2.12a | Done | Studio (D-060) | 1 | Single-client pass: all areas PASS; #146/#147 found and fixed (P2.12c: onboarding 60 s) |
 | P2.13a | ui | — | In review | #151 → preview/phase2 | 1 | 662 tests. Theme.luau (tokens; Fredoka→FredokaOne, Nunito→BuilderSansBold), Raid/Ui delegates to it, den HUD phone + PC hotbar (1-6, Q). Icons for Kian: 7 x 128 px + Glow orb. Not translatable: hard shadows/bevels approximated, tracked caps |
-| P2.13b | ui | P2.13a | In progress | agent/ui/P2.13b (stacked on #151) | 1 | Eggs, odds, shop, Lantern (phone + PC) |
-| P2.13c | ui | P2.13a | In progress | agent/ui/P2.13c (stacked on #151) | 1 | Raid portal, HUD, carry, results (phone + PC); hide old PC Raid button |
+| P2.13b | ui | P2.13a | In progress | #153 (stacked on #151), round 2 | 2 | Odds panel, hatch popup, shop, Lantern restyled; round 2: PC egg screen (key 1) + PC shop. Needs feature: egg catalog, restock timer, event tokens, shop tabs |
+| P2.13c | ui | P2.13a | In review | #152 (stacked on #151) | 2 | Portal cards, raid HUD, outcome cards, PC keys 1-3/Enter/Esc; Back to den / Raid again wired. Needs feature: Leave raid remote, Share clip, Scout, Reroll, speed bar, traps seen, rank/Glow lost stats |
 | P2.13d | ui | P2.13a | In progress | agent/ui/P2.13d (stacked on #151) | 1 | Raid log, revenge, opt-in; PC raid feed |
 | P2.13e | ui | P2.13a | In progress | agent/ui/P2.13e (stacked on #151) | 1 | Live moments, collection, settings, onboarding |
 | P2.12 | integration | all | Done | #137 | 1 | docs/playtests/phase2.md + "Before inviting" checklist. Build freeze + tester access: Kian |
