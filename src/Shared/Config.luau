@@ -85,6 +85,18 @@ local Config = {
 		rebirthMultiplierStep = 0.5, -- each rebirth adds +50% Glow
 	},
 
+	-- Robux-bought Glow multipliers (decision D-030). They multiply Glow earned in play and never
+	-- grant Glow directly. Bonuses stack additively: VIP + Lantern Night = +100%, so 2.0x (not
+	-- 1.5 * 1.5). Robux-linked: never applied to a player whose PolicyService info restricts paid
+	-- random items (ArePaidRandomItemsRestricted). Fail closed: if PolicyService can't be read
+	-- for a player, treat them as restricted. Their Glow stays earn-only, so eggs stay purchasable
+	-- for them. Ship only after the P2.8 reviewer policy audit and PolicyService check.
+	Boosts = {
+		vipGlowBonus = 0.5, -- VIP pass: +50% Glow (1.5x on its own)
+		lanternNightGlowBonus = 0.5, -- Lantern Night server boost: +50% Glow for everyone in the server
+		lanternNightSeconds = 15 * 60, -- how long one Lantern Night lasts
+	},
+
 	Mutations = {
 		None = 1,
 		Shiny = 1.5,
