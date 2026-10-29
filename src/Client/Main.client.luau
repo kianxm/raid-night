@@ -6,7 +6,16 @@
 
 local Controllers = script.Parent:WaitForChild("Controllers")
 
-for _, name in { "DenController", "HudController", "RaidLogController", "DenStatusController" } do
+for _, name in
+	{
+		"DenController",
+		"HudController",
+		"RaidLogController",
+		"DenStatusController",
+		"RaidPortalController",
+		"RaidHudController",
+	}
+do
 	local controller = require(Controllers:WaitForChild(name)) :: any
 	controller.start()
 end
