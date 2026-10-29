@@ -13,7 +13,11 @@ local expect = require("../lib/expect")
 local FILES = {
 	"src/Server/Services/RaidService.luau",
 	"src/Server/Raid/Lockdown.luau",
+	"src/Server/Raid/TestHook.luau",
 }
+-- TestHook builds its own in-memory stand-in profile, which no player owns, so it is the one
+-- file allowed to fill a critters table. It must still never save anything.
+local BUILDS_FAKE_PROFILE = { ["src/Server/Raid/TestHook.luau"] = true }
 
 local function codeOnly(source: string): string
 	source = string.gsub(source, "%-%-%[(=*)%[.-%]%1%]", "")
@@ -44,6 +48,16 @@ tests["RaidService reads Config.Flags only through Escrow.canStartTransfer"] = f
 	expect.eq(count(code, 'Escrow.canStartTransfer(Config.Flags, "Live"'), 1, "and it is the kill-switch check")
 end
 
+tests["the test hook only ever installs in Studio"] = function()
+	local code = codeOnly(fs.readFile("src/Server/Raid/TestHook.luau"))
+	expect.truthy(
+		string.find(code, "function TestHook.install%(raidApi: Api%)%s+if not RunService:IsStudio%(%) then%s+return")
+	)
+	local service = codeOnly(fs.readFile(FILES[1]))
+	expect.truthy(string.find(service, "if RunService:IsStudio%(%) then%s+TestHook.install%("))
+	expect.truthy(string.find(service, 'assert%(RunService:IsStudio%(%), "stand%-ins are Studio%-only"%)'))
+end
+
 tests["raid server code never reads an attribute"] = function()
 	for _, path in FILES do
 		expect.eq(count(codeOnly(fs.readFile(path)), "GetAttribute"), 0, path)
@@ -56,8 +70,10 @@ tests["raid server code never writes or saves a profile"] = function()
 		expect.eq(count(code, "saveNow"), 0, `{path} saves a profile`)
 		expect.eq(count(code, "resetDailyIfNeeded"), 0, `{path} resets daily counters`)
 		expect.eq(count(code, "record" .. "Outgoing"), 0, `{path} writes a raid log`)
-		expect.falsy(string.find(code, "critters%[[^%]]+%]%s*=[^=]"), `{path} assigns into a critters table`)
-		expect.falsy(string.find(code, "%.placement%s*=[^=]"), `{path} changes a placement`)
+		if not BUILDS_FAKE_PROFILE[path] then
+			expect.falsy(string.find(code, "critters%[[^%]]+%]%s*=[^=]"), `{path} assigns into a critters table`)
+			expect.falsy(string.find(code, "%.placement%s*=[^=]"), `{path} changes a placement`)
+		end
 	end
 end
 

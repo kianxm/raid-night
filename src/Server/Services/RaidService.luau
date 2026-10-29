@@ -26,6 +26,7 @@
 	          the identical arguments; then the lock clears and both dens are refreshed.
 
 	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
+	  Studio only: Raid/TestHook.luau seeds a stand-in den for single-client tests (D-010)
 
 	Server API:
 	  requestGrab(player, plot, padIndex) -> (ok, reason?)  start a server-timed grab hold
@@ -61,9 +62,18 @@ local DenWorldService = require(script.Parent.DenWorldService) :: any
 local IncomeService = require(script.Parent.IncomeService) :: any
 local RaidFolder = script.Parent.Parent.Raid
 local Lockdown = require(RaidFolder.Lockdown)
+local TestHook = require(RaidFolder.TestHook)
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
+
+-- A Studio-only fake den owner (TestHook, decision D-010). Never set in a live server.
+export type StandIn = {
+	userId: number, -- negative, so never a real player
+	profile: PlayerProfile, -- used until DataService holds a profile for userId
+	root: BasePart?, -- where the stand-in owner stands (tags like a real owner)
+	redraw: () -> (), -- draws its pad critters (IncomeService only draws real players' dens)
+}
 
 type Hold = { plot: number, padIndex: number, critterUid: string, startedAt: number }
 type Carry = {
@@ -94,6 +104,7 @@ local carries: { [Player]: Carry } = {}
 local locked: { [string]: true } = {} -- "<ownerUserId>:<uid>" while carried or in escrow
 local prompts: { [BasePart]: ProximityPrompt } = {}
 local windows: { [Player]: { start: number, count: number } } = {}
+local standIns: { [number]: StandIn } = {} -- plot -> stand-in; stays empty outside Studio
 local beingRaided: RemoteEvent
 local started = false
 
@@ -139,6 +150,11 @@ end
 
 -- Who owns a den: userId, their loaded profile, and their root part.
 local function ownerOf(plot: number): (number?, PlayerProfile?, BasePart?)
+	local standIn = standIns[plot]
+	if standIn then
+		local root = if standIn.root and standIn.root.Parent then standIn.root else nil
+		return standIn.userId, DataService.getProfile(standIn.userId) or standIn.profile, root
+	end
 	local owner = DenWorldService.getOwner(plot)
 	if not owner then
 		return nil, nil, nil
@@ -150,6 +166,11 @@ local function refreshUser(userId: number)
 	local player = Players:GetPlayerByUserId(userId)
 	if player then
 		IncomeService.refresh(player)
+	end
+	for _, standIn in standIns do
+		if standIn.userId == userId then
+			standIn.redraw()
+		end
 	end
 end
 
@@ -457,6 +478,42 @@ local function syncPrompts()
 	end
 end
 
+-- Studio test hook -------------------------------------------------------------------------------
+
+local function setStandIn(plot: number, standIn: StandIn?)
+	assert(RunService:IsStudio(), "stand-ins are Studio-only")
+	local old = standIns[plot]
+	standIns[plot] = standIn
+	if old and old ~= standIn then
+		for raider, carry in carries do
+			if carry.defenderUserId == old.userId then
+				drop(raider, carry, "stand-in removed")
+			end
+		end
+	end
+end
+
+local function describe(): string
+	local parts = {}
+	for player, hold in holds do
+		table.insert(parts, `{player.Name} holding den {hold.plot} pad {hold.padIndex}`)
+	end
+	for player, carry in carries do
+		table.insert(parts, `{player.Name} carrying {carry.speciesId} from den {carry.plot} pad {carry.padIndex}`)
+	end
+	local lockCount = 0
+	for _ in locked do
+		lockCount += 1
+	end
+	table.insert(parts, `{lockCount} critter lock(s)`)
+	for plot = 1, Plots.Layout.plotCount do
+		if Lockdown.isActive(plot) then
+			table.insert(parts, `den {plot} in Lockdown`)
+		end
+	end
+	return table.concat(parts, "; ")
+end
+
 -- Lifecycle ---------------------------------------------------------------------------------------
 
 -- One failing step must not stop the others or the next frame.
@@ -517,6 +574,14 @@ function RaidService.start()
 			end
 		end
 	)
+	if RunService:IsStudio() then
+		TestHook.install({
+			setStandIn = setStandIn,
+			requestGrab = RaidService.requestGrab,
+			isLocked = isLocked,
+			describe = describe,
+		})
+	end
 
 	local carryClock, promptClock = 0, PROMPT_TICK
 	RunService.Heartbeat:Connect(function(dt: number)
