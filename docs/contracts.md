@@ -17,7 +17,7 @@ sections for what you touch. Update this page in the same commit as any contract
 
 | Key | Type | Written by | Notes |
 | --- | --- | --- | --- |
-| Profile per user | `PlayerProfile` | DataService only (session-locked) | Others send messages |
+| Profile per user | `PlayerProfile` | DataService only: its sessions, or `updateOffline` while no server holds the key (P1.1) | Others send messages (`sendMessage`) |
 | Snapshot per user | `DenSnapshot` | SnapshotService | Never includes vault critters |
 | Escrow per raidId | `EscrowRecord` | EscrowService | Write-once create, then state moves forward only |
 | Open escrows per user | `EscrowOpenIndex` | EscrowService | Both raider and defender; added before the record, removed once terminal |
@@ -39,13 +39,29 @@ Studio-only memory and test profiles (decision D-019, details in `DataService.lu
   never saved, and `saveNow` on it confirms at once. `releaseTestProfile(userId)` works like a
   leave (`onProfileReleasing` runs), and it refuses while an escrow for that id is still open,
   or when EscrowService has not registered its release guard (fail closed).
+- **Escrow playtest switches** (P1.1, ServerStorage attributes, read only when
+  `RunService:IsStudio()`): `StudioAsyncRaids = true` makes `EscrowService.canStartTransfer`
+  count `asyncRaids` as on (the master `raids` switch still applies), and
+  `StudioEscrowPause = "<checkpoint>"` (an Escrow checkpoint name such as `"deliveredDebit"`)
+  holds any escrow drive at that step for up to 2 minutes, so a playtest can stop the server
+  mid-transfer. A live server never reads either.
+
+Profile writes outside a session (P1.1): `DataService.updateOffline` runs one `UpdateAsync` on
+`Player_<userId>` that lands only while ProfileStore's `MetaData.ActiveSession` is empty, runs
+`Profile.prepare` on the data first, and keeps ProfileStore's metadata, message queue, `UserIds`
+and `RobloxMetaData`. It never takes a session lock (so it never makes a server release and kick
+its player). Messages (`DataService.sendMessage`) are `{ topic, data }` tables in ProfileStore's
+queue in the same key; `DataService.onMessage(topic, fn)` receives them where the profile is
+loaded. Topics: `EscrowDebit` with `data = { raidId }`, a wake-up for an async debit (the
+escrow record decides; repeats and late ones change nothing).
 
 **Never change the store name or the key format.** ProfileStore would find no save under the
 new name and hand every player a fresh template. Everyone silently starts over: the old saves
 still exist, but nothing reads them. The same applies to `EscrowRecords` and its keys below,
 where a rename would strand every transfer in flight.
 
-Escrow storage: DataStore `EscrowRecords`.
+Escrow storage: DataStore `EscrowRecords`. Every write stores the userIds the key is about
+(both parties for a record, the owner for an index; decision D-008, for erasure tooling).
 
 - `Escrow_<raidId>`: the `EscrowRecord`. raidId is at most `Config.Escrow.maxRaidIdLength` (43)
   characters, so the key fits DataStore's 50. Forward-only is enforced by `Escrow.canReplace`
@@ -134,7 +150,8 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 `EscrowRecord.kind` (`"Live"` or `"Async"`) is set when the record is created and never changes
 (`Escrow.canReplace`). Missing means `"Live"`: every record written before the field existed
 is a Phase 0 live steal, so it needed no migration. `EscrowService.transferLive` creates
-`"Live"` records.
+`"Live"` records; `EscrowService.transferAsync` (P1.1, an async raid's escape) creates `"Async"`
+records, and its `glowRequested` is the snapshot's `RaidRules.lootGlow` estimate.
 
 `EscrowRecord.liveBaseRate: number?` (decision D-034) is the defender den's Glow/s
 (`Economy.denRate`) when the raider's grab was accepted, before the owner could be alerted.
