@@ -27,8 +27,13 @@
 	          with server-tracked arguments (glowRequested 0, D-015). "InFlight" is retried with
 	          the identical arguments after 2, 5 and 10 s (never past 20 s); then the lock clears
 	          and both dens are refreshed.
-	  End     Every carry ends with Net.Pushes.RaidEnded to the raider (decision D-020): raidId
-	          "" for a drop before the escape, escaped = (transferLive result == "Committed").
+	  End     Every carry ends with Net.Pushes.RaidEnded to the raider (decision D-020):
+	            raidId ""             dropped before the escape; escaped = false
+	            raidId, escaped true  Committed, and the critter is in the raider's profile
+	            raidId, escaped false NOT confirmed: Refused (nothing moved), Committed with
+	                                  nothing stolen, or still InFlight after the last retry. In
+	                                  the InFlight case recovery may still commit it later; the
+	                                  raider's DenChanged/Inventory shows the truth when it lands.
 
 	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
 
@@ -445,16 +450,19 @@ local function escape(player: Player, carry: Carry)
 			warn(`[RaidService] refresh after raid {raidId} failed: {refreshError}`)
 		end
 		local line = `raid {raidId}: transferLive {status}{if reason then ` ({reason})` else ""}`
-		if status == "Committed" then
+		local escaped = status == "Committed"
+		if escaped then
 			debugLog(line)
 			local raiderProfile = DataService.getProfile(raiderUserId)
 			if raiderProfile and raiderProfile.critters[critterUid] == nil then
+				-- e.g. the owner hit the loss cap first: the raid committed with nothing in it.
 				warn(`[RaidService] raid {raidId} committed but stole nothing: {critterUid} is not the raider's`)
+				escaped = false
 			end
 		else
 			warn(`[RaidService] {line}`)
 		end
-		pcall(sendEnded, player, raidId, status == "Committed", speciesId)
+		pcall(sendEnded, player, raidId, escaped, speciesId)
 	end)
 end
 
