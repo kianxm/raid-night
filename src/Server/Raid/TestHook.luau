@@ -14,7 +14,8 @@
 	Drive it from the Studio command bar (server side) during Play:
 	  local hook = game:GetService("ServerStorage"):WaitForChild("RaidTestHook")
 	  hook:Invoke("seed")              --> plot number of the stand-in den
-	  hook:Invoke("status")            --> one-line summary: carries, locks, Lockdown, stand-in pads
+	  hook:Invoke("status")            --> one-line summary: carries (with the D-034 base), locks,
+	                                       Lockdown, live protection / last live loss, stand-in pads
 	  hook:Invoke("chase", true)       --> the stand-in owner walks at you; within tagRange it tags
 	  hook:Invoke("home")              --> the stand-in owner returns to its den and stops
 	  hook:Invoke("lockdown")          --> start a Lockdown on the stand-in den: ok, reason
