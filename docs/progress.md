@@ -49,13 +49,13 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | --- | --- | --- | --- | --- | --- | --- |
 | P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) APPROVED both; fix round for two loss-adjacent items (D-049). Own Studio run waits for merge (D-044) |
 | P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
-| P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: #100, #101 (stacked), in review; P1.3b: Todo | 1 | Split (D-046). #100 contracts + pure rules, #101 server + pocket den; 286 tests (D-050). P1.3b = escrow handoff, shield, revenge token, logs, pair limit, markRaidLogSeen (after P1.1 fix round) |
+| P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: #100, #101 (stacked), in review; P1.3b: Todo | 1 | Split (D-046). #100 contracts + pure rules, #101 server + pocket den: reviewer APPROVED both, 286 tests (D-050). P1.3b in progress (agent/raid/P1.3b, + P1.4b stacked). P1.3b = escrow handoff, shield, revenge token, logs, pair limit, markRaidLogSeen (after P1.1 fix round) |
 | P1.4 | raid | P1.3 | In progress | P1.4a: #99 (approved); P1.4b: Todo | 1 | Split (D-046). #99: 3-min raid = 1,768 bytes, ±0.25 stud, reviewer APPROVED (decode fuzzed), 281 tests; GetReplay limit 3 and 7-day index cleanup approved (D-048). P1.4b = hook into raids after P1.3a, using save() not saveNow() |
 | P1.5 | ui | — | Done | #89, #92 (open) | 1 | Studio: log, HUD, outcome card pass; portal blank (#90). Fix #92 reviewed, merge refused by the permission check (Needs Kian). Phone sizes not emulated (deferred). ~986 lines accepted as one unit |
 | P1.6 | ui | P1.3, P1.5 | In progress | agent/ui/P1.6 | 1 | Stacked on #100, contains #92 and #94 (D-044) |
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
 | P1.8 | economy | P1.7 | Blocked | #96 (stacked on #95) | 1 | Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
-| P1.9 | matchmaking | P1.2 | In review | #94 | 1 | Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
+| P1.9 | matchmaking | P1.2 | In review | #94; P1.9b agent/raid/P1.9b | 1 | P1.9b (raid) wires getLiveRevenge into the live steal path. Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
 
 ## Setup notes
@@ -158,6 +158,7 @@ dropped based on real play.
 - Finished escrow records are never deleted (D-008 cleanup deferred, D-047; storage growth only; proposal in #98).
 - ReplayStore: cap expired-replay deletes per save (~4) so a returning raider's 64-delete burst can't drain the DataStore budget; delete the dropped list even if SetAsync fails; cache fetched records; finite startedAt check (reviewer #99; small).
 - DenSnapshot has no losses-today count, so StartRaid assumes 0 (the escrow debit still enforces the cap) (raid #100; matchmaking; small).
+- Async raids (reviewer #101): trap slow / Net is judged against the new walk speed at once, so a carrier with >150 ms ping can drop as TooFast (fails safe; add a grace); no movement budget before a grab lets a teleport skip guards/traps on the way in (carry back is checked); presence read error should be reported by matchmaking, not read as offline (P1.3b refuses on error); confirm StreamingEnabled is on in the place so pockets stay hidden.
 - Pool memory at scale: 7-day entries may exceed MemoryStore quota (matchmaking #91; medium). Five more edge cases listed in #91.
 - Revenge landing: arrive()'s 0.2 s wait can lose to DenWorldService onCharacterAdded and send the player home (reviewer #94; UX).
 - Revenge join `pending` expires at 30 s while TeleportAsync may be in flight, allowing a second attempt (reviewer #94; fails safe).
