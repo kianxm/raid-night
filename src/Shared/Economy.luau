@@ -805,6 +805,63 @@ function Economy.buyEgg(profile: PlayerProfile, now: number, roll: EggRoll): (Cr
 	return critter, nil
 end
 
+--[[
+	Tutorial den critter (P2.6, decision D-064). The tutorial den next door has no defender
+	profile, so a successful tutorial steal is a grant, not an Escrow move. The grant is one fixed
+	Common (TUTORIAL_CRITTER_SPECIES), untradeable like a rescue-egg critter, and lands in
+	Inventory like any stolen critter (IncomeService's push then auto-places it, D-027).
+
+	At most once per player, ever. `claim` is the once-ever key: it must not yield and must return
+	true exactly once per player. The server passes DataService.advanceOnboarding(userId,
+	TUTORIAL_CLAIM_STEP), which moves onboarding forward only: it is true the first time the player
+	reaches that step and false forever after, and false for a save from before onboarding or a
+	skipped onboarding. The step and the critter are written in the same synchronous block, so they
+	land in the same profile save: a crash before that save loses both together (the player can
+	redo the tutorial), and a retry or a rejoin finds the step done and grants nothing.
+
+	Every check that can fail runs BEFORE `claim`, so a refused grant never spends the claim.
+	Returns the new critter, or nil and a reason with nothing written (the claim untouched unless
+	the reason is "already granted").
+]]
+Economy.TUTORIAL_CRITTER_SPECIES = "dusk_mouse"
+Economy.TUTORIAL_CLAIM_STEP = "stealHome"
+
+function Economy.grantTutorialCritter(
+	profile: PlayerProfile,
+	now: number,
+	uid: string,
+	claim: () -> boolean
+): (Critter?, string?)
+	if type(now) ~= "number" or now ~= now or now == math.huge or now == -math.huge then
+		return nil, "bad time"
+	end
+	if type(uid) ~= "string" or uid == "" then
+		return nil, "bad uid"
+	end
+	if profile.critters[uid] ~= nil then
+		return nil, "uid already exists" -- never overwrite a critter
+	end
+	local species = CritterCatalog.get(Economy.TUTORIAL_CRITTER_SPECIES)
+	if not species or species.tier ~= "Common" then
+		return nil, "no tutorial species"
+	end
+	if claim() ~= true then
+		return nil, "already granted"
+	end
+	local critter: Critter = {
+		uid = uid,
+		speciesId = species.id,
+		mutation = "None",
+		placement = "Inventory",
+		padIndex = nil,
+		acquiredAt = now,
+		stolenLockUntil = nil,
+		untradeable = true,
+	}
+	profile.critters[uid] = critter -- Inventory earns nothing, so no accrue is needed first
+	return critter, nil
+end
+
 -- The client's view of a den. Call accrue first so `stored` is current. Critters are copies,
 -- ordered oldest first (then by uid) so the client gets a stable list.
 function Economy.denState(profile: PlayerProfile): Net.DenState

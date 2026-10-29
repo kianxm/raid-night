@@ -163,6 +163,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "TutorialGrant",
+		load = function()
+			return require("./specs/TutorialGrant.spec")
+		end,
+	},
+	{
 		name = "RateLimit",
 		load = function()
 			return require("./specs/RateLimit.spec")
