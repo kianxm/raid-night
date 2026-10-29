@@ -226,6 +226,9 @@ local function closeDen(player: Player)
 	dens[player] = nil
 	if den then
 		pcall(function()
+			if den.critter then
+				den.critter:Destroy() -- unparented while it was carried
+			end
 			den.model:Destroy()
 			player:SetAttribute(POSITION_ATTRIBUTE, nil)
 		end)
