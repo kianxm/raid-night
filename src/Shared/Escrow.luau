@@ -26,8 +26,9 @@
 	  - debitDefender runs wherever the defender's profile is loaded. If the defender is online,
 	    deliver it as a ProfileStore message so their session applies it; if offline, the raider's
 	    server loads the profile, applies it and releases it.
-	  - A recovery sweep advances any record left in Pending or Debited (on raider join, and on a
-	    timer), using `advance`.
+	  - Recovery (`recover`) runs on either party's load and on a timer. It never debits afresh:
+	    a Pending record settles from the defender's saved debit, or is voided if there is none.
+	  - Idempotency entries (appliedTransfers) of a still-open raid are never pruned.
 ]]
 
 local Types = require("./Types")
@@ -38,6 +39,7 @@ type PlayerProfile = Types.PlayerProfile
 type EscrowRecord = Types.EscrowRecord
 type AppliedTransfer = Types.AppliedTransfer
 type Critter = Types.Critter
+type EscrowOpenIndex = Types.EscrowOpenIndex
 
 local Escrow = {}
 
@@ -218,12 +220,108 @@ function Escrow.isTerminal(record: EscrowRecord): boolean
 end
 
 --[[
-	Drives a record to a terminal state, one single-key write at a time. Safe to call any
-	number of times, from any server, after any crash. `checkpoint`, if given, is called after
-	every save; the simulation uses it to inject crashes.
+	Kill switches (docs/contracts.md, approved by Kian 2026-10-28): may a NEW raid or transfer of
+	this kind start? `raids` is the master switch for every kind. "Async" raids, and any revenge
+	raid, also need `asyncRaids`. Unknown kinds are refused. Pass `Config.Flags` in.
 
-	NOTE: if the defender's session is held by another server, the server layer must route the
-	debit through that session (ProfileStore message) instead of calling this directly.
+	Switches only stop new transfers. Nothing below (advance and its steps) reads a flag, so a
+	record already in Pending or Debited always finishes.
+]]
+export type KillSwitches = { raids: boolean, asyncRaids: boolean }
+
+function Escrow.canStartTransfer(flags: KillSwitches, kind: string, isRevenge: boolean?): (boolean, string?)
+	if kind ~= "Live" and kind ~= "Async" then
+		return false, `unknown transfer kind {kind}`
+	end
+	if not flags.raids then
+		return false, "raids are switched off"
+	end
+	if (kind == "Async" or isRevenge) and not flags.asyncRaids then
+		return false, if isRevenge then "revenge raids are switched off" else "async raids are switched off"
+	end
+	return true, nil
+end
+
+-- Whether two records describe the same transfer (same raid, parties, request and revenge).
+function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
+	return a.raidId == b.raidId
+		and a.raiderUserId == b.raiderUserId
+		and a.defenderUserId == b.defenderUserId
+		and a.critterUid == b.critterUid
+		and a.glowRequested == b.glowRequested
+		and a.isRevenge == b.isRevenge
+end
+
+local FORWARD: { [string]: { [string]: true } } = {
+	Pending = { Pending = true, Debited = true, Voided = true },
+	Debited = { Debited = true, Committed = true },
+	Committed = { Committed = true },
+	Voided = { Voided = true },
+}
+
+--[[
+	The record store's write rule: may `incoming` replace `stored` (nil = no record yet)? A record
+	is created once, in Pending, and then only moves forward along the state machine. A repeat of
+	the same state is allowed only if it agrees on the loot. Pure; the server checks it inside its
+	DataStore update, and the simulation's store asserts it on every write.
+]]
+function Escrow.canReplace(stored: EscrowRecord?, incoming: EscrowRecord): (boolean, string?)
+	if stored == nil then
+		if incoming.state == "Pending" then
+			return true, nil
+		end
+		return false, `no record to move to {incoming.state}`
+	end
+	if not Escrow.sameTransfer(stored, incoming) then
+		return false, "a different transfer already uses this raidId"
+	end
+	local allowed = FORWARD[stored.state]
+	if not allowed or not allowed[incoming.state] then
+		return false, `cannot move from {stored.state} to {incoming.state}`
+	end
+	if stored.state == "Debited" or stored.state == "Committed" then
+		local storedUid = if stored.critter then stored.critter.uid else nil
+		local incomingUid = if incoming.critter then incoming.critter.uid else nil
+		if storedUid ~= incomingUid or stored.glow ~= incoming.glow then
+			return false, "conflicting loot for this raidId"
+		end
+	end
+	return true, nil
+end
+
+-- Saves a debit the defender's profile already holds, then records it. Shared by advance and
+-- recover so both settle a debit the same way.
+local function commitDebit(
+	store: Store,
+	record: EscrowRecord,
+	defender: PlayerProfile,
+	applied: AppliedTransfer,
+	now: number,
+	check: (string) -> ()
+)
+	store.saveProfile(defender)
+	check("savedDefender")
+	Escrow.markDebited(record, applied, now)
+	store.saveRecord(record)
+	check("savedRecordDebited")
+end
+
+local function creditAndCommit(store: Store, record: EscrowRecord, now: number, check: (string) -> ())
+	local raider = store.loadProfile(record.raiderUserId)
+	Escrow.creditRaider(raider, record, now)
+	store.saveProfile(raider)
+	check("savedRaider")
+	Escrow.markCommitted(record, now)
+	store.saveRecord(record)
+	check("savedRecordCommitted")
+end
+
+--[[
+	The live path: drives a record to a terminal state, one single-key write at a time, debiting
+	the defender if that has not happened yet. Only the call that created the record uses it;
+	later paths use `recover`, which never debits afresh. Idempotent. `checkpoint`, if given, is
+	called before the defender's first save and after every save; the simulation injects crashes
+	there.
 ]]
 function Escrow.advance(raidId: string, store: Store, now: number, checkpoint: ((string) -> ())?): EscrowRecord?
 	local function check(name: string)
@@ -240,34 +338,73 @@ function Escrow.advance(raidId: string, store: Store, now: number, checkpoint: (
 	if record.state == "Pending" then
 		local defender = store.loadProfile(record.defenderUserId)
 		local applied = Escrow.debitDefender(defender, record, now)
-		store.saveProfile(defender)
-		check("savedDefender")
-
-		Escrow.markDebited(record, applied, now)
-		store.saveRecord(record)
-		check("savedRecordDebited")
+		check("debitedUnsaved")
+		commitDebit(store, record, defender, applied, now, check)
 	end
 
 	if record.state == "Debited" then
-		local raider = store.loadProfile(record.raiderUserId)
-		Escrow.creditRaider(raider, record, now)
-		store.saveProfile(raider)
-		check("savedRaider")
-
-		Escrow.markCommitted(record, now)
-		store.saveRecord(record)
-		check("savedRecordCommitted")
+		creditAndCommit(store, record, now, check)
 	end
 
 	return record
 end
 
--- Drops idempotency entries older than the retention window. Only safe because every escrow
--- is driven to a terminal state within minutes; the window is days.
-function Escrow.pruneApplied(profile: PlayerProfile, now: number): number
+--[[
+	Recovery: advances a record using only what is already saved and only the parties that are
+	present (`isPresent(userId)`: loaded in this server). Never debits afresh.
+	  Pending, defender present: their saved debit for this raid -> record Debited; no debit ->
+	    Voided (nothing moved; the defender's session lock means no debit can still land).
+	  Debited, raider present: credit and commit.
+	Anything whose party is absent is left as is, for that party's next load. Idempotent.
+]]
+function Escrow.recover(
+	raidId: string,
+	store: Store,
+	now: number,
+	isPresent: (userId: number) -> boolean,
+	checkpoint: ((string) -> ())?
+): EscrowRecord?
+	local function check(name: string)
+		if checkpoint then
+			checkpoint(name)
+		end
+	end
+
+	local record = store.loadRecord(raidId)
+	if not record then
+		return nil
+	end
+
+	if record.state == "Pending" then
+		if not isPresent(record.defenderUserId) then
+			return record
+		end
+		local defender = store.loadProfile(record.defenderUserId)
+		local applied = defender.appliedTransfers[raidId]
+		if applied == nil then
+			Escrow.void(record, defender, now)
+			store.saveRecord(record)
+			check("savedRecordVoided")
+			return record
+		end
+		assert(applied.role == "Debit", "recover: raidId already used for a credit")
+		commitDebit(store, record, defender, applied, now, check)
+	end
+
+	if record.state == "Debited" and isPresent(record.raiderUserId) then
+		creditAndCommit(store, record, now, check)
+	end
+
+	return record
+end
+
+-- Drops idempotency entries older than the retention window, except for raids still listed in
+-- the player's open-escrow index (`open`): those entries are the only proof a step already ran,
+-- and an open escrow can stay open for longer than the window while a party is away.
+function Escrow.pruneApplied(profile: PlayerProfile, now: number, open: EscrowOpenIndex): number
 	local removed = 0
 	for raidId, applied in profile.appliedTransfers do
-		if now - applied.at > Config.Escrow.appliedTransferRetentionSeconds then
+		if open[raidId] == nil and now - applied.at > Config.Escrow.appliedTransferRetentionSeconds then
 			profile.appliedTransfers[raidId] = nil
 			removed += 1
 		end

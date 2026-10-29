@@ -2,50 +2,471 @@
 --[[
 	EscrowService (owner: data agent; every change reviewed by the reviewer agent)
 
-	Turns a successful raid into a safe transfer using Shared/Escrow.luau.
+	Turns a successful live raid into a safe transfer using Shared/Escrow.luau, and finishes any
+	transfer that a crash or an unconfirmed save left in flight.
 
-	Flow when a raid ends in an escape:
-	  1. Escrow.create -> save the record under its raidId key (write-once)
-	  2. Debit the defender:
-	       - defender online somewhere -> DataService.sendMessage(defender, { kind = "EscrowDebit", raidId })
-	         and their session runs Escrow.debitDefender, then updates the record
-	       - defender offline -> DataService.withOfflineProfile(defender, Escrow.debitDefender ...)
-	  3. Credit the raider in this server (their profile is loaded here)
-	  4. Escrow.markCommitted
+	Public API (everything else is private):
+	  canStartTransfer(kind, isRevenge?)  may a NEW transfer start? Escrow.canStartTransfer with
+	                          Config.Flags: `raids` is the master switch; "Async" and revenge also
+	                          need `asyncRaids`; unknown kinds are refused. The only code here that
+	                          reads a flag (a Lune test guards this).
+	  transferLive(raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge?)
+	                          same-server live steal. Yields (seconds normally, about 2 minutes
+	                          worst case). Returns (status, reason):
+	                            "Committed"  the loot moved; both saves confirmed
+	                            "InFlight"   started, or may have; recovery finishes it. Retry with
+	                                         the SAME raidId; never restart the raid under a new one
+	                            "Refused"    nothing moved: switch off, bad input, a party not
+	                                         loaded, raidId used by another transfer, or Voided
+	                          A raidId that already has a record (or is busy or awaiting retry here)
+	                          is never re-gated: the call reports its true state and finishes what
+	                          it can. Only the call that creates the record debits the defender.
+	                          critterUid and glowRequested must come from server state (RaidRules
+	                          loot math, the server-tracked carry), never from a remote.
 
-	Recovery: on raider join, and every 60 seconds, advance any of this server's players'
-	records still in Pending or Debited. Every step is idempotent, so retries are always safe.
+	Storage (docs/contracts.md), DataStore "EscrowRecords"; memory instead when
+	DataService.persistence() is "Memory" (Studio without API access):
+	  Escrow_<raidId>  EscrowRecord: created once, then forward only (Escrow.canReplace runs
+	                   inside every UpdateAsync)
+	  Open_<userId>    Types.EscrowOpenIndex, for BOTH parties: written before the record, removed
+	                   once it is terminal; with no record, only once older than 15 minutes
+	Each DataStore call: 4 attempts, 1/2/4 s backoff. Every transform is idempotent.
 
-	TODO (Phase 1):
-	  [ ] Implement the Escrow.Store interface on top of DataService + an escrow DataStore
-	  [ ] Index open records per raider (MemoryStore) so recovery does not scan
-	  [ ] Duplication alarm: log loudly if creditRaider ever asserts on a duplicate uid
+	New raid: busy lock -> start checks -> index both parties -> create record -> Escrow.advance
+	(debit + saveNow, record Debited, credit + saveNow, record Committed) -> index cleanup in the
+	background. Profiles come fresh from DataService.getProfile (accrued first), and a profile
+	save counts only when the written data holds this raid's exact appliedTransfers entry.
 
-	Kill switches: a NEW transfer needs its raid kind's flag (Config.Flags.raids for live steals,
-	Config.Flags.asyncRaids for offline raids). Recovery of records already in flight is never
-	gated: switching a feature off must not strand loot that has already left a defender.
+	Recovery never reads a flag. On every profile load: read Open_<userId>, prune
+	appliedTransfers except open raids, then Escrow.recover each open raid (Pending with the
+	defender here: their saved debit -> Debited, none -> Voided; Debited with the raider here:
+	credit and commit). A sweep retries what this server left in flight, with per-raid backoff,
+	while the party it needs is here; otherwise that party's next load picks it up.
 ]]
 
+local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Economy = require(ReplicatedStorage.Shared.Economy)
+local Escrow = require(ReplicatedStorage.Shared.Escrow)
+local Types = require(ReplicatedStorage.Shared.Types)
+local DataService = require(script.Parent.DataService)
+
+type EscrowRecord = Types.EscrowRecord
+type EscrowOpenIndex = Types.EscrowOpenIndex
+type PlayerProfile = Types.PlayerProfile
 
 export type TransferKind = "Live" | "Async"
+export type TransferStatus = "Committed" | "InFlight" | "Refused"
+
+local STORE_NAME = "EscrowRecords"
+local MAX_RAID_ID_LENGTH = Config.Escrow.maxRaidIdLength
+local CALL_RETRY_DELAYS = { 1, 2, 4 } -- seconds between DataStore attempts
+local INDEX_STALE_SECONDS = 15 * 60 -- a record-less index entry younger than this may be mid-create
+local SWEEP_SECONDS = 15
+local RETRY_FIRST_SECONDS = 30
+local RETRY_MAX_SECONDS = 30 * 60
+local CLOSE_WAIT_SECONDS = 25
 
 local EscrowService = {}
 
--- Whether a new transfer of this kind may start. Every entry point that creates an escrow
--- record must call this first and refuse when it returns false.
-function EscrowService.canStartTransfer(kind: TransferKind): (boolean, string?)
-	local enabled = if kind == "Async" then Config.Flags.asyncRaids else Config.Flags.raids
-	if not enabled then
-		return false, `{kind} raids are switched off`
+type Retry = { from: number, need: number, delay: number, nextAt: number }
+
+local mode: ("DataStore" | "Memory")? = nil
+local dataStore: DataStore? = nil
+local memory: { [string]: any } = {}
+local getOptions = Instance.new("DataStoreGetOptions")
+getOptions.UseCache = false -- recovery must see the latest record, not a 4 s cached copy
+
+local busy: { [string]: true } = {} -- raidIds being driven right now in this server
+local retry: { [string]: Retry } = {} -- raids this server left in flight
+local needsIndex: { [number]: Retry } = {} -- loaded players whose index read failed
+
+local function deepCopy(value: any): any
+	if type(value) ~= "table" then
+		return value
 	end
-	return true, nil
+	local copy = {}
+	for k, v in value do
+		copy[k] = deepCopy(v)
+	end
+	return copy
+end
+
+local function isHere(userId: number): boolean
+	return DataService.getProfile(userId) ~= nil
+end
+
+local function backoff(previous: Retry?, from: number, need: number): Retry
+	local delay = if previous then math.min(previous.delay * 2, RETRY_MAX_SECONDS) else RETRY_FIRST_SECONDS
+	return { from = from, need = need, delay = delay, nextAt = os.clock() + delay }
+end
+
+local function storage(): ("DataStore" | "Memory")?
+	if mode == nil then
+		mode = DataService.persistence()
+		if mode == "DataStore" then
+			dataStore = DataStoreService:GetDataStore(STORE_NAME)
+		elseif mode == "Memory" then
+			warn("[EscrowService] no DataStore access: escrow records live in memory for this session")
+		end
+	end
+	return mode
+end
+
+local function withRetries<T>(what: string, fn: () -> T): T
+	local lastError: any = nil
+	for attempt = 1, #CALL_RETRY_DELAYS + 1 do
+		local ok, result = pcall(fn)
+		if ok then
+			return result
+		end
+		lastError = result
+		if attempt <= #CALL_RETRY_DELAYS then
+			task.wait(CALL_RETRY_DELAYS[attempt])
+		end
+	end
+	error(`{what} failed after {#CALL_RETRY_DELAYS + 1} attempts: {lastError}`, 0)
+end
+
+local function read(key: string): any
+	if storage() == "Memory" then
+		return deepCopy(memory[key])
+	end
+	local store = assert(dataStore, "escrow storage not ready")
+	return withRetries(`read {key}`, function()
+		return (store:GetAsync(key, getOptions))
+	end)
+end
+
+-- transform(stored) returns the new value, or nil to leave the key unchanged.
+local function update(key: string, transform: (any) -> any)
+	if storage() == "Memory" then
+		local result = transform(deepCopy(memory[key]))
+		if result ~= nil then
+			memory[key] = deepCopy(result)
+		end
+		return
+	end
+	local store = assert(dataStore, "escrow storage not ready")
+	withRetries(`update {key}`, function()
+		store:UpdateAsync(key, transform)
+	end)
+end
+
+local function recordKey(raidId: string): string
+	return `Escrow_{raidId}`
+end
+
+local function indexKey(userId: number): string
+	return `Open_{userId}`
+end
+
+local function saveRecord(record: EscrowRecord)
+	local refusal: string? = nil
+	update(recordKey(record.raidId), function(stored)
+		local ok, why = Escrow.canReplace(stored, record)
+		refusal = if ok then nil else why
+		return if ok then record else nil
+	end)
+	if refusal then
+		error(`escrow record {record.raidId} refused: {refusal}`, 0)
+	end
+end
+
+-- Write-once. Returns the stored record (an existing one wins) and whether this call wrote it.
+local function createRecord(record: EscrowRecord): (EscrowRecord, boolean)
+	local existing: EscrowRecord? = nil
+	update(recordKey(record.raidId), function(stored)
+		existing = stored
+		return if stored == nil then record else nil
+	end)
+	return existing or record, existing == nil
+end
+
+local function indexAdd(userId: number, raidId: string, role: "Raider" | "Defender", createdAt: number)
+	update(indexKey(userId), function(stored: EscrowOpenIndex?)
+		local open: EscrowOpenIndex = stored or {}
+		if open[raidId] then
+			return nil
+		end
+		open[raidId] = { role = role, createdAt = createdAt }
+		return open
+	end)
+end
+
+-- Removes one entry; returns true once it is gone. With `staleBefore`, keeps an entry created at
+-- or after that time (its record may still be being created). Decided inside the transform.
+local function indexRemove(userId: number, raidId: string, staleBefore: number?): boolean
+	local gone = false
+	update(indexKey(userId), function(stored: EscrowOpenIndex?)
+		local entry = if stored then stored[raidId] else nil
+		if stored == nil or entry == nil then
+			gone = true
+			return nil
+		end
+		if staleBefore and entry.createdAt >= staleBefore then
+			gone = false
+			return nil
+		end
+		gone = true
+		stored[raidId] = nil
+		return stored
+	end)
+	return gone
+end
+
+local function closeIndexes(record: EscrowRecord)
+	for _, userId in { record.raiderUserId, record.defenderUserId } do
+		local ok, err = pcall(indexRemove, userId, record.raidId)
+		if not ok then
+			warn(`[EscrowService] index cleanup {record.raidId}/{userId} failed; their next load retries: {err}`)
+		end
+	end
+end
+
+-- Escrow.Store for one raid. Profiles come fresh from DataService each time.
+local function storeFor(raidId: string): Escrow.Store
+	return {
+		loadRecord = function(id: string): EscrowRecord?
+			return read(recordKey(id))
+		end,
+		saveRecord = saveRecord,
+		loadProfile = function(userId: number): PlayerProfile
+			local profile = DataService.getProfile(userId)
+			if not profile then
+				error(`profile {userId} is not loaded in this server`, 0)
+			end
+			Economy.accrue(profile, os.time()) -- money model: accrue before `stored` changes
+			return profile
+		end,
+		saveProfile = function(profile: PlayerProfile)
+			if DataService.getProfile(profile.userId) ~= profile then
+				error(`profile {profile.userId} changed session before its save`, 0)
+			end
+			local entry = profile.appliedTransfers[raidId]
+			if entry == nil then
+				error(`profile {profile.userId} has no entry for {raidId} to save`, 0)
+			end
+			local role, at = entry.role, entry.at
+			local ok, why = DataService.saveNow(profile.userId, function(saved: any): boolean
+				local applied = type(saved) == "table"
+					and type(saved.appliedTransfers) == "table"
+					and saved.appliedTransfers[raidId]
+				return type(applied) == "table" and applied.role == role and applied.at == at
+			end)
+			if not ok then
+				error(`save not confirmed: {why}`, 0)
+			end
+		end,
+	}
+end
+
+-- Advances one raid as far as it can go. The caller holds busy[raidId]. `live` only for the call
+-- that created the record; every other path recovers. `from` is whose index led here.
+-- Never reads a kill switch.
+local function drive(raidId: string, from: number, live: boolean): (TransferStatus, string?)
+	local store = storeFor(raidId)
+	local now = os.time()
+	local ok, result = pcall(function(): EscrowRecord?
+		if live then
+			return Escrow.advance(raidId, store, now)
+		end
+		return Escrow.recover(raidId, store, now, isHere)
+	end)
+	if not ok then
+		local message = tostring(result)
+		if string.find(message, "duplicate", 1, true) then
+			warn(`[EscrowService] DUPLICATION ALARM {raidId}: {message}`)
+		end
+		retry[raidId] = backoff(retry[raidId], from, from)
+		return "InFlight", message
+	end
+	local record: EscrowRecord? = result
+	if record == nil then
+		local cleaned, gone = pcall(indexRemove, from, raidId, os.time() - INDEX_STALE_SECONDS)
+		if cleaned and gone then
+			retry[raidId] = nil
+			return "Refused", "no escrow record"
+		end
+		retry[raidId] = backoff(retry[raidId], from, from)
+		return "InFlight", "no record yet; a create may still be in progress"
+	end
+	if Escrow.isTerminal(record) then
+		retry[raidId] = nil
+		task.spawn(closeIndexes, record)
+		if record.state == "Voided" then
+			return "Refused", "voided: nothing moved"
+		end
+		return "Committed", nil
+	end
+	local need = if record.state == "Pending" then record.defenderUserId else record.raiderUserId
+	retry[raidId] = backoff(retry[raidId], from, need)
+	return "InFlight", `record is {record.state}`
+end
+
+local function driveLocked(raidId: string, from: number)
+	if busy[raidId] then
+		return
+	end
+	busy[raidId] = true
+	local status, reason = drive(raidId, from, false)
+	busy[raidId] = nil
+	if status == "InFlight" then
+		warn(`[EscrowService] {raidId} still in flight: {reason}`)
+	end
+end
+
+local function recoverUser(userId: number)
+	local ok, result = pcall(read, indexKey(userId))
+	if not ok or storage() == nil then
+		needsIndex[userId] = backoff(needsIndex[userId], userId, userId)
+		warn(`[EscrowService] could not read open escrows for {userId}; will retry: {result}`)
+		return
+	end
+	needsIndex[userId] = nil
+	local open: EscrowOpenIndex = result or {}
+	local profile = DataService.getProfile(userId)
+	if profile then
+		-- Never prune the idempotency entry of a raid that is still open (docs/contracts.md).
+		Escrow.pruneApplied(profile, os.time(), open)
+	end
+	for raidId in open do
+		driveLocked(raidId, userId)
+	end
+end
+
+local function sweep()
+	local clock = os.clock()
+	for userId, entry in table.clone(needsIndex) do
+		if not isHere(userId) then
+			needsIndex[userId] = nil -- their next load reads the index again
+		elseif clock >= entry.nextAt then
+			recoverUser(userId)
+		end
+	end
+	for raidId, entry in table.clone(retry) do
+		if busy[raidId] or clock < entry.nextAt then
+			continue
+		end
+		if not isHere(entry.need) then
+			retry[raidId] = nil -- the party it needs settles it from their own index on load
+			continue
+		end
+		driveLocked(raidId, entry.from)
+	end
+end
+
+-- The ONLY code in this service that reads a kill switch. Recovery never calls it.
+function EscrowService.canStartTransfer(kind: TransferKind, isRevenge: boolean?): (boolean, string?)
+	return Escrow.canStartTransfer(Config.Flags, kind, isRevenge)
+end
+
+local function startOrResume(
+	raidId: string,
+	raiderUserId: number,
+	defenderUserId: number,
+	critterUid: string?,
+	glowRequested: number,
+	isRevenge: boolean
+): (TransferStatus, string?)
+	if raiderUserId == defenderUserId then
+		return "Refused", "raider and defender are the same player"
+	end
+	if type(glowRequested) ~= "number" or not (glowRequested >= 0 and glowRequested < math.huge) then
+		return "Refused", "glowRequested must be a finite number >= 0"
+	end
+	local now = os.time()
+	local record =
+		Escrow.create(raidId, raiderUserId, defenderUserId, critterUid, math.floor(glowRequested), isRevenge, now)
+
+	-- An existing raid is never re-gated: report its true state and finish what can be finished.
+	local existing: EscrowRecord? = read(recordKey(raidId))
+	if existing then
+		if not Escrow.sameTransfer(existing, record) then
+			return "Refused", "raidId already used by a different transfer"
+		end
+		return drive(raidId, raiderUserId, false)
+	end
+	if retry[raidId] then
+		return "InFlight", "an earlier attempt's record may still land; recovery decides"
+	end
+
+	-- A new raid: the only place a kill switch applies.
+	local allowed, why = EscrowService.canStartTransfer("Live", isRevenge)
+	if not allowed then
+		return "Refused", why
+	end
+	if not isHere(raiderUserId) or not isHere(defenderUserId) then
+		return "Refused", "both profiles must be loaded in this server"
+	end
+
+	-- Index both parties first, so recovery can find the record from either side. A failure here
+	-- leaves at most index entries, which are dropped once stale: nothing moved.
+	local indexed, indexError = pcall(function()
+		indexAdd(raiderUserId, raidId, "Raider", now)
+		indexAdd(defenderUserId, raidId, "Defender", now)
+	end)
+	if not indexed then
+		return "Refused", `could not start: {indexError}`
+	end
+
+	local created, stored, isNew = pcall(createRecord, record)
+	if not created then
+		retry[raidId] = backoff(nil, raiderUserId, raiderUserId)
+		return "InFlight", `record create not confirmed: {stored}`
+	end
+	if not Escrow.sameTransfer(stored, record) then
+		return "Refused", "raidId already used by a different transfer"
+	end
+	return drive(raidId, raiderUserId, isNew)
+end
+
+function EscrowService.transferLive(
+	raidId: string,
+	raiderUserId: number,
+	defenderUserId: number,
+	critterUid: string?,
+	glowRequested: number,
+	isRevenge: boolean?
+): (TransferStatus, string?)
+	if type(raidId) ~= "string" or #raidId == 0 or #raidId > MAX_RAID_ID_LENGTH then
+		return "Refused", `raidId must be 1 to {MAX_RAID_ID_LENGTH} characters`
+	end
+	if busy[raidId] then
+		return "InFlight", "already being advanced"
+	end
+	if storage() == nil then
+		return "Refused", "escrow storage not ready" -- no profile can be loaded yet either
+	end
+	busy[raidId] = true -- held from before the first write until the drive ends
+	local ok, status, reason =
+		pcall(startOrResume, raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge == true)
+	busy[raidId] = nil
+	if not ok then
+		return "InFlight", `could not confirm the raid's state; retry with the same raidId: {status}`
+	end
+	return status, reason
 end
 
 function EscrowService.start()
-	-- TODO (Phase 1): start the recovery sweep here, unconditionally (never behind a flag).
+	-- Recovery is never behind a flag (docs/contracts.md: Kill switches).
+	DataService.onProfileLoaded(function(player: Player)
+		recoverUser(player.UserId)
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(SWEEP_SECONDS)
+			sweep()
+		end
+	end)
+	game:BindToClose(function()
+		local deadline = os.clock() + CLOSE_WAIT_SECONDS
+		while next(busy) ~= nil and os.clock() < deadline do
+			task.wait(0.5)
+		end
+	end)
 end
 
 return EscrowService

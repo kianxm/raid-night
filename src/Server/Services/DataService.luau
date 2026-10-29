@@ -21,6 +21,13 @@
 	  getProfile(userId)      the live profile for a player in THIS server, or nil
 	  onProfileLoaded(fn)     fn(player, profile) after a load; also runs for already-loaded ones
 	  onProfileReleasing(fn)  fn(userId, profile) right before the final save; must not yield
+	  saveNow(userId, confirm)  saves now and yields until a save whose written data passes
+	                          confirm(savedData) lands: (true) or (false, reason). Bounded: 3 tries
+	                          of up to 10 s, 2 s then 4 s backoff (about 36 s worst case). false is
+	                          not a rollback: the change stays in the live profile and still saves
+	                          on the next autosave or on leave, unless the server dies first.
+	                          Never call it from code a player's load waits on.
+	  persistence()          "DataStore", "Memory" (Studio without API access) or nil (checking)
 	  sendMessage             Phase 1, errors until then
 
 	TODO (Phase 1, async core):
@@ -45,6 +52,12 @@ type Session = any -- a ProfileStore profile; the vendored module is not strictl
 local STORE_NAME = "PlayerProfiles"
 -- Must cover ProfileStore's session-conflict wait (~45 s before it steals a dead server's lock).
 local LOAD_TIMEOUT_SECONDS = 60
+
+-- saveNow: Profile:Save() makes ONE UpdateAsync attempt and fires nothing if it fails, so we
+-- wait a bounded time per attempt and back off before asking again.
+local SAVE_NOW_ATTEMPTS = 3
+local SAVE_NOW_WAIT_SECONDS = 10
+local SAVE_NOW_FIRST_BACKOFF_SECONDS = 2
 
 local MESSAGE_LOAD_FAILED = "We couldn't load your save, so we stopped before anything changed. "
 	.. "Nothing was lost. Please rejoin in a minute."
@@ -229,6 +242,87 @@ function DataService.onProfileReleasing(fn: (number, PlayerProfile) -> ()): () -
 			table.remove(releasingListeners, index)
 		end
 	end
+end
+
+-- One save request. "saved": a save landed whose written data passes `confirm`. "lost": the
+-- session ended without such a save. "timeout": nothing confirmed within the wait.
+local function saveOnce(session: Session, confirm: (any) -> boolean): "saved" | "lost" | "timeout"
+	local thread = coroutine.running()
+	local result: ("saved" | "lost" | "timeout")? = nil
+	local waiting = false
+	local connection: any = nil
+	local timer: thread? = nil
+	local function finish(value: "saved" | "lost" | "timeout")
+		if result then
+			return
+		end
+		result = value
+		connection:Disconnect()
+		if timer and value ~= "timeout" then
+			task.cancel(timer)
+		end
+		if waiting then
+			task.spawn(thread)
+		end
+	end
+	-- Judge each save by the data it actually wrote, not by timing: an autosave that started
+	-- before the change can finish after this call, and must not count.
+	connection = session.OnAfterSave:Connect(function(saved: any)
+		local ok, passed = pcall(confirm, saved)
+		if ok and passed then
+			finish("saved")
+		elseif not session:IsActive() then
+			finish("lost")
+		end
+	end)
+	timer = task.delay(SAVE_NOW_WAIT_SECONDS, finish, "timeout")
+	session:Save()
+	if not result then
+		waiting = true
+		coroutine.yield()
+	end
+	return result :: any
+end
+
+-- Saves a loaded profile now and yields until ProfileStore confirms a save whose written data
+-- passes confirm(savedData). `confirm` must match the exact change that has to be durable (escrow
+-- matches its appliedTransfers entry by raidId, role and time). Always issues a fresh save: a
+-- previous save's data is never trusted as confirmation.
+-- Yields up to about 36 s, so call it only from a thread nobody waits on to load a player (for
+-- example an onProfileLoaded listener, which runs on its own thread) and never from the loading
+-- code itself.
+function DataService.saveNow(userId: number, confirm: (savedData: any) -> boolean): (boolean, string?)
+	local backoff = SAVE_NOW_FIRST_BACKOFF_SECONDS
+	for attempt = 1, SAVE_NOW_ATTEMPTS do
+		local session = sessions[userId]
+		if not session or not session:IsActive() then
+			return false, `profile {userId} is not loaded in this server`
+		end
+		local result = saveOnce(session, confirm)
+		if result == "saved" then
+			return true, nil
+		elseif result == "lost" then
+			return false, `session for {userId} ended before the save was confirmed`
+		end
+		if attempt < SAVE_NOW_ATTEMPTS then
+			task.wait(backoff)
+			backoff *= 2
+		end
+	end
+	return false, `no confirmed save for {userId} after {SAVE_NOW_ATTEMPTS} attempts`
+end
+
+-- Where saves go: "DataStore", "Memory" (Studio without API access; ProfileStore keeps profiles
+-- in memory for this session only), or nil while ProfileStore is still checking access.
+-- Services that keep their own records next to profiles must use the same mode.
+function DataService.persistence(): ("DataStore" | "Memory")?
+	local state = ProfileStore.DataStoreState
+	if state == "Access" then
+		return "DataStore"
+	elseif state == "NotReady" then
+		return nil
+	end
+	return "Memory"
 end
 
 -- Phase 1: sends a message to a player's profile wherever it is loaded (ProfileStore message

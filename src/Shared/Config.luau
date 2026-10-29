@@ -115,7 +115,8 @@ local Config = {
 	},
 
 	Escrow = {
-		appliedTransferRetentionSeconds = 7 * DAY,
+		appliedTransferRetentionSeconds = 7 * DAY, -- never applied to a raid that is still open
+		maxRaidIdLength = 43, -- DataStore keys are at most 50 characters, minus "Escrow_"; a GUID is 36
 	},
 
 	Notifications = {

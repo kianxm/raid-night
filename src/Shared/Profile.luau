@@ -10,7 +10,6 @@
 local Types = require("./Types")
 local Config = require("./Config")
 local RaidRules = require("./RaidRules")
-local Escrow = require("./Escrow")
 
 type PlayerProfile = Types.PlayerProfile
 
@@ -70,7 +69,10 @@ end
 	Readies a save the server just loaded, before anything reads it. Runs, in order:
 	migrate; stamp a brand-new save (ProfileStore copies the `Profile.new(0, 0)` template, so
 	createdAt == 0 means "never played"); check the save belongs to `userId`; roll the daily
-	counters; drop expired revenge tokens and old escrow idempotency entries.
+	counters; drop expired revenge tokens.
+
+	It does NOT prune escrow idempotency entries (appliedTransfers): only EscrowService may, after
+	reading the player's open-escrow index, because an open raid's entry must never be dropped.
 
 	Mutates `data` in place and errors on a save it cannot trust (newer schema, wrong owner).
 	DataService passes a copy so a failure leaves the loaded save untouched.
@@ -87,7 +89,6 @@ function Profile.prepare(data: any, userId: number, now: number): PlayerProfile
 	assert(profile.userId == userId, `Profile.prepare: save belongs to {profile.userId}, not {userId}`)
 	RaidRules.resetDailyIfNeeded(profile, now)
 	RaidRules.pruneRevengeTokens(profile, now)
-	Escrow.pruneApplied(profile, now)
 	return profile
 end
 
