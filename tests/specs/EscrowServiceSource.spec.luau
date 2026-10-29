@@ -204,4 +204,38 @@ tests["an async transfer naming a bad revenge token is Refused before anything i
 	end
 end
 
+tests["the Studio pause lets go on close or timeout without finishing its step (#114)"] = function()
+	local code = source.codeOnly(source.read(ESCROW))
+	local pause = source.functionBody(code, "studioCheckpoint") or ""
+	expect.truthy(string.find(pause, "if not RunService:IsStudio%(%) then%s*return nil"), "Studio only")
+	local loop = string.match(pause, "while ServerStorage:GetAttribute%(STUDIO_PAUSE%) == name do(.-)\n\t\tend\n")
+	expect.truthy(loop, "waits only while the attribute names this checkpoint")
+	local exit = string.find(loop :: string, "if closing or os%.clock%(%) >= deadline then%s*error%(")
+	local wait = string.find(loop :: string, "task%.wait%(0%.5%)")
+	expect.truthy(exit and wait, "close or deadline raises; the wait is bounded and yields")
+	expect.truthy((exit :: number) < (wait :: number), "checked before every wait")
+	expect.falsy(string.find(loop :: string, "break"), "never falls through to the paused step")
+	expect.falsy(string.find(loop :: string, "return"), "never returns into the paused step")
+	-- The raise must read as an ordinary failure (retry later), never as a duplication alarm.
+	local message = string.match(loop :: string, "error%(%s*`(.-)`") or ""
+	expect.truthy(#message > 0, "error message found")
+	for _, sign in { "duplicate", "conflicting loot", "already used for a" } do
+		expect.falsy(string.find(message, sign, 1, true), `message has no alarm sign "{sign}"`)
+	end
+	-- closing is set once, first thing in BindToClose, before it waits on busy.
+	expect.eq(count(code, "closing = true"), 1, "closing set in one place")
+	local start = source.functionBody(code, "EscrowService.start") or ""
+	local close = string.match(start, "game:BindToClose%(function%(%)(.-)\n\tend%)")
+	expect.truthy(close, "BindToClose found")
+	local set = string.find(close :: string, "^%s*closing = true")
+	expect.truthy(set, "closing set first")
+	expect.truthy(
+		string.find(close :: string, "while next%(busy%) ~= nil and os%.clock%(%) < deadline do"),
+		"bounded busy wait"
+	)
+	-- Only the Studio pause reads it: live drives are unchanged.
+	local rest = without(code, { "studioCheckpoint", "EscrowService.start" })
+	expect.eq(count(rest, "%f[%w_]closing%f[^%w_]"), 1, "closing only declared outside the pause and close")
+end
+
 return tests

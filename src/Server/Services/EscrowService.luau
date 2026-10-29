@@ -122,8 +122,11 @@
 
 	Studio playtests (ServerStorage attributes, never read in a live server): StudioAsyncRaids
 	(above), and StudioEscrowPause = "<checkpoint>" (an Escrow checkpoint name, e.g.
-	"deliveredDebit"): any drive reaching it waits there up to 2 minutes, so the server can be
-	stopped mid-transfer to test recovery on rejoin.
+	"deliveredDebit"): any drive reaching it waits there, so the server can be stopped
+	mid-transfer to test recovery on rejoin. Clearing the attribute resumes the drive; a server
+	close (BindToClose) or 2 minutes stops it by an error instead, so the paused step never runs
+	from here and recovery finishes it on the next load (#114: a pause that ignored the close kept
+	busy[raidId], so BindToClose waited its full 25 s and Studio's play session hung after Stop).
 
 	Studio test profiles (DataService.loadTestProfile, decision D-019) have no load to recover
 	from, so DataService refuses to release one while an escrow for it is open here.
@@ -197,6 +200,7 @@ local getOptions = Instance.new("DataStoreGetOptions")
 getOptions.UseCache = false -- recovery must see the latest record, not a 4 s cached copy
 
 local busy: { [string]: true } = {} -- raidIds being driven right now in this server
+local closing = false -- set first thing in BindToClose; only the Studio pause reads it
 local retry: { [string]: Retry } = {} -- raids this server left in flight
 local needsIndex: { [number]: Retry } = {} -- loaded players whose index read failed
 local parked: { [string]: number } = {} -- raids left for an absent party's load: raidId -> that party
@@ -518,7 +522,15 @@ local function studioCheckpoint(raidId: string): ((string) -> ())?
 		end
 		warn(`[EscrowService] Studio pause: {raidId} waits at {name} for up to {STUDIO_PAUSE_SECONDS} s; stop now`)
 		local deadline = os.clock() + STUDIO_PAUSE_SECONDS
-		while ServerStorage:GetAttribute(STUDIO_PAUSE) == name and os.clock() < deadline do
+		while ServerStorage:GetAttribute(STUDIO_PAUSE) == name do
+			if closing or os.clock() >= deadline then
+				-- Never finish the paused step from here: the drive's pcall catches this, the record
+				-- stays as saved, and busy[raidId] is let go so BindToClose is not held (#114).
+				error(
+					`Studio pause at {name} stopped ({if closing then "server closing" else "timed out"}); recovery finishes it on the next load`,
+					0
+				)
+			end
 			task.wait(0.5)
 		end
 	end
@@ -997,6 +1009,7 @@ function EscrowService.start()
 		end
 	end)
 	game:BindToClose(function()
+		closing = true -- a Studio pause lets go now (studioCheckpoint)
 		local deadline = os.clock() + CLOSE_WAIT_SECONDS
 		while next(busy) ~= nil and os.clock() < deadline do
 			task.wait(0.5)
