@@ -23,8 +23,11 @@
 	  3. Repeating any step, any number of times, changes nothing after the first success.
 	  4. Daily loss limits hold at the debit, by the record's kind (decision D-031). Live: nothing
 	     is taken from a den already protected (RaidRules.liveProtected), so the steal that
-	     crosses the line is the last. Async: nothing once the defender lost maxLossesPerDay
-	     critters that day.
+	     crosses the line is the last; the day's first live loss is measured against the
+	     record's grab-time base when it has one (D-034). Async: nothing once the defender lost
+	     maxLossesPerDay critters that day.
+	  5. A Live debit that takes nothing grants nothing (D-033): no shield, revenge token, pair
+	     count or raid-log entry; only its idempotency entry.
 
 	Transport today (Phase 0; server layer, not this module):
 	  - Only same-server live transfers exist. EscrowService.transferLive runs `advance` with both
@@ -74,7 +77,33 @@ local function cloneCritter(critter: Critter): Critter
 	return table.clone(critter)
 end
 
+-- A record's liveBaseRate is kept to this many steps per Glow/s. A short decimal survives the
+-- DataStore's JSON round trip exactly, so a retry's fresh record still equals the stored one
+-- (Escrow.sameTransfer compares it) even if a tuning value makes den rates long decimals.
+local BASE_RATE_STEPS = 1000
+
+--[[
+	May a record of this kind carry this grab-time base (decision D-034)? nil always may (no
+	measurement). Otherwise only a Live record, and only a finite number >= 0 (NaN, inf and
+	negatives are refused; so is a rate so large that rounding it overflows). Escrow.create
+	asserts it; EscrowService refuses a call that fails it before writing anything.
+]]
+function Escrow.checkLiveBaseRate(kind: TransferKind, liveBaseRate: any): (boolean, string?)
+	if liveBaseRate == nil then
+		return true, nil
+	end
+	if kind ~= "Live" then
+		return false, "only a Live transfer carries a liveBaseRate"
+	end
+	if type(liveBaseRate) ~= "number" or not (liveBaseRate >= 0 and liveBaseRate * BASE_RATE_STEPS < math.huge) then
+		return false, "liveBaseRate must be nil or a finite number >= 0"
+	end
+	return true, nil
+end
+
 -- `kind` is required: it picks the debit's daily loss rule, so no caller may leave it to chance.
+-- `liveBaseRate` (Live only, D-034): Economy.denRate of the defender's den when the grab was
+-- accepted; stored rounded to the nearest 0.001 Glow/s. nil = not measured.
 function Escrow.create(
 	raidId: string,
 	raiderUserId: number,
@@ -83,11 +112,14 @@ function Escrow.create(
 	glowRequested: number,
 	isRevenge: boolean,
 	now: number,
-	kind: TransferKind
+	kind: TransferKind,
+	liveBaseRate: number?
 ): EscrowRecord
 	assert(raiderUserId ~= defenderUserId, "Escrow.create: raider and defender must differ")
 	assert(glowRequested >= 0, "Escrow.create: glowRequested must be >= 0")
 	assert(kind == "Live" or kind == "Async", `Escrow.create: unknown kind {kind}`)
+	local baseOk, baseWhy = Escrow.checkLiveBaseRate(kind, liveBaseRate)
+	assert(baseOk, `Escrow.create: {baseWhy}`)
 	return {
 		raidId = raidId,
 		raiderUserId = raiderUserId,
@@ -101,6 +133,7 @@ function Escrow.create(
 		createdAt = now,
 		updatedAt = now,
 		kind = kind,
+		liveBaseRate = if liveBaseRate then math.floor(liveBaseRate * BASE_RATE_STEPS + 0.5) / BASE_RATE_STEPS else nil,
 	}
 end
 
@@ -115,7 +148,11 @@ end
 	den's daily loss rule allows it (decision D-031): a Live record takes nothing from a den that
 	is protected for the day (RaidRules.liveProtected), an Async record nothing once the defender
 	is at Config.Limits.maxLossesPerDay. Takes up to `glowRequested` from storage either way.
-	Records the defender-side consequences (live loss value, shield, revenge token, log).
+	Records the defender-side consequences: the live loss value (with the record's grab-time base
+	on the day's first live loss, D-034), then shield, pair count, revenge token and log
+	(RaidRules.recordIncoming). A Live debit that took no critter and no Glow grants none of
+	those (decision D-033): an empty steal must not use up the raider's pair slot or reward the
+	defender. Its appliedTransfers entry is still written, for idempotency.
 	Idempotent: a repeat returns the first result unchanged.
 ]]
 function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now: number): AppliedTransfer
@@ -141,7 +178,8 @@ function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now
 		-- succeeds, with Glow only.
 		if critter and critter.placement == "Pad" and mayLose then
 			if live then
-				RaidRules.recordLiveLoss(defender, critter, now) -- while it is still in the den
+				-- While it is still in the den; the base is the grab's when the record has one.
+				RaidRules.recordLiveLoss(defender, critter, now, record.liveBaseRate)
 			end
 			taken = cloneCritter(critter)
 			defender.critters[record.critterUid] = nil
@@ -159,6 +197,9 @@ function Escrow.debitDefender(defender: PlayerProfile, record: EscrowRecord, now
 	}
 	defender.appliedTransfers[record.raidId] = applied
 
+	if live and taken == nil and glow == 0 then
+		return applied -- an empty live commit grants nothing (D-033)
+	end
 	RaidRules.recordIncoming(
 		defender,
 		record.raidId,
@@ -278,8 +319,8 @@ function Escrow.canStartTransfer(flags: KillSwitches, kind: string, isRevenge: b
 	return true, nil
 end
 
--- Whether two records describe the same transfer (same raid, parties, request, revenge and kind;
--- a missing kind is "Live").
+-- Whether two records describe the same transfer (same raid, parties, request, revenge, kind and
+-- grab-time base; a missing kind is "Live", a missing liveBaseRate matches only a missing one).
 function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
 	return a.raidId == b.raidId
 		and a.raiderUserId == b.raiderUserId
@@ -288,6 +329,7 @@ function Escrow.sameTransfer(a: EscrowRecord, b: EscrowRecord): boolean
 		and a.glowRequested == b.glowRequested
 		and a.isRevenge == b.isRevenge
 		and Escrow.kindOf(a) == Escrow.kindOf(b)
+		and a.liveBaseRate == b.liveBaseRate
 end
 
 local FORWARD: { [string]: { [string]: true } } = {
@@ -310,6 +352,7 @@ function Escrow.canReplace(stored: EscrowRecord?, incoming: EscrowRecord): (bool
 		end
 		return false, `no record to move to {incoming.state}`
 	end
+	-- This also pins liveBaseRate exactly: never filled in, changed or dropped (D-034).
 	if not Escrow.sameTransfer(stored, incoming) then
 		return false, "a different transfer already uses this raidId"
 	end

@@ -84,14 +84,39 @@ Each arrow is two single-key writes; every step is idempotent by `raidId`
 4. Daily loss limits hold at the debit, by the record's `kind` (decision D-031):
    - Live: no live debit takes a critter from a den that is already protected
      (`RaidRules.liveProtected`). The debit that crosses the threshold lands, so today's live
-     losses never pass it by more than one critter's rate.
+     losses never pass it by more than one critter's rate. The day's first live loss sets the
+     base from the record's `liveBaseRate` when it has one (D-034, below).
    - Async: no async debit takes a critter once the defender has lost
      `Config.Limits.maxLossesPerDay` critters that UTC day (live losses count toward it too).
+5. An empty live commit grants nothing (decision D-033). A Live debit that takes no critter
+   (the den is protected, or the critter is gone) and no Glow still writes its
+   `appliedTransfers` entry, so it stays idempotent. It skips `RaidRules.recordIncoming`
+   entirely: no shield, no revenge token, no `pairRaidsToday` increment (the raider's pair slot
+   is not used up) and no "escaped" incoming raid-log entry. A Live debit that takes only Glow,
+   and every Async debit, empty or not, still records all four.
 
 `EscrowRecord.kind` (`"Live"` or `"Async"`) is set when the record is created and never changes
 (`Escrow.canReplace`). Missing means `"Live"`: every record written before the field existed
 is a Phase 0 live steal, so it needed no migration. `EscrowService.transferLive` creates
 `"Live"` records.
+
+`EscrowRecord.liveBaseRate: number?` (decision D-034) is the defender den's Glow/s
+(`Economy.denRate`) when the raider's grab was accepted, before the owner could be alerted.
+It is the base for the defender's first live loss of the day (Live loss rules, below).
+
+- **Set once.** `Escrow.create` takes it as an optional last argument, for Live records only.
+  It must be nil or a finite number >= 0: NaN, inf, negatives and non-numbers fail
+  `Escrow.checkLiveBaseRate`, which `Escrow.create` asserts. `EscrowService.transferLive`
+  checks it first and returns `Refused` before any write, so a bad value never crashes a
+  transfer half-way.
+- **Rounded at create.** The stored value is rounded to the nearest 0.001 Glow/s. A short
+  decimal survives the DataStore's JSON round trip exactly, so a retry's fresh record still
+  equals the stored one, even if a future tuning value makes den rates long decimals.
+- **Never changes.** It is part of the transfer's identity: `Escrow.sameTransfer` compares it
+  exactly, and a missing value matches only a missing one. So `Escrow.canReplace` never lets a
+  write fill it in, change it or drop it, and a retry with another value is refused.
+- **Missing means no grab-time measurement:** records written before the field existed, and
+  Async records. The debit then measures the den itself, as it did before D-034. No migration.
 
 Only the call that creates a record, and its same-server retries while the server awaits them
 (kept `createNonce`), debits the defender (`Escrow.advance`). That call sets
@@ -108,8 +133,9 @@ It runs on either party's load, with the parties loaded in that server:
 - `Debited`, raider loaded: credit, then `Committed`.
 
 Retrying `EscrowService.transferLive` (P0.5): call again with IDENTICAL arguments (raidId,
-raider, defender, critterUid, glowRequested, isRevenge). Once a record is stored, the same raidId
-with any other argument returns `Refused` ("raidId already used by a different transfer"). While
+raider, defender, critterUid, glowRequested, isRevenge, liveBaseRate). Once a record is stored,
+the same raidId with any other argument returns `Refused` ("raidId already used by a different
+transfer"). While
 the server still waits on a retry of the raid (an earlier call returned `InFlight`), the retry
 reuses that call's `createNonce`. So a create that landed but lost its response is still the
 call's own, and the steal continues (`Escrow.advance`) instead of being voided.
@@ -218,23 +244,28 @@ async, for the raid log and the async cap. Values live in `Config.LiveRaid` (tab
    raider and any of their steals still in flight.
 3. **Value-based daily protection.** Live losses are measured in Glow per second. A loss is the
    stolen critter's `Economy.critterRate` at the debit, counting its mutation, the defender's
-   rebirths, and where it sat before the steal. The base is `Economy.denRate(defender)` just
-   before the day's first live loss lands, with the stolen critter still in the den. Once
-   today's live losses reach `protectionLossShare` (50%) of that base, the den is protected
-   from live steals for the rest of the UTC day. The steal that crosses the line lands, and
-   nothing after it does. The base never changes during the day, even if the den does.
-   Stealing a few Commons from a rich den never protects it, while losing its best critter
-   does at once.
+   rebirths, and where it sat before the steal. The base is `Economy.denRate(defender)` for
+   the day's first live loss, measured when that steal's grab was accepted, before the owner
+   could be alerted (decision D-034, Kian). It travels in the record's `liveBaseRate`. So an
+   owner who moves high earners to Inventory or the Vault during the carry cannot shrink the
+   base and buy a whole day of protection with one cheap loss. A record without
+   `liveBaseRate` falls back to `denRate` just before the debit, with the stolen critter
+   still in the den. Once today's live losses reach `protectionLossShare` (50%) of that base,
+   the den is protected from live steals for the rest of the UTC day. The steal that crosses
+   the line lands, and nothing after it does. The base never changes during the day, whatever
+   later records carry or the den does. Stealing a few Commons from a rich den never protects
+   it, while losing its best critter does at once.
 4. **Escrow.** Live steals keep moving critters through `Escrow.luau`, on the two profiles
    loaded in one server, via `EscrowService.transferLive`. They switch to the cross-server
    path when P1.1 adds it. The rules are checked when the grab starts and again at the debit,
-   where a `"Live"` record takes no critter from a protected den.
+   where a `"Live"` record takes no critter from a protected den. A live debit that takes
+   nothing at all grants the defender nothing (Escrow invariant 5, D-033).
 
 The state is stored on the profile as two optional `PlayerProfile` fields:
 
 | Field | Meaning |
 | --- | --- |
-| `liveLossBaseRate: number?` | The den's Glow/s just before its first live loss today |
+| `liveLossBaseRate: number?` | The den's Glow/s for its first live loss today: at that steal's grab (the record's `liveBaseRate`), or just before its debit when the record has none |
 | `liveLossRateToday: number?` | The summed Glow/s of the critters lost to live steals today |
 
 Both belong to `lossDay` and are set back to nil when the day rolls
@@ -246,9 +277,12 @@ The pure rules live in `RaidRules`, and the server always decides:
 
 - `liveProtected(profile, now)` is read-only. It is true when the profile's `lossDay` is today and
   `liveLossRateToday >= protectionLossShare * liveLossBaseRate`. A NaN counts as protected.
-- `recordLiveLoss(defender, critter, now)` is called by `Escrow.debitDefender` for a Live debit,
-  before the critter leaves the profile. It sets the base on the day's first loss and adds the
-  critter's rate. It errors if the critter is already gone.
+- `recordLiveLoss(defender, critter, now, grabBaseRate?)` is called by `Escrow.debitDefender` for
+  a Live debit that takes a critter, before the critter leaves the profile, with the record's
+  `liveBaseRate`. On the day's first loss it sets the base to `grabBaseRate`. When that is nil,
+  or anything but a finite number >= 0, it measures `denRate` instead. Then it adds the
+  critter's rate. Later losses that day never change the base. It errors if the critter is
+  already gone.
 - `liveGrabReadyAt(lastLiveLossAt)` returns `lastLiveLossAt + postLossSafetySeconds`, on
   whatever clock the input uses.
 - `canGrabLive` no longer checks `maxLossesPerDay`. After `CritterBusy` it refuses with
@@ -256,6 +290,12 @@ The pure rules live in `RaidRules`, and the server always decides:
   when `now < liveGrabReadyAt(lastLiveLossAt)`, which also refuses a NaN. `lastLiveLossAt` is a
   new optional `LiveGrab` input on the same clock as `now`; nil means no loss this server
   session.
+
+RaidService (P0.5h) measures the grab-time base: `Economy.denRate(ownerProfile)` when it
+accepts the grab request, before the hold starts and before `BeingRaidedLive` reaches the owner.
+It keeps that value with the carry and passes it as `transferLive`'s last argument on every
+attempt (D-034). Until it does, live records carry no base, and the debit measures the den
+instead.
 
 RaidService (P0.5h) shows the state with the den attributes `LiveProtected` and
 `LiveGrabReadyAt` (see Replicated attributes). They are for display only: the server decides

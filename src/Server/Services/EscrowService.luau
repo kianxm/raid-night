@@ -10,7 +10,8 @@
 	                          Config.Flags: `raids` is the master switch; "Async" and revenge also
 	                          need `asyncRaids`; unknown kinds are refused. The only code here that
 	                          reads a flag (a Lune test guards this).
-	  transferLive(raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge?)
+	  transferLive(raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge?,
+	               liveBaseRate?)
 	                          same-server live steal. Yields (seconds normally, about 2 minutes
 	                          worst case). Returns (status, reason):
 	                            "Committed"  the loot moved; both saves confirmed
@@ -25,13 +26,19 @@
 	                          createNonce, below).
 	                          critterUid and glowRequested must come from server state (RaidRules
 	                          loot math, the server-tracked carry), never from a remote.
+	                          liveBaseRate (D-034): Economy.denRate of the owner's den, measured
+	                          by RaidService when it accepted the grab, before the owner was
+	                          alerted, and kept with the carry. It is the base for the day's first
+	                          live loss. nil = not measured (the debit measures the den then). Not
+	                          nil and not a finite number >= 0: "Refused" before any write.
 	                          Retrying (P0.5): pass IDENTICAL arguments every time (raidId, both
-	                          userIds, critterUid, glowRequested, isRevenge). Once a record exists,
-	                          the same raidId with any other argument returns "Refused" ("raidId
-	                          already used by a different transfer") and changes nothing. While
-	                          this server awaits a retry of the raid, the retry reuses the first
-	                          call's createNonce: a create that landed with its response lost is
-	                          still that call's own, so the steal continues instead of voiding.
+	                          userIds, critterUid, glowRequested, isRevenge, liveBaseRate). Once a
+	                          record exists, the same raidId with any other argument returns
+	                          "Refused" ("raidId already used by a different transfer") and
+	                          changes nothing. While this server awaits a retry of the raid, the
+	                          retry reuses the first call's createNonce: a create that landed with
+	                          its response lost is still that call's own, so the steal continues
+	                          instead of voiding.
 
 	Storage (docs/contracts.md), DataStore "EscrowRecords"; memory instead when
 	DataService.persistence() is "Memory" (Studio without API access, or Studio's memory switch,
@@ -63,8 +70,10 @@
 	from, so DataService refuses to release one while an escrow for it is open here.
 
 	Live loss rules (decision D-031): transferLive creates "Live" records, whose debit takes no
-	critter from a den protected for the day (Escrow.debitDefender). Live steals use this
-	same-server path, on the two profiles loaded here, until P1.1 adds the cross-server one.
+	critter from a den protected for the day (Escrow.debitDefender), measures the day's first
+	live loss against the record's liveBaseRate when it has one (D-034), and grants the defender
+	nothing when it takes nothing (D-033). Live steals use this same-server path, on the two
+	profiles loaded here, until P1.1 adds the cross-server one.
 
 	TODO (P1.1, decision D-012): the void assumes only the creating call debits. Debits delivered
 	by ProfileStore message (or applied to an offline profile) will race it. Read the TODO in
@@ -464,7 +473,8 @@ local function startOrResume(
 	defenderUserId: number,
 	critterUid: string?,
 	glowRequested: number,
-	isRevenge: boolean
+	isRevenge: boolean,
+	liveBaseRate: number?
 ): (TransferStatus, string?)
 	if raiderUserId == defenderUserId then
 		return "Refused", "raider and defender are the same player"
@@ -472,8 +482,13 @@ local function startOrResume(
 	if type(glowRequested) ~= "number" or not (glowRequested >= 0 and glowRequested < math.huge) then
 		return "Refused", "glowRequested must be a finite number >= 0"
 	end
+	local baseOk, baseWhy = Escrow.checkLiveBaseRate("Live", liveBaseRate)
+	if not baseOk then
+		return "Refused", baseWhy -- before any write; Escrow.create would assert on it
+	end
 	local now = os.time()
-	-- A "Live" record: its debit applies the live loss rules (Escrow.debitDefender, D-031).
+	-- A "Live" record: its debit applies the live loss rules (Escrow.debitDefender, D-031), with
+	-- the grab-time base for the day's first live loss (D-034).
 	local record = Escrow.create(
 		raidId,
 		raiderUserId,
@@ -482,7 +497,8 @@ local function startOrResume(
 		math.floor(glowRequested),
 		isRevenge,
 		now,
-		"Live"
+		"Live",
+		liveBaseRate
 	)
 	-- This call's own create (decideCreate). A retry while this server awaits one for the raid
 	-- reuses the first call's nonce, so a create that landed with its response lost stays its own.
@@ -546,7 +562,8 @@ function EscrowService.transferLive(
 	defenderUserId: number,
 	critterUid: string?,
 	glowRequested: number,
-	isRevenge: boolean?
+	isRevenge: boolean?,
+	liveBaseRate: number?
 ): (TransferStatus, string?)
 	if type(raidId) ~= "string" or #raidId == 0 or #raidId > MAX_RAID_ID_LENGTH then
 		return "Refused", `raidId must be 1 to {MAX_RAID_ID_LENGTH} characters`
@@ -558,8 +575,16 @@ function EscrowService.transferLive(
 		return "Refused", "escrow storage not ready" -- no profile can be loaded yet either
 	end
 	busy[raidId] = true -- held from before the first write until the drive ends
-	local ok, status, reason =
-		pcall(startOrResume, raidId, raiderUserId, defenderUserId, critterUid, glowRequested, isRevenge == true)
+	local ok, status, reason = pcall(
+		startOrResume,
+		raidId,
+		raiderUserId,
+		defenderUserId,
+		critterUid,
+		glowRequested,
+		isRevenge == true,
+		liveBaseRate
+	)
 	busy[raidId] = nil
 	if not ok then
 		return "InFlight", `could not confirm the raid's state; retry with the same raidId: {status}`

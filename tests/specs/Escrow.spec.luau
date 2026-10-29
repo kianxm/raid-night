@@ -161,6 +161,145 @@ tests["a record's kind is written once"] = function()
 	expect.truthy(Escrow.canReplace(missing, table.clone(missing)), "an old record still moves forward")
 end
 
+-- Empty live commits (decision D-033) -----------------------------------------------------------
+
+-- The four things a debit grants the defender, to compare before and after.
+local function grants(profile: Types.PlayerProfile, raiderUserId: number)
+	local tokens = 0
+	for _ in profile.revengeTokens do
+		tokens += 1
+	end
+	return profile.shieldUntil, tokens, RaidRules.pairCount(profile, raiderUserId, NOW), #profile.raidLog
+end
+
+tests["an empty live debit writes its entry but grants nothing (D-033)"] = function()
+	local raider, defender, record = setup("Live")
+	record.glowRequested = 0 -- Phase 0 live steals take no Glow (D-015)
+	defender.liveLossBaseRate, defender.liveLossRateToday = 100, 50 -- protected
+	local shield, tokens, pair, log = grants(defender, raider.userId)
+	local first = Escrow.debitDefender(defender, record, NOW)
+	expect.eq(defender.appliedTransfers["raid-1"], first, "the idempotency entry is written")
+	expect.eq(first.critter, nil)
+	expect.eq(first.glow, 0)
+	local shieldAfter, tokensAfter, pairAfter, logAfter = grants(defender, raider.userId)
+	expect.eq(shieldAfter, shield, "no shield")
+	expect.eq(tokensAfter, tokens, "no revenge token")
+	expect.eq(pairAfter, pair, "the raider's pair slot is not used up")
+	expect.eq(logAfter, log, "no 'escaped' raid-log entry")
+	expect.eq(defender.lossesToday, 0)
+	expect.eq(Escrow.debitDefender(defender, record, NOW + 5), first, "a repeat returns the same entry")
+	Escrow.markDebited(record, first, NOW)
+	Escrow.creditRaider(raider, record, NOW)
+	Escrow.markCommitted(record, NOW)
+	expect.eq(record.state, "Committed", "the raid still settles")
+	expect.eq(raider.glow, 0)
+	expect.eq(next(raider.critters), nil, "the raider got nothing")
+end
+
+tests["a live debit whose critter is gone, with no Glow, grants nothing either"] = function()
+	local raider, defender, record = setup("Live")
+	record.glowRequested = 0
+	defender.critters["fox"].placement = "Vault" -- moved before the escape landed
+	defender.critters["fox"].padIndex = nil
+	local shield, tokens, pair, log = grants(defender, raider.userId)
+	runAll(raider, defender, record)
+	local shieldAfter, tokensAfter, pairAfter, logAfter = grants(defender, raider.userId)
+	expect.eq(shieldAfter, shield)
+	expect.eq(tokensAfter, tokens)
+	expect.eq(pairAfter, pair)
+	expect.eq(logAfter, log)
+	expect.truthy(defender.appliedTransfers["raid-1"], "still idempotent")
+end
+
+tests["a live debit that takes only Glow still records the raid"] = function()
+	local raider, defender, record = setup("Live")
+	defender.liveLossBaseRate, defender.liveLossRateToday = 100, 50 -- protected: Glow only
+	runAll(raider, defender, record)
+	expect.eq(raider.glow, 250)
+	expect.eq(defender.shieldUntil, NOW + Config.Shield.afterSuccessfulRaidSeconds)
+	expect.truthy(defender.revengeTokens["raid-1"])
+	expect.eq(RaidRules.pairCount(defender, raider.userId, NOW), 1)
+	expect.eq(defender.raidLog[1].raidId, "raid-1")
+end
+
+tests["an async debit that takes nothing still records the raid (unchanged by D-033)"] = function()
+	local raider, defender, record = setup("Async")
+	record.glowRequested = 0
+	defender.lossesToday = Config.Limits.maxLossesPerDay
+	runAll(raider, defender, record)
+	expect.truthy(defender.critters["fox"], "capped")
+	expect.eq(defender.shieldUntil, NOW + Config.Shield.afterSuccessfulRaidSeconds)
+	expect.truthy(defender.revengeTokens["raid-1"])
+	expect.eq(RaidRules.pairCount(defender, raider.userId, NOW), 1)
+	expect.eq(defender.raidLog[1].raidId, "raid-1")
+end
+
+-- Grab-time base on the record (decision D-034) ---------------------------------------------------
+
+tests["create takes a grab-time base only on a Live record, and only a finite number >= 0"] = function()
+	for _, good in { 0, 3, 112.5, 1e9 } do
+		local record = Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW, "Live", good)
+		expect.eq(record.liveBaseRate, good, `{good} kept`)
+		expect.truthy(Escrow.checkLiveBaseRate("Live", good))
+	end
+	expect.eq(Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW, "Live").liveBaseRate, nil, "none: not measured")
+	expect.truthy(Escrow.checkLiveBaseRate("Async", nil), "an async record has none")
+	local bad: { any } = { 0 / 0, -1, -0.001, math.huge, -math.huge, 1e306, "603", true }
+	for _, value in bad do
+		local ok, why = Escrow.checkLiveBaseRate("Live", value)
+		expect.falsy(ok, `{value} refused`)
+		expect.truthy(type(why) == "string" and #why > 0, `{value}: says why`)
+		expect.throws(function()
+			Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW, "Live", value)
+		end, `create asserts on {value}`)
+	end
+	expect.falsy(Escrow.checkLiveBaseRate("Async", 10), "Live only")
+	expect.throws(function()
+		Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW, "Async", 10)
+	end, "an async record never carries one")
+end
+
+tests["a grab-time base is stored to 0.001 Glow/s, so a lossy JSON round trip keeps it exact"] = function()
+	local function created(value: number): number
+		return Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW, "Live", value).liveBaseRate :: number
+	end
+	expect.eq(created(0.1 + 0.2), 0.3)
+	expect.eq(created(25 * 1.1), 27.5, "a non-dyadic tuning value")
+	expect.eq(created(603), 603)
+	expect.eq(created(12.5), 12.5, "a vault half stays exact")
+	expect.eq(created(0.0004), 0)
+	for _, value in { 0.1 + 0.2, 25 * 1.1, 1 / 3, 1234.5678912, 98765.4321, 603, 12.5 } do
+		local stored = created(value)
+		-- 14 significant digits: the least an encoder might keep. A retry's fresh record must still
+		-- equal the stored one (Escrow.sameTransfer).
+		expect.eq(tonumber(string.format("%.14g", stored)), stored, `{value} survives`)
+		expect.eq(created(value), stored, `{value}: the same input always gives the same record`)
+	end
+end
+
+tests["the grab-time base is part of the transfer: a retry with another value is refused"] = function()
+	local base = Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW, "Live", 603)
+	base.createNonce = "call-a"
+	local retry = Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW + 3, "Live", 603)
+	retry.createNonce = "call-a"
+	expect.truthy(Escrow.sameTransfer(base, retry), "identical arguments")
+	for _, other in { 604, 0 } do
+		local changed = Escrow.create("raid-b", 1, 2, "fox", 0, false, NOW, "Live", other)
+		changed.createNonce = "call-a"
+		expect.falsy(Escrow.sameTransfer(base, changed), `{other}: another transfer`)
+		expect.falsy(Escrow.canReplace(base, changed), `{other}: the store refuses it`)
+	end
+	local none = table.clone(base)
+	none.liveBaseRate = nil
+	expect.falsy(Escrow.sameTransfer(base, none), "a missing base matches only a missing one")
+	expect.falsy(Escrow.canReplace(base, none), "never dropped")
+	expect.falsy(Escrow.canReplace(none, base), "never filled in")
+	expect.truthy(Escrow.canReplace(none, table.clone(none)), "an old record without one still moves forward")
+	local debited = table.clone(base)
+	debited.state = "Debited"
+	expect.truthy(Escrow.canReplace(base, debited), "kept through the state machine")
+end
+
 tests["Glow taken never exceeds what is stored"] = function()
 	local raider, defender, record = setup()
 	defender.stored = 40.9

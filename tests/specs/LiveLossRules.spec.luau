@@ -1,8 +1,10 @@
 --!strict
 -- Live loss rules (decision D-031): value-based daily protection, post-loss safety and the
--- live same-pair limit, from the grab check through the defender's debit.
+-- live same-pair limit, from the grab check through the defender's debit; the base measured at
+-- the grab (decision D-034).
 local expect = require("../lib/expect")
 local fixtures = require("../lib/fixtures")
+local source = require("../lib/source")
 local RaidRules = require("../../src/Shared/RaidRules")
 local Escrow = require("../../src/Shared/Escrow")
 local Economy = require("../../src/Shared/Economy")
@@ -45,16 +47,38 @@ end
 local raids = 0
 
 -- A live steal landing on the defender: the escrow debit of a "Live" record (no Glow, D-015).
-local function debit(owner: PlayerProfile, raiderUserId: number, uid: string, now: number): Types.AppliedTransfer
+-- `grabBase` is the record's liveBaseRate (D-034); nil = a record without one.
+local function debit(
+	owner: PlayerProfile,
+	raiderUserId: number,
+	uid: string,
+	now: number,
+	grabBase: number?
+): Types.AppliedTransfer
 	raids += 1
-	local record = Escrow.create(`raid-{raids}`, raiderUserId, owner.userId, uid, 0, false, now, "Live")
+	local record = Escrow.create(`raid-{raids}`, raiderUserId, owner.userId, uid, 0, false, now, "Live", grabBase)
 	return Escrow.debitDefender(owner, record, now)
 end
 
 -- A debit that must take the critter.
-local function steal(owner: PlayerProfile, raiderUserId: number, uid: string, now: number)
-	local applied = debit(owner, raiderUserId, uid, now)
+local function steal(owner: PlayerProfile, raiderUserId: number, uid: string, now: number, grabBase: number?)
+	local applied = debit(owner, raiderUserId, uid, now, grabBase)
 	expect.eq(applied.critter and applied.critter.uid, uid, `the debit took {uid}`)
+end
+
+-- The owner moves a critter off its pad (as Economy.place would, minus the accrue).
+local function move(owner: PlayerProfile, uid: string, placement: Types.Placement)
+	owner.critters[uid].placement = placement
+	owner.critters[uid].padIndex = nil
+end
+
+-- A rich den with one cheap Common: the king (600 Glow/s) on pad 1, a rat (3) on pad 2.
+local function kingAndRat(): PlayerProfile
+	local owner = fixtures.veteran(2, NOW)
+	fixtures.give(owner, fixtures.critter("king", "king_bandit", "Pad", 1))
+	fixtures.give(owner, fixtures.critter("rat", "crumb_rat", "Pad", 2))
+	expect.eq(Economy.denRate(owner), 603)
+	return owner
 end
 
 -- Four Rare foxes (25 Glow/s each) on pads 1-4: 100 Glow/s.
@@ -73,6 +97,19 @@ tests["protectionLossShare is Kian's 50% (D-031)"] = function()
 	expect.eq(Live.protectionLossShare, 0.5)
 end
 
+tests["liveProtected counts a NaN base or a NaN loss as protected"] = function()
+	local nan = 0 / 0
+	for _, case in { { nan, 10 }, { 100, nan }, { nan, nan } } do
+		local owner = foxDen()
+		owner.liveLossBaseRate, owner.liveLossRateToday = case[1], case[2]
+		expect.truthy(RaidRules.liveProtected(owner, NOW), `base {case[1]}, lost {case[2]}`)
+		expect.eq(select(2, canGrab(owner, 1, 1, NOW)), Reason.LiveProtected, "grabs refused too")
+	end
+	local owner = foxDen()
+	owner.liveLossBaseRate, owner.liveLossRateToday = nan, nan
+	expect.falsy(RaidRules.liveProtected(owner, DAY_START + DAY), "a NaN from yesterday is not today's")
+end
+
 tests["a den with no live loss today is not protected, and the check never writes"] = function()
 	local owner = foxDen()
 	expect.falsy(RaidRules.liveProtected(owner, NOW))
@@ -80,7 +117,7 @@ tests["a den with no live loss today is not protected, and the check never write
 	expect.eq(owner.liveLossRateToday, nil)
 end
 
-tests["the base is the den's Glow/s just before its first live loss, vault included"] = function()
+tests["with no grab-time base, the base is the den's Glow/s just before its first live loss, vault included"] = function()
 	local owner = foxDen()
 	fixtures.give(owner, fixtures.critter("vaulted", "crescent_fox", "Vault")) -- earns half: 12.5
 	steal(owner, 1, "fox1", NOW)
@@ -191,6 +228,109 @@ tests["stealing only Commons from a rich den never triggers protection"] = funct
 	expect.eq(owner.liveLossRateToday, 42, "14 Commons at 3 Glow/s")
 	expect.falsy(RaidRules.liveProtected(owner, now), "42 of 1,022 Glow/s is nowhere near half")
 	expect.truthy((canGrab(owner, 108, 15, now, lastLoss)), "the den is still open to a new raider")
+end
+
+-- Grab-time base (decision D-034) ------------------------------------------------------------------
+
+tests["moving a high earner off its pad during the carry cannot shrink the base (D-034)"] = function()
+	local owner = kingAndRat()
+	local grabBase = Economy.denRate(owner) -- RaidService measures it when it accepts the grab
+	move(owner, "king", "Inventory") -- alerted, the owner hides the king before the escape lands
+	expect.eq(Economy.denRate(owner), 3, "the den now earns only the rat's 3 Glow/s")
+	steal(owner, 1, "rat", NOW, grabBase)
+	expect.eq(owner.liveLossBaseRate, 603, "measured at the grab, king included")
+	expect.falsy(RaidRules.liveProtected(owner, NOW), "3 of 603 Glow/s: one cheap loss buys no protection")
+	owner.critters.king.placement, owner.critters.king.padIndex = "Pad", 1 -- the king goes back out
+	local ok, reason = canGrab(owner, 3, 1, RaidRules.liveGrabReadyAt(NOW), NOW)
+	expect.truthy(ok, `the den is still open: {reason}`)
+end
+
+tests["vaulting the den's top earner during the carry cannot shrink the base either"] = function()
+	local owner = fixtures.veteran(2, NOW)
+	fixtures.give(owner, fixtures.critter("possum", "drama_possum", "Pad", 1)) -- 6 Glow/s
+	fixtures.give(owner, fixtures.critter("rat", "crumb_rat", "Pad", 2)) -- 3, a Common
+	local grabBase = Economy.denRate(owner)
+	move(owner, "possum", "Vault") -- earns half there
+	expect.eq(Economy.denRate(owner), 6, "3 of 6 would be exactly the share")
+	steal(owner, 1, "rat", NOW, grabBase)
+	expect.eq(owner.liveLossBaseRate, 9)
+	expect.falsy(RaidRules.liveProtected(owner, NOW), "3 of the grab's 9 Glow/s")
+end
+
+tests["a record without a grab-time base measures the den at the debit (older records)"] = function()
+	local owner = kingAndRat()
+	move(owner, "king", "Inventory")
+	steal(owner, 1, "rat", NOW) -- no liveBaseRate: today's behaviour before D-034
+	expect.eq(owner.liveLossBaseRate, 3, "the den as it is at the debit")
+	expect.truthy(RaidRules.liveProtected(owner, NOW), "which is why RaidService must pass the grab's rate")
+end
+
+tests["a record without kind or liveBaseRate still debits like a Phase 0 live steal"] = function()
+	local owner = kingAndRat()
+	local record = Escrow.create("old-raid", 1, owner.userId, "rat", 0, false, NOW, "Live")
+	record.kind = nil -- written before either field existed
+	expect.eq(record.liveBaseRate, nil)
+	local applied = Escrow.debitDefender(owner, record, NOW)
+	expect.eq(applied.critter and applied.critter.uid, "rat")
+	expect.eq(owner.liveLossBaseRate, 603, "measured at the debit, the rat still in the den")
+	expect.eq(owner.liveLossRateToday, 3)
+end
+
+tests["later losses that day never change the base, whatever their record carries"] = function()
+	local owner = foxDen()
+	steal(owner, 1, "fox1", NOW, 100)
+	steal(owner, 3, "fox2", NOW + 60, 10) -- a later grab measured a smaller den
+	expect.eq(owner.liveLossBaseRate, 100, "kept")
+	expect.truthy(RaidRules.liveProtected(owner, NOW + 60), "50 of 100")
+	local slipped = debit(owner, 4, "fox3", NOW + 120, 1000) -- nor a bigger one
+	expect.eq(slipped.critter, nil, "protected: nothing taken")
+	expect.eq(owner.liveLossBaseRate, 100)
+end
+
+tests["a new UTC day's first live loss takes its own record's grab-time base"] = function()
+	local owner = foxDen()
+	steal(owner, 1, "fox1", NOW, 100)
+	steal(owner, 3, "fox2", NOW + 60, 75)
+	local tomorrow = DAY_START + DAY
+	local grabBase = Economy.denRate(owner) -- two foxes left at tomorrow's grab
+	move(owner, "fox4", "Inventory") -- then the owner hides one
+	steal(owner, 4, "fox3", tomorrow, grabBase)
+	expect.eq(owner.liveLossBaseRate, 50, "the record's base, on the new day's first loss")
+	expect.eq(owner.liveLossRateToday, 25)
+	expect.truthy(RaidRules.liveProtected(owner, tomorrow))
+end
+
+tests["recordLiveLoss treats a grab-time base that is not a finite number >= 0 as none"] = function()
+	for _, bad in { 0 / 0, -1, math.huge, -math.huge } do
+		local owner = kingAndRat()
+		RaidRules.recordLiveLoss(owner, owner.critters.rat, NOW, bad)
+		expect.eq(owner.liveLossBaseRate, 603, `{bad}: measured instead`)
+	end
+	local owner = kingAndRat()
+	RaidRules.recordLiveLoss(owner, owner.critters.rat, NOW, 0)
+	expect.eq(owner.liveLossBaseRate, 0, "0 is a measurement (an empty den), not a missing one")
+end
+
+tests["transferLive refuses a bad liveBaseRate before any write and puts it in the Live record"] = function()
+	local code = source.codeOnly(source.read("src/Server/Services/EscrowService.luau"))
+	local live = source.functionBody(code, "EscrowService.transferLive") or ""
+	expect.truthy(string.find(live, "isRevenge: boolean%?,%s*liveBaseRate: number%?%s*%)"), "the trailing parameter")
+	expect.truthy(
+		string.find(live, "pcall%(%s*startOrResume,[^)]*isRevenge == true,%s*liveBaseRate%s*%)"),
+		"transferLive passes it on"
+	)
+	local start = source.functionBody(code, "startOrResume") or ""
+	local checked = string.find(
+		start,
+		'local baseOk, baseWhy = Escrow%.checkLiveBaseRate%("Live", liveBaseRate%)%s*if not baseOk then%s*return "Refused"'
+	)
+	local created = string.find(start, 'Escrow%.create%(.-"Live",%s*liveBaseRate%s*%)')
+	local firstRead = string.find(start, "read%(recordKey")
+	local firstWrite = string.find(start, "indexAdd%(")
+	expect.truthy(checked and created and firstRead and firstWrite, "check, create, read and write found")
+	expect.truthy((checked :: number) < (created :: number), "checked before Escrow.create (which asserts)")
+	expect.truthy((checked :: number) < (firstRead :: number), "and before anything is read or written")
+	expect.truthy((created :: number) < (firstWrite :: number), "the record built with it is the one created")
 end
 
 return tests
