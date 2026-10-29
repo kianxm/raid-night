@@ -3,6 +3,16 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-030 · 2026-10-28 · Robux-linked Glow multipliers are off for policy-restricted players (Kian)
+Decision: Lantern Night stays a Glow multiplier. All Robux-bought Glow multipliers (VIP 1.5×
+and Lantern Night) are Robux-linked. For a player whose PolicyService info restricts paid
+random items, they never apply: VIP keeps its non-Glow perks, and other players' Lantern Nights
+don't boost them, so their Glow stays earn-only and eggs stay purchasable. Egg odds are shown
+everywhere. Both products stay gated on the reviewer policy audit and the PolicyService check
+in P2.8. Amends D-028. Orchestrator detail: the bonuses stack additively (VIP +50% and Lantern
+Night +50% = 2.0×), values in Config.Boosts; pure multiplier logic tested per policy flag
+(C2, P0.12). Reversible: yes.
+
 ### D-029 · 2026-10-28 · Three more launch products, no randomness (Kian)
 Decision: add to the launch catalog (design-summary, PurchaseService): server boost "Lantern
 Night" (99-199 Robux, +50% Glow earned server-wide for 15 min, buyer announced), critter
@@ -19,6 +29,8 @@ audit. Egg odds are shown on screen for every egg from Phase 0, read from Config
 the eggMaxTier renormalization (rescue egg: Common 100%). Updated design-summary, decision
 0005, contracts.md, playbook, PurchaseService header. Why: Glow buys eggs, so selling Glow would
 make eggs paid random items (CLAUDE.md rule 6). Reversible: yes, in the Phase 2 mini-phase.
+Amended by D-030: Robux-bought Glow multipliers (VIP 1.5×, Lantern Night) are allowed but never
+apply to players whose PolicyService info restricts paid random items.
 
 ### D-027 · 2026-10-28 · Phase 0: Inventory critters auto-fill free pads; fix steal feedback before the gate
 Context: the P0.8 Studio pass found stolen critters (and eggs bought with full pads) land in
