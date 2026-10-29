@@ -128,10 +128,10 @@ local Config = {
 
 	Economy = {
 		maxDenLevel = 50,
-		upgradeCostBase = 100,
+		upgradeCostBase = 500,
 		upgradeCostGrowth = 1.35, -- cost(level) = base * growth^(level - 1)
-		eggPriceBase = 50,
-		eggPriceGrowth = 1.12, -- egg price scales with den level
+		eggPriceBase = 150,
+		eggPriceGrowth = 1.32, -- egg price scales with den level
 		rebirthMinTier = "Legendary", -- must own at least one critter of this tier or higher
 		-- Highest tier a bought egg can hatch. Tiers up to it keep their EggOdds ratios,
 		-- renormalized (Economy.rollTierUpTo). Phase 2 raises it to "Mythic" (decision D-003).
