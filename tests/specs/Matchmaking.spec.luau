@@ -296,4 +296,21 @@ tests["teleport failures map to client reasons"] = function()
 	expect.eq(Matchmaking.teleportFailReason("Failure"), "TeleportFailed")
 end
 
+tests["raid_portal_opened fields count the rows and flag any revenge row (schema-valid)"] = function()
+	local Analytics = require("../../src/Shared/Analytics")
+	local none = Matchmaking.portalOpenedFields({})
+	expect.eq(none.targetsOffered, 0)
+	expect.eq(none.revengeAvailable, false)
+	local plain = Matchmaking.portalOpenedFields({ { revengeRaidId = nil }, {} })
+	expect.eq(plain.targetsOffered, 2)
+	expect.eq(plain.revengeAvailable, false, "no revenge id, no revenge")
+	local mixed = Matchmaking.portalOpenedFields({ { revengeRaidId = "r1" }, {}, {} })
+	expect.eq(mixed.targetsOffered, 3)
+	expect.eq(mixed.revengeAvailable, true)
+	for _, fields in { none, plain, mixed } do
+		local payload, why = Analytics.encode("raid_portal_opened", fields)
+		expect.truthy(payload ~= nil, `Analytics schema accepts the fields: {why}`)
+	end
+end
+
 return tests

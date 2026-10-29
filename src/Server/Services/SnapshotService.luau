@@ -4,8 +4,13 @@
 
 	Saves each den's raidable snapshot (Matchmaking.buildSnapshot) to DataStore `DenSnapshots`, key
 	`Snapshot_<userId>`. Async raids are built from it, never from the live profile. Vault
-	critters are never in it. It is built from a shallow copy of the profile, so the live profile
-	is never accrued or changed here.
+	critters are never in it. It is built from a shallow copy of the profile. Glow factor (P2.8,
+	D-030/D-032): when the profile is the one loaded here (interval, a loaded test session), it
+	first accrues through IncomeService.accrue, the Glow-factor helper, so the snapshot's stored
+	Glow includes the owner's boost and Matchmaking.buildSnapshot's factor-1 accrue covers no
+	time. That accrue is the only change made to the live profile here. A leave snapshot is built
+	after getProfile is already nil, so it never accrues the live profile: IncomeService's own
+	releasing listener makes the final accrue at the factor.
 	  interval  every Config.Snapshot.intervalSeconds while the profile is loaded (the first one
 	            right after load). Skipped while the server's UpdateAsync budget is low; the next
 	            tick retries.
@@ -42,6 +47,8 @@ local Matchmaking = require(Shared.Matchmaking)
 local Profile = require(Shared.Profile)
 local Types = require(Shared.Types)
 local DataService = require(script.Parent.DataService) :: any
+-- No cycle: IncomeService requires DataService, DenWorldService and Economy/CritterView only.
+local IncomeService = require(script.Parent.IncomeService) :: any
 
 type DenSnapshot = Types.DenSnapshot
 type PlayerProfile = Types.PlayerProfile
@@ -77,6 +84,9 @@ local function storage(): ("DataStore" | "Memory")?
 end
 
 local function build(profile: PlayerProfile, now: number): DenSnapshot
+	if DataService.getProfile(profile.userId) == profile then
+		IncomeService.accrue(profile, now) -- at the owner's Glow factor, before the copy
+	end
 	local snapshot = Matchmaking.buildSnapshot(table.clone(profile), now)
 	snapshot.blockedUserIds = blocks[profile.userId]
 	return snapshot
