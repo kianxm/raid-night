@@ -58,7 +58,8 @@ Studio-only memory and test profiles (decision D-019, details in `DataService.lu
   the `Player_<testId>` (and their `Escrow_`/`Open_`) keys in the Data Stores manager after a
   soak. `ServerStorage.DataTestHook` (Studio only, same switch and id checks) wraps it:
   `"load"`, `"seed"` (Common critters on free pads plus stored Glow, then a confirmed save),
-  `"show"` and `"release"`.
+  `"show"` and `"release"`. Soak and test raids use test ids against test ids only; never a
+  test id against a real account in DataStore mode (it would really move that player's critter).
 - **Escrow playtest switches** (P1.1, ServerStorage attributes, read only when
   `RunService:IsStudio()`): `StudioAsyncRaids = true` makes `EscrowService.canStartTransfer`
   count `asyncRaids` as on (the master `raids` switch still applies), and
