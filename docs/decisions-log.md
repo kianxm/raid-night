@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-033 · 2026-10-28 · Empty live commits grant nothing
+Context: reviewer on #65. Decision: when a live debit takes nothing (den protected) and Glow is
+0, still write the appliedTransfers entry (idempotency), but skip the defender's shield, revenge
+token, pairRaidsToday increment and "escaped" raid-log entry. Pin it in the simulation. Why: an
+empty steal must not use up the raider's pair slot or hand the defender rewards (principle 4).
+Rare after D-031 (grabs refuse protected dens and in-flight carries). Reversible: yes.
+
 ### D-032 · 2026-10-28 · Robux-linked multiplier mechanics
 Context: reviewer on #59. Decisions: (1) the multiplier is pure (Economy.glowBoostFactor) and
 fails closed: unknown PolicyService result = restricted; (2) kill switch: Robux-linked
