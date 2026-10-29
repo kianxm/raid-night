@@ -30,7 +30,8 @@ local Strings = {
 	stolen = "You stole {name}! It's in your den.",
 	stealUnconfirmed = "Steal not confirmed",
 	stealUnconfirmedSub = "If it went through, it'll show up in your den.",
-	protectedToday = "Protected today",
+	protected = "Protected",
+	protectedOwn = "Protected from steals",
 	safeFor = "Safe for {time}",
 	alreadyStealing = "Someone is already stealing here",
 }
