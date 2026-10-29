@@ -358,9 +358,21 @@ own server (RaidService + `Raid/AsyncRaid.luau`; rules in `RaidRules`, "Async ra
 - `Net.Pushes.RaidEnded` ends every async raid, with `reason`: `"Escaped"` (gate while carrying;
   `escaped` is true only once the loot has moved), `"Timeout"`, `"Tagged"` (a guard),
   `"Retreat"` (gate with nothing), `"Left"`, `"Error"`. The raider is sent back to their den.
+  For `"Escaped"` the push comes once escrow answers (`RaidRules.asyncEscapeOutcome`, P1.3b):
+  - `escaped = true`: the loot is in the raider's profile. `speciesId` and `glow` are what was
+    credited (the raider's `appliedTransfers` entry), never the snapshot's figure. `speciesId` is
+    nil when only Glow moved (the critter had left its pad, or the den hit its daily loss cap).
+  - `pending = true` (additive, optional): escrow is still delivering, usually because the owner
+    is online in another server. It lands on its own and never voids; `speciesId` and `glow` are
+    the carried critter and the estimate. Show "on its way"; DenChanged shows the truth.
+  - `escaped = false` and no `pending`: nothing moved (Refused). `speciesId` is what was carried,
+    `glow` is 0.
 - `Net.Requests.GetRaidLog` `() -> { RaidLogEntry }`: the player's own log, newest first.
-- Raid code never writes a profile. An escape goes to `RaidService.onAsyncEscape`, which hands it
-  to EscrowService (P1.3b; until then nothing moves).
+- Raid code never writes a profile. An escape goes to `RaidService.onAsyncEscape`, which calls
+  `EscrowService.transferAsync` (Async kind). The escrow debit writes the defender's shield,
+  revenge token, pair count and Incoming log entry (`RaidRules.recordIncoming`).
+- StartRaid fails closed when the owner's presence cannot be read (`PresenceUnknown`), and also
+  honours, until the den's next snapshot, the shield of an escape this server just completed.
 
 ## Replays
 

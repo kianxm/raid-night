@@ -65,7 +65,10 @@ tests["async raids: start checks, lock on every end, nothing private to the clie
 	local start = string.sub(code, first :: number, last :: number)
 	expect.truthy(string.find(start, "RaidRules.canStartAsync(", 1, true), "pure start checks")
 	expect.truthy(string.find(start, "SnapshotService.blockedBy(player.UserId)", 1, true), "raider's block list")
-	expect.truthy(string.find(start, "MatchmakingService.getPresence(targetUserId)", 1, true), "presence")
+	local presence = string.find(start, "pcall(MatchmakingService.getPresence, targetUserId)", 1, true)
+	expect.truthy(presence, "presence, read under pcall")
+	local failClosed = string.find(start, "if not presenceRead or presenceOk == false then", 1, true)
+	expect.truthy(failClosed and failClosed > (presence :: number), "a failed presence read refuses (fail closed)")
 	local lock = string.find(start, "MatchmakingService.acquireLock(", 1, true)
 	local release = string.find(start, "MatchmakingService.releaseLock, targetUserId, raidId", 1, true)
 	expect.truthy(lock and release and release > lock, "a failed entry releases the lock")
@@ -79,7 +82,38 @@ tests["async raids: start checks, lock on every end, nothing private to the clie
 	)
 	expect.eq(count(code, "storedGlow"), 0, "exact Glow never reaches the client")
 	expect.eq(count(code, "blockedUserIds"), 0, "the block list never reaches the client")
-	expect.eq(count(code, "EscrowService"), 0, "P1.3a: the escape goes through RaidService.onAsyncEscape")
+	expect.eq(count(code, "EscrowService"), 0, "the escape goes through RaidService.onAsyncEscape")
+	local enterFirst = string.find(code, "local function enterPocket", 1, true)
+	local enter = string.sub(code, enterFirst :: number, first :: number)
+	local here = string.find(enter, "Players:GetPlayerByUserId(snapshot.userId) ~= nil", 1, true)
+	expect.truthy(here, "enterPocket re-checks the owner is not here, after the lock")
+	local acquire = string.find(enter, "Pocket.acquire()", 1, true)
+	expect.truthy(acquire and (here :: number) < acquire, "before a pocket is taken")
+	expect.truthy(string.find(enter, "pcall(sendHome, player)", 1, true), "a failed entry sends the raider home")
+	local escapeAt = string.find(finish, "pcall(api.onEscape", 1, true)
+	local releaseAt = string.find(finish, "pcall(MatchmakingService.releaseLock", 1, true)
+	expect.truthy(escapeAt and releaseAt and escapeAt < releaseAt, "the lock is held until escrow answers")
+end
+
+tests["async escape: escrow only, through transferAsync with server-tracked arguments"] = function()
+	local code = codeOnly(fs.readFile(FILES[1]))
+	expect.eq(count(code, "EscrowService.transferAsync"), 1, "one transferAsync call site")
+	local call = string.match(code, "pcall%(%s*EscrowService%.transferAsync%s*,([^%)]*)%)")
+	expect.truthy(call, "transferAsync is called through pcall")
+	local args = {}
+	for arg in string.gmatch(call :: string, "[^,]+") do
+		table.insert(args, (string.gsub(arg, "%s", "")))
+	end
+	expect.eq(
+		table.concat(args, ","),
+		"run.raidId,run.raiderUserId,run.defenderUserId,run.critterUid,run.glowRequested,run.isRevenge",
+		"every argument comes from the server-tracked escape"
+	)
+	local first = string.find(code, "function RaidService.onAsyncEscape", 1, true)
+	local body = string.sub(code, first :: number, string.find(code, "\nend\n", first :: number) :: number)
+	expect.truthy(string.find(body, "RaidRules.asyncEscapeOutcome(", 1, true), "the outcome is the pure rule's")
+	expect.truthy(string.find(body, "appliedTransfers[run.raidId]", 1, true), "read from the raider's profile")
+	expect.eq(count(body, "transferLive"), 0, "never the live path")
 end
 
 tests["the test hook only ever installs in Studio"] = function()

@@ -20,7 +20,11 @@
 	End    Escaped (gate while carrying), Timeout, Tagged, Retreat (gate with nothing), Left (left
 	       the game, died, left the pocket), Error. Every end releases the pocket and the raid lock,
 	       sends the raider home and pushes Net.Pushes.RaidEnded with `reason`. An escape first
-	       hands the raid to api.onEscape (RaidService.onAsyncEscape).
+	       hands the raid to api.onEscape (RaidService.onAsyncEscape -> EscrowService), on its own
+	       thread, and the push carries its real outcome (moved, pending, or nothing moved). The
+	       lock is released after escrow answers.
+	       StartRaid fails closed when presence cannot be read, and honours the shield of an
+	       escape this server just completed until the den's next snapshot carries it.
 	Log    Net.Requests.GetRaidLog -> a copy of the player's own raid log, and asks DataService to
 	       mark it seen (markRaidLogSeen, data's, called once it exists). Player attribute
 	       RaidLogSeenAt = the profile's raidLogSeenAt when it loaded. Display only.
@@ -69,7 +73,7 @@ export type Api = {
 	isCarryingLive: (Player) -> boolean,
 	raidEnded: RemoteEvent,
 	remotes: Folder,
-	onEscape: (Escape) -> (boolean, number), -- (loot moved, Glow taken)
+	onEscape: (Escape) -> RaidRules.EscapeOutcome, -- yields while escrow runs
 }
 
 type Carry = { uid: string, padIndex: number, speciesId: string, weight: Types.Weight, budget: number }
@@ -104,6 +108,7 @@ local api: Api
 local raids: { [Player]: Raid } = {}
 local starting: { [Player]: true } = {}
 local windows: { [Player]: { [string]: { start: number, count: number } } } = {}
+local recentShields: { [number]: number } = {} -- defender userId -> shieldUntil (os.time())
 
 local function debugLog(message: string)
 	if RunService:IsStudio() then
@@ -166,6 +171,20 @@ local function sendHome(player: Player)
 	end
 end
 
+-- An escape's shield, before the den's next snapshot carries it: an offline debit changes the
+-- saved profile, not the snapshot, so StartRaid here also honours what this server just did.
+local function rememberShield(defenderUserId: number, shieldUntil: number)
+	local now = os.time()
+	for userId, untilAt in recentShields do
+		if untilAt <= now then
+			recentShields[userId] = nil
+		end
+	end
+	if shieldUntil > now then
+		recentShields[defenderUserId] = math.max(recentShields[defenderUserId] or 0, shieldUntil)
+	end
+end
+
 local function endRaid(raid: Raid, reason: string)
 	if raid.ended then
 		return
@@ -196,9 +215,9 @@ local function endRaid(raid: Raid, reason: string)
 		warn(`[AsyncRaid] pocket {raid.pocket.slot} release failed: {releaseError}`)
 	end
 	task.spawn(function()
-		local moved, taken = false, 0
+		local outcome: RaidRules.EscapeOutcome? = nil
 		if escaped and carry then
-			local ok, a, b = pcall(api.onEscape, {
+			local ok, result = pcall(api.onEscape, {
 				raidId = raid.raidId,
 				raiderUserId = player.UserId,
 				defenderUserId = raid.defenderUserId,
@@ -210,9 +229,12 @@ local function endRaid(raid: Raid, reason: string)
 				snapshotPower = raid.snapshot.power,
 			})
 			if ok then
-				moved, taken = a == true, if type(b) == "number" then b else 0
+				outcome = result
+				rememberShield(raid.defenderUserId, result.shieldUntil)
 			else
-				warn(`[AsyncRaid] onAsyncEscape for raid {raid.raidId} failed: {a}`)
+				-- Escrow may still have the raid (the raider's Open_ index): never claim "nothing".
+				warn(`[AsyncRaid] onAsyncEscape for raid {raid.raidId} failed: {result}`)
+				outcome = RaidRules.asyncEscapeOutcome("InFlight", nil, carry.speciesId, 0, os.time())
 			end
 		end
 		pcall(MatchmakingService.releaseLock, raid.defenderUserId, raid.raidId)
@@ -220,10 +242,11 @@ local function endRaid(raid: Raid, reason: string)
 		if player.Parent then
 			local payload: Net.RaidEnd = {
 				raidId = raid.raidId,
-				escaped = moved,
-				speciesId = if carry then carry.speciesId else nil,
-				glow = taken,
+				escaped = outcome ~= nil and outcome.escaped,
+				speciesId = if outcome then outcome.speciesId elseif carry then carry.speciesId else nil,
+				glow = if outcome then outcome.glow else 0,
 				reason = reason,
+				pending = if outcome and outcome.pending then true else nil,
 			}
 			pcall(api.raidEnded.FireClient, api.raidEnded, player, payload)
 		end
@@ -335,19 +358,23 @@ local function enterPocket(
 	raidId: string,
 	snapshot: DenSnapshot,
 	revengeRaidId: string?
-): Net.RaidStart?
+): (Net.RaidStart?, string?)
 	local root = api.rootOf(player)
 	local character = player.Character
 	if player.Parent == nil or not root or not character or raids[player] or api.isCarryingLive(player) then
-		return nil
+		return nil, RaidRules.Reason.RaiderNotReady
 	end
 	if DenWorldService.getPlot(player) == nil or DataService.getProfile(player.UserId) == nil then
-		return nil
+		return nil, RaidRules.Reason.RaiderNotReady
+	end
+	-- The owner may have joined this server during the lock call: raided live instead (D-043).
+	if Players:GetPlayerByUserId(snapshot.userId) ~= nil then
+		return nil, RaidRules.Reason.DefenderOnline
 	end
 	local pocket = Pocket.acquire()
 	if not pocket then
 		debugLog(`no free pocket for {player.Name}`)
-		return nil
+		return nil, RaidRules.Reason.NoPocket
 	end
 	local ok, result = pcall(function(): Net.RaidStart
 		local layout = RaidRules.pocketLayout(snapshot)
@@ -408,10 +435,11 @@ local function enterPocket(
 	end)
 	if not ok then
 		raids[player] = nil
-		Pocket.release(pocket)
+		pcall(Pocket.release, pocket)
+		pcall(sendHome, player) -- the raider may already be standing in the pocket
 		error(result)
 	end
-	return result
+	return result, nil
 end
 
 local function startRaid(player: Player, targetUserId: number, revengeRaidId: string?): (Net.RaidStart?, string?)
@@ -421,9 +449,17 @@ local function startRaid(player: Player, targetUserId: number, revengeRaidId: st
 		return nil, RaidRules.Reason.SwitchedOff
 	end
 	local found = SnapshotService.get(targetUserId) -- yields
-	local presence = MatchmakingService.getPresence(targetUserId) -- yields
+	-- Fail closed: an owner we cannot place may be online, and is raided live instead (D-043).
+	-- A second result of false is a failed read (matchmaking handoff: getPresence returns it).
+	local presenceRead, presence, presenceOk = pcall(MatchmakingService.getPresence, targetUserId) -- yields
+	if not presenceRead or presenceOk == false then
+		return nil, RaidRules.Reason.PresenceUnknown
+	end
 	local now = os.time()
 	local snapshot: DenSnapshot? = if type(found) == "table" then table.clone(found) else nil
+	if snapshot then
+		snapshot.shieldUntil = math.max(snapshot.shieldUntil, recentShields[targetUserId] or 0)
+	end
 	local losses = 0
 	local defender = DataService.getProfile(targetUserId) -- only a Studio test den is ever here
 	if defender and snapshot then
@@ -452,13 +488,13 @@ local function startRaid(player: Player, targetUserId: number, revengeRaidId: st
 	if not locked then
 		return nil, if why == "Locked" then RaidRules.Reason.Locked else why
 	end
-	local entered, result = pcall(enterPocket, player, raidId, snapshot, revengeRaidId)
+	local entered, result, refusal = pcall(enterPocket, player, raidId, snapshot, revengeRaidId)
 	if not entered or result == nil then
 		pcall(MatchmakingService.releaseLock, targetUserId, raidId)
 		if not entered then
 			warn(`[AsyncRaid] could not start raid {raidId}: {result}`)
 		end
-		return nil, if entered then RaidRules.Reason.NoPocket else "Error"
+		return nil, if entered then refusal else "Error"
 	end
 	debugLog(`{player.Name} started raid {raidId} on {targetUserId}{if isRevenge then " (revenge)" else ""}`)
 	return result, nil

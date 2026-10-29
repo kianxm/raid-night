@@ -52,17 +52,19 @@
 	  Studio only: Raid/TestHook.luau seeds a stand-in den for single-client tests (D-010)
 
 	Async raids (P1.3a): Raid/AsyncRaid.luau runs StartRaid, pocket dens (Raid/Pocket.luau), traps,
-	guards, the timer, grabs and GetRaidLog. An escape ends in RaidService.onAsyncEscape below.
+	guards, the timer, grabs and GetRaidLog. An escape ends in RaidService.onAsyncEscape below,
+	which hands it to EscrowService.transferAsync (P1.3b).
 
 	Server API:
 	  requestGrab(player, plot, padIndex) -> (ok, reason?)  start a server-timed grab hold
 	  cancelGrab(player)                                     stop a hold (prompt released)
 	  isCarrying(player) -> boolean
-	  onAsyncEscape(escape) -> (moved, glow)                 an async raider reached the gate carrying
+	  onAsyncEscape(escape) -> EscapeOutcome                 an async raider reached the gate carrying
 
 	TODO (Phase 1):
-	  [ ] P1.3b: onAsyncEscape -> EscrowService (Async transfer), shield, revenge token, logs on
-	      both sides; RaidRules.recordOutgoing for every ended raid (pair limit) via data
+	  [x] P1.3b: onAsyncEscape -> EscrowService.transferAsync (its debit writes the defender's
+	      shield, revenge token, pair count and log)
+	  [ ] data handoff: the raider's Outgoing log, pair count and revenge-token use need a write path
 	  [ ] P1.4: replay frames (positions at 5 Hz + events) for the defender
 ]]
 
@@ -668,21 +670,53 @@ end
 -- Async escape ------------------------------------------------------------------------------------
 
 --[[
-	An async raider reached the pocket's gate carrying a critter. Everything in `run` is
-	server-tracked (AsyncRaid). Returns (moved, glow): whether the loot reached the raider, and the
-	Glow taken; AsyncRaid releases the raid lock after this returns and pushes RaidEnded.
-	P1.3a stub (D-046): nothing moves, no shield, no revenge token. P1.3b replaces the body with
-	the EscrowService Async transfer (critterUid, glowRequested, isRevenge, kind "Async").
-	The pool update already uses the snapshot's power band; P1.3b passes the new shield.
+	An async raider reached the pocket's gate carrying a critter (P1.3b). Everything in `run` is
+	server-tracked (AsyncRaid). The loot moves through EscrowService.transferAsync only, never a
+	profile write here. It yields (seconds, about 2 min at worst); AsyncRaid calls this on its own
+	thread, then releases the raid lock and pushes RaidEnded with the outcome.
+	  Committed  the raider's profile holds the result: its appliedTransfers entry, which may be
+	             Glow only (the critter left its pad, or the den hit its daily loss cap)
+	  InFlight   the defender is online in another server (or a write is unconfirmed): recovery
+	             finishes it without us and pushes the raider's DenChanged. "On its way"
+	  Refused    nothing moved
+	The escrow debit itself writes the defender's shield, revenge token, pair count and log
+	(Escrow.debitDefender -> RaidRules.recordIncoming). The pool gets the new shield here.
 ]]
-function RaidService.onAsyncEscape(run: AsyncRaid.Escape): (boolean, number)
-	MatchmakingService.noteRaided(run.defenderUserId, run.snapshotPower, os.time(), 0)
-	warn(
-		`[RaidService] async raid {run.raidId}: {run.raiderUserId} escaped {run.defenderUserId}'s den with `
-			.. `{run.speciesId} ({run.critterUid}), {run.glowRequested} Glow requested`
-			.. `{if run.isRevenge then " (revenge)" else ""}; escrow handoff is P1.3b, nothing moved`
+function RaidService.onAsyncEscape(run: AsyncRaid.Escape): RaidRules.EscapeOutcome
+	local ok, status, reason = pcall(
+		EscrowService.transferAsync,
+		run.raidId,
+		run.raiderUserId,
+		run.defenderUserId,
+		run.critterUid,
+		run.glowRequested,
+		run.isRevenge
 	)
-	return false, 0
+	if not ok then
+		-- transferAsync catches its own errors, so this is unexpected: the raider's Open_ index
+		-- lets recovery finish anything written. Claim neither way.
+		status, reason = "InFlight", status
+	end
+	local profile = DataService.getProfile(run.raiderUserId)
+	local credit = if profile then profile.appliedTransfers[run.raidId] else nil
+	local now = os.time()
+	local outcome = RaidRules.asyncEscapeOutcome(status, credit, run.speciesId, run.glowRequested, now)
+	if outcome.shieldUntil > 0 then
+		pcall(MatchmakingService.noteRaided, run.defenderUserId, run.snapshotPower, now, outcome.shieldUntil)
+	end
+	local player = Players:GetPlayerByUserId(run.raiderUserId)
+	if status == "Committed" and player then
+		pcall(IncomeService.refresh, player)
+	end
+	local said = if status == "Committed"
+		then `moved {outcome.speciesId or "no critter"} and {outcome.glow} Glow`
+		elseif status == "InFlight" then `in flight ({reason}); it lands on its own`
+		else `refused ({reason}); nothing moved`
+	print(
+		`[RaidService] async raid {run.raidId}: {run.raiderUserId} escaped {run.defenderUserId}'s den`
+			.. `{if run.isRevenge then " (revenge)" else ""}: {said}`
+	)
+	return outcome
 end
 
 -- Prompts -----------------------------------------------------------------------------------------

@@ -58,6 +58,10 @@ export type RaidEnd = {
 	-- Async raids only: "Escaped" (reached the gate carrying; `escaped` is true only once the loot
 	-- has moved), "Timeout", "Tagged", "Retreat" (gate with nothing), "Left", "Error". nil = live.
 	reason: string?,
+	-- Async "Escaped" only: true = escrow is still delivering (the den's owner is online in another
+	-- server); it lands on its own and DenChanged shows it. speciesId and glow are then estimates.
+	-- "Escaped" with escaped false and no pending: nothing moved.
+	pending: boolean?,
 }
 
 -- GetReplay's answer (docs/contracts.md, Replays). data is a Shared/Replay.encode string in
