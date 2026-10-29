@@ -18,6 +18,7 @@ local Config = require(Shared:WaitForChild("Config")) :: any
 local GearRules = require(Shared:WaitForChild("GearRules")) :: any
 local CritterCatalog = require(Shared:WaitForChild("CritterCatalog")) :: any
 local Ui = require(Client:WaitForChild("Raid"):WaitForChild("Ui"))
+local Theme = Ui.theme
 local Strings = require(Client:WaitForChild("Hud"):WaitForChild("Strings"))
 local HudMath = require(Client:WaitForChild("Hud"):WaitForChild("HudMath"))
 local ShopMath = require(Client:WaitForChild("Hud"):WaitForChild("ShopMath"))
