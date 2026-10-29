@@ -1,95 +1,65 @@
 --!strict
 --[[
 	Ui (owner: ui agent): small widget helpers for the raid screens. Same look as HudController
-	(chunky rounded panels, thick outlines, Fredoka numbers, Gotham body); one accent per screen.
+	(chunky rounded panels, thick outlines, Fredoka numbers); a thin layer over Ui/Theme.luau.
 ]]
 
 local TweenService = game:GetService("TweenService")
 
 local SettingsState = require(script.Parent.Parent:WaitForChild("Hud"):WaitForChild("SettingsState"))
 
+local Theme = require(script.Parent.Parent:WaitForChild("Ui"):WaitForChild("Theme"))
+
 local Ui = {}
 
+Ui.theme = Theme
+
+-- Legacy names kept so every screen restyles from the theme without edits.
 Ui.COLOR = {
-	panel = Color3.fromHex("1B1F3B"),
-	row = Color3.fromHex("2E3552"),
-	outline = Color3.fromHex("0B1026"),
-	text = Color3.fromHex("FFFFFF"),
-	dim = Color3.fromHex("B8BEDD"),
-	glow = Color3.fromHex("78E6FF"),
-	go = Color3.fromHex("5BE38A"),
-	revenge = Color3.fromHex("FF6B6B"),
-	gold = Color3.fromHex("FFC857"),
-	disabled = Color3.fromHex("4A5070"),
+	panel = Theme.color.panel,
+	row = Theme.color.panelRaised,
+	outline = Theme.color.night900,
+	text = Theme.color.ink,
+	dim = Theme.color.inkDim,
+	glow = Theme.color.glow,
+	go = Theme.color.go,
+	revenge = Theme.color.revenge,
+	gold = Theme.color.gold,
+	lock = Theme.color.lock,
+	safe = Theme.color.safe,
+	disabled = Theme.color.disabled,
 }
-Ui.DISPLAY = Enum.Font.FredokaOne
-Ui.BODY = Enum.Font.GothamBold
+Ui.DISPLAY = Theme.display
+Ui.BODY = Theme.body
 
 function Ui.round(parent: Instance, radius: number)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius)
-	c.Parent = parent
+	Theme.corner(parent, radius)
 end
 
 function Ui.outline(parent: Instance, thickness: number)
-	local s = Instance.new("UIStroke")
-	s.Color = Ui.COLOR.outline
-	s.Thickness = thickness
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = parent
+	Theme.outline(parent, thickness)
 end
 
 function Ui.label(parent: Instance, font: Enum.Font, maxSize: number, color: Color3?): TextLabel
-	local l = Instance.new("TextLabel")
-	l.BackgroundTransparency = 1
+	local l = Theme.text(parent, maxSize, color, true)
 	l.Font = font
-	l.TextColor3 = color or Ui.COLOR.text
-	l.TextScaled = true
-	l.Size = UDim2.fromScale(1, 1)
-	local limit = Instance.new("UITextSizeConstraint")
-	limit.MaxTextSize = maxSize
-	limit.MinTextSize = 10
-	limit.Parent = l
-	l.Parent = parent
 	return l
 end
 
 function Ui.panel(parent: Instance, name: string, size: UDim2, position: UDim2): Frame
-	local f = Instance.new("Frame")
-	f.Name = name
-	f.Size = size
-	f.Position = position
-	f.BackgroundColor3 = Ui.COLOR.panel
-	f.BorderSizePixel = 0
-	Ui.round(f, 14)
-	Ui.outline(f, 3)
-	f.Parent = parent
-	return f
+	return Theme.panel(parent, name, size, position)
 end
 
 -- Chunky button with one big title. Callers keep height >= 44 px for thumbs.
 function Ui.button(parent: Instance, name: string, text: string, color: Color3, size: UDim2): TextButton
-	local b = Instance.new("TextButton")
-	b.Name = name
-	b.Size = size
-	b.BackgroundColor3 = color
-	b.Text = ""
-	b.AutoButtonColor = true
-	Ui.round(b, 12)
-	Ui.outline(b, 3)
-	b.Parent = parent
-	local t = Ui.label(b, Ui.DISPLAY, 22, Ui.COLOR.outline)
-	t.Name = "Title"
-	t.Text = text
-	t.Size = UDim2.new(1, -10, 1, -8)
-	t.Position = UDim2.fromOffset(5, 4)
-	return b
+	return Theme.button(parent, name, text, color, size)
 end
 
 function Ui.setButton(b: TextButton, text: string, color: Color3, enabled: boolean)
 	local title = b:FindFirstChild("Title") :: TextLabel
 	title.Text = text
-	b.BackgroundColor3 = if enabled then color else Ui.COLOR.disabled
+	title.TextColor3 = if enabled then Theme.color.onAccent else Theme.color.onDisabled
+	b.BackgroundColor3 = if enabled then color else Theme.color.disabled
 	b.Active = enabled
 end
 
@@ -101,6 +71,14 @@ function Ui.modal(gui: Instance, name: string, title: string, accent: Color3): (
 	f.AnchorPoint = Vector2.new(0.5, 0.5)
 	f.Visible = false
 	f.ZIndex = 8
+	local corner = f:FindFirstChildOfClass("UICorner")
+	if corner then
+		corner.CornerRadius = UDim.new(0, Theme.radius.xl2)
+	end
+	local rim = f:FindFirstChildOfClass("UIStroke")
+	if rim then
+		rim.Thickness = Theme.stroke.heavy
+	end
 	local cap = Instance.new("UISizeConstraint")
 	cap.MaxSize = Vector2.new(480, 560)
 	cap.Parent = f
@@ -145,11 +123,11 @@ function Ui.card(parent: Instance, name: string, order: number, height: number):
 	c.Name = name
 	c.LayoutOrder = order
 	c.Size = UDim2.new(1, -8, 0, height)
-	c.BackgroundColor3 = Ui.COLOR.row
+	c.BackgroundColor3 = Theme.color.panelRaised
 	c.BorderSizePixel = 0
 	c.ZIndex = 9
-	Ui.round(c, 12)
-	Ui.outline(c, 2)
+	Theme.corner(c, Theme.radius.lg)
+	Theme.outline(c, Theme.stroke.thin)
 	c.Parent = parent
 	return c
 end

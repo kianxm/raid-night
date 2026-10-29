@@ -14,6 +14,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ContextActionService = game:GetService("ContextActionService")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Net = require(Shared:WaitForChild("Net")) :: any
@@ -25,25 +27,30 @@ local Hud = script.Parent.Parent:WaitForChild("Hud")
 local Ui = require(script.Parent.Parent:WaitForChild("Raid"):WaitForChild("Ui"))
 local Strings = require(Hud:WaitForChild("Strings"))
 local HudMath = require(Hud:WaitForChild("HudMath"))
+local HudLayout = require(Hud:WaitForChild("HudLayout"))
+local Theme = require(script.Parent.Parent:WaitForChild("Ui"):WaitForChild("Theme"))
 local OnboardingController = require(script.Parent:WaitForChild("OnboardingController")) :: any
 local DenController = require(script.Parent:WaitForChild("DenController")) :: any
 
 local LOCKDOWN_REMOTE = Net.Requests.Lockdown
 local TOAST_SECONDS = 4
 
+local C = Theme.color
 local COLOR = {
-	panel = Color3.fromHex("1B1F3B"),
-	outline = Color3.fromHex("0B1026"),
-	text = Color3.fromHex("FFFFFF"),
-	glow = Color3.fromHex("78E6FF"),
-	barBack = Color3.fromHex("2E3552"),
-	collect = Color3.fromHex("5BE38A"),
-	buy = Color3.fromHex("FFC857"),
-	lock = Color3.fromHex("9B7BFF"),
-	disabled = Color3.fromHex("4A5070"),
+	panel = C.panel,
+	outline = C.night900,
+	text = C.ink,
+	glow = C.glow,
+	collect = C.go,
+	collectFull = C.gold,
+	buy = C.gold,
+	lock = C.lock,
+	disabled = C.disabled,
 }
-local DISPLAY_FONT = Enum.Font.FredokaOne
-local BODY_FONT = Enum.Font.GothamBold
+local DISPLAY_FONT = Theme.display
+local BODY_FONT = Theme.body
+local MODE = HudLayout.mode(UserInputService.TouchEnabled, UserInputService.KeyboardEnabled)
+local DESKTOP = MODE == "desktop"
 
 local HudController = {}
 
@@ -54,26 +61,15 @@ local round, outline, label, panel = Ui.round, Ui.outline, Ui.label, Ui.panel
 
 -- One chunky button with a big title and a small price/sub line. Min height 56 px for thumbs.
 local function makeButton(parent: Instance, name: string, order: number, color: Color3)
-	local b = Instance.new("TextButton")
-	b.Name = name
+	local b = Theme.button(parent, name, "", color, UDim2.new(1, 0, 0, 58))
 	b.LayoutOrder = order
-	b.Size = UDim2.new(1, 0, 0, 58)
-	b.BackgroundColor3 = color
-	b.AutoButtonColor = true
-	b.Text = ""
-	round(b, 14)
-	outline(b, 3)
-	b.Parent = parent
-	local title = label(b, DISPLAY_FONT, 22)
-	title.Name = "Title"
+	local title = b:FindFirstChild("Title") :: TextLabel
 	title.Size = UDim2.new(1, -12, 0.55, 0)
 	title.Position = UDim2.fromOffset(6, 3)
-	title.TextColor3 = COLOR.outline
-	local sub = label(b, BODY_FONT, 16)
+	local sub = Theme.bodyText(b, Theme.type.body, COLOR.outline)
 	sub.Name = "Sub"
 	sub.Size = UDim2.new(1, -12, 0.35, 0)
 	sub.Position = UDim2.new(0, 6, 0.6, 0)
-	sub.TextColor3 = COLOR.outline
 	return b, title, sub
 end
 
@@ -108,9 +104,86 @@ local function oddsPanelText(tiers: { { tier: string, chance: number } }, labels
 	return table.concat(lines, "\n")
 end
 
+local function setSub(b: TextButton, text: string)
+	local sub = b:FindFirstChild("Sub")
+	if sub and sub:IsA("TextLabel") then
+		sub.Text = text
+	end
+end
+
 local function setEnabled(b: TextButton, enabled: boolean, color: Color3)
 	b.BackgroundColor3 = if enabled then color else COLOR.disabled
 	b.Active = enabled
+	local ink = if enabled then C.onAccent else C.onDisabled
+	for _, name in { "Title", "Sub" } do
+		local l = b:FindFirstChild(name)
+		if l and l:IsA("TextLabel") then
+			l.TextColor3 = ink
+		end
+	end
+end
+
+-- PC hotbar (DeskMain.dc.html): bottom-center, keys 1-6 then Lockdown apart on Q. Slots are
+-- Theme buttons with a keycap chip; no icon art exists yet, so the label carries the meaning.
+local SLOT_STYLE: { [string]: { text: string, fill: Color3, neutral: boolean } } = {
+	collect = { text = Strings.collect, fill = COLOR.collect, neutral = false },
+	eggs = { text = Strings.hotbarEggs, fill = COLOR.buy, neutral = false },
+	raid = { text = Strings.raid, fill = C.glow, neutral = false },
+	shop = { text = Strings.menuShop, fill = C.panelRaised, neutral = true },
+	critters = { text = Strings.hotbarCritters, fill = C.panelRaised, neutral = true },
+	defenses = { text = Strings.hotbarDefenses, fill = C.panelRaised, neutral = true },
+	lockdown = { text = Strings.lockdown, fill = COLOR.lock, neutral = false },
+}
+
+local function buildHotbar(gui: ScreenGui): { [string]: TextButton }
+	local slots: { [string]: TextButton } = {}
+	local bar = Instance.new("Frame")
+	bar.Name = "Hotbar"
+	bar.BackgroundTransparency = 1
+	bar.AnchorPoint = Vector2.new(0, 1)
+	bar.Size = UDim2.fromScale(1, 0)
+	bar.AutomaticSize = Enum.AutomaticSize.Y
+	bar.Position = UDim2.new(0, 0, 1, -HudLayout.DESKTOP.hotbarBottom)
+	bar.Parent = gui
+	local function fit()
+		local layout = HudLayout.hotbar(gui.AbsoluteSize.X)
+		bar.Size = UDim2.new(1, 0, 0, layout.slotSize)
+		bar.AutomaticSize = Enum.AutomaticSize.None
+		for i, slot in HudLayout.SLOTS do
+			local b = slots[slot.action]
+			b.Size = UDim2.fromOffset(layout.slotSize, layout.slotSize)
+			b.Position = UDim2.fromOffset(layout.xs[i], 0)
+		end
+	end
+	for _, slot in HudLayout.SLOTS do
+		local style = SLOT_STYLE[slot.action]
+		local b = Theme.button(bar, slot.action, style.text, style.fill, UDim2.fromOffset(64, 64))
+		local title = b:FindFirstChild("Title") :: TextLabel
+		title.Size = UDim2.new(1, -8, 0.4, 0)
+		title.Position = UDim2.new(0, 4, 0.5, 0)
+		title.TextColor3 = if style.neutral then C.ink else C.onAccent
+		local key, keyText = Theme.chip(b, "Key", slot.keyLabel, C.night900, C.ink)
+		key.Size = UDim2.fromOffset(24, 22)
+		key.Position = UDim2.fromOffset(4, 4)
+		keyText.Font = DISPLAY_FONT
+		local sub = Theme.bodyText(b, Theme.type.caption, if style.neutral then C.inkDim else C.onAccent)
+		sub.Name = "Sub"
+		sub.Size = UDim2.new(1, -8, 0, 14)
+		sub.Position = UDim2.new(0, 4, 0.3, 0)
+		slots[slot.action] = b
+	end
+	fit()
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
+
+	-- Space / Shift reminder, bottom-right.
+	local hint = Theme.bodyText(gui, Theme.type.caption, C.inkMute)
+	hint.Name = "KeyHint"
+	hint.AnchorPoint = Vector2.new(1, 1)
+	hint.Size = UDim2.fromOffset(200, 18)
+	hint.Position = UDim2.new(1, -24, 1, -28)
+	hint.TextXAlignment = Enum.TextXAlignment.Right
+	hint.Text = `Space {Strings.hintJump}   Shift {Strings.hintSprint}`
+	return slots
 end
 
 local function build(): { [string]: any }
@@ -124,36 +197,46 @@ local function build(): { [string]: any }
 	gui.DisplayOrder = 1
 	gui.Parent = player:WaitForChild("PlayerGui")
 
-	-- Top-left: Glow + storage.
-	local top = panel(gui, "GlowPanel", UDim2.new(0.3, 0, 0, 74), UDim2.fromOffset(10, 8))
+	-- Glow counter + storage. Phone: top-left under the Roblox bar. PC: bottom-left (no
+	-- thumbstick there, and chat keeps the top-left). Orb + number + rate, bar, caption.
+	local PH, DK = HudLayout.PHONE, HudLayout.DESKTOP
+	local top = panel(gui, "GlowPanel", UDim2.fromOffset(0, 0), UDim2.fromOffset(0, 0))
 	local sizeLimit = Instance.new("UISizeConstraint")
-	sizeLimit.MinSize = Vector2.new(170, 74)
-	sizeLimit.MaxSize = Vector2.new(260, 74)
-	sizeLimit.Parent = top
-	local glowText = label(top, DISPLAY_FONT, 30)
-	glowText.Size = UDim2.new(1, -16, 0, 36)
-	glowText.Position = UDim2.fromOffset(8, 4)
+	if DESKTOP then
+		top.AnchorPoint = Vector2.new(0, 1)
+		top.Position = UDim2.new(0, DK.inset, 1, -DK.inset)
+		top.Size = UDim2.fromOffset(DK.glowWidth, DK.glowHeight)
+	else
+		top.Position = UDim2.fromOffset(PH.inset, 8)
+		top.Size = UDim2.new(0.3, 0, 0, PH.glowHeight)
+		sizeLimit.MinSize = Vector2.new(PH.glowMinWidth, PH.glowHeight)
+		sizeLimit.MaxSize = Vector2.new(PH.glowMaxWidth, PH.glowHeight)
+		sizeLimit.Parent = top
+	end
+	Theme.padding(top, Theme.space.s2)
+	local orb = Theme.orb(top, Theme.size.orb)
+	orb.Position = UDim2.fromOffset(0, 2)
+	local glowText = label(top, DISPLAY_FONT, if DESKTOP then 34 else Theme.type.number)
+	glowText.Size = UDim2.new(1, -120, 0, 34)
+	glowText.Position = UDim2.fromOffset(Theme.size.orb + 6, 0)
 	glowText.TextColor3 = COLOR.glow
 	glowText.TextXAlignment = Enum.TextXAlignment.Left
-
-	local barBack = Instance.new("Frame")
+	local rateText = label(top, DISPLAY_FONT, Theme.type.numberSm, C.inkDim)
+	rateText.Name = "Rate"
+	rateText.AnchorPoint = Vector2.new(1, 0)
+	rateText.Size = UDim2.fromOffset(84, 22)
+	rateText.Position = UDim2.new(1, 0, 0, 8)
+	rateText.TextXAlignment = Enum.TextXAlignment.Right
+	local storage = Theme.bar(top, "StorageBar", 16)
+	storage.track.Position = UDim2.fromOffset(0, 40)
+	local barBack = storage.track
+	local fill = storage.fill
+	local barText = label(top, BODY_FONT, Theme.type.caption, C.inkDim)
+	barText.Name = "Caption"
+	barText.Size = UDim2.new(1, 0, 0, 16)
+	barText.Position = UDim2.fromOffset(0, 60)
+	barText.TextXAlignment = Enum.TextXAlignment.Left
 	barBack.Name = "StorageBar"
-	barBack.Size = UDim2.new(1, -16, 0, 22)
-	barBack.Position = UDim2.fromOffset(8, 44)
-	barBack.BackgroundColor3 = COLOR.barBack
-	barBack.BorderSizePixel = 0
-	round(barBack, 8)
-	outline(barBack, 2)
-	barBack.Parent = top
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(0, 1)
-	fill.BackgroundColor3 = COLOR.collect
-	fill.BorderSizePixel = 0
-	round(fill, 8)
-	fill.Parent = barBack
-	local barText = label(barBack, BODY_FONT, 16)
-	barText.ZIndex = 2
 
 	-- Top-center: carried critter (hidden unless carrying).
 	local carry = panel(gui, "Carrying", UDim2.fromOffset(220, 40), UDim2.new(0.5, -110, 0, 8))
@@ -195,7 +278,8 @@ local function build(): { [string]: any }
 	-- Re-fit on size changes (#54): full layout on tall screens, compact on phone landscape.
 	local function applyLayout()
 		local layout = HudMath.columnLayout(gui.AbsoluteSize.Y)
-		column.Position = UDim2.new(1, -12, 1, -layout.reserve)
+		-- PC: the hotbar owns Collect/Eggs/Lockdown; only the odds chip stays, above the key hints.
+		column.Position = UDim2.new(1, -12, 1, -(if DESKTOP then 64 else layout.reserve))
 		list.Padding = UDim.new(0, layout.gap)
 		for _, child in column:GetChildren() do
 			if child:IsA("TextButton") then
@@ -217,6 +301,7 @@ local function build(): { [string]: any }
 					child.TextTruncate = Enum.TextTruncate.None
 				else
 					child.Size = UDim2.new(1, 0, 0, layout.button)
+					child.Visible = not DESKTOP
 				end
 			end
 		end
@@ -235,15 +320,15 @@ local function build(): { [string]: any }
 	oddsChip.Size = UDim2.fromScale(1, 0)
 	oddsChip.AutomaticSize = Enum.AutomaticSize.Y
 	oddsChip.BackgroundColor3 = COLOR.panel
-	oddsChip.AutoButtonColor = true
+	oddsChip.AutoButtonColor = false
 	oddsChip.Font = BODY_FONT
 	oddsChip.TextSize = 14
 	oddsChip.TextColor3 = COLOR.text
 	oddsChip.RichText = true
 	oddsChip.TextWrapped = true
 	oddsChip.Text = ""
-	round(oddsChip, 12)
-	outline(oddsChip, 2)
+	round(oddsChip, Theme.radius.md)
+	outline(oddsChip, Theme.stroke.thin)
 	local chipPad = Instance.new("UIPadding")
 	chipPad.PaddingTop = UDim.new(0, 6)
 	chipPad.PaddingBottom = UDim.new(0, 6)
@@ -297,15 +382,18 @@ local function build(): { [string]: any }
 	oddsClose.BackgroundColor3 = COLOR.buy
 	oddsClose.Font = DISPLAY_FONT
 	oddsClose.TextSize = 22
-	oddsClose.TextColor3 = COLOR.outline
+	oddsClose.TextColor3 = C.onAccent
 	oddsClose.Text = Strings.oddsClose
 	oddsClose.ZIndex = 9
-	round(oddsClose, 14)
-	outline(oddsClose, 3)
+	round(oddsClose, Theme.radius.lg)
+	outline(oddsClose, Theme.stroke.normal)
 	oddsClose.Parent = oddsPanel
 
 	return {
+		hotbar = if DESKTOP then buildHotbar(gui) else {},
 		glowText = glowText,
+		rateText = rateText,
+		storage = storage,
 		fill = fill,
 		barText = barText,
 		carry = carry,
@@ -441,6 +529,52 @@ function HudController.start()
 		end)
 	end)
 
+	-- PC hotbar: the same requests as the phone rail, plus the menu screens. Keys go through
+	-- ContextActionService and Pass, so nothing that already listens for 1-6 or Q is swallowed.
+	-- Only built and bound with a keyboard and no touch input (HudLayout.mode).
+	local function openScreen(id: string)
+		local menu = script.Parent:WaitForChild("MenuController") :: ModuleScript
+		(require(menu) :: any).show(id)
+	end
+	local ACTIONS: { [string]: () -> () } = {
+		collect = function()
+			request(Net.Requests.Collect, busy)
+		end,
+		eggs = function()
+			request(Net.Requests.BuyEgg, busy)
+		end,
+		raid = function()
+			(require(script.Parent:WaitForChild("RaidPortalController")) :: any).open()
+		end,
+		shop = function()
+			openScreen("Shop")
+		end,
+		critters = function()
+			openScreen("Bag")
+		end,
+		defenses = function()
+			openScreen("Den")
+		end,
+		lockdown = function()
+			request(LOCKDOWN_REMOTE, busy, function(result)
+				showToast(if result == true then Strings.lockdownStarted else Strings.lockdownRefused)
+			end)
+		end,
+	}
+	if DESKTOP then
+		for _, slot in HudLayout.SLOTS do
+			local action = ACTIONS[slot.action]
+			local button = ui.hotbar[slot.action]
+			button.Activated:Connect(action)
+			ContextActionService:BindAction("RaidNight_" .. slot.action, function(_, state)
+				if state == Enum.UserInputState.Begin then
+					action()
+				end
+				return Enum.ContextActionResult.Pass
+			end, false, Enum.KeyCode[slot.keyName])
+		end
+	end
+
 	whenRemote(Net.Pushes.BeingRaidedLive, function(remote)
 		if not remote:IsA("RemoteEvent") then
 			return
@@ -486,20 +620,38 @@ function HudController.start()
 			local price = Economy.paidEggPrice(state.denLevel, OnboardingController.getStatus())
 			local free = HudMath.isRescue(#state.critters, state.glow, stored, price)
 
-			ui.glowText.Text = HudMath.abbreviate(state.glow) .. " " .. Strings.glow
+			ui.glowText.Text = HudMath.abbreviate(state.glow)
 			local share = if state.storageCap > 0 then math.clamp(stored / state.storageCap, 0, 1) else 0
-			ui.fill.Size = UDim2.fromScale(share, 1)
-			ui.barText.Text = if share >= 1
-				then Strings.storageFull
-				else HudMath.abbreviate(stored) .. " / " .. HudMath.abbreviate(state.storageCap)
+			local full = HudLayout.storageTone(share) == "full"
+			ui.storage.set(share, full)
+			ui.rateText.Text = if full
+				then Strings.ratePaused
+				else Strings.format(Strings.ratePerSecond, { rate = HudMath.abbreviate(state.ratePerSecond) })
+			ui.rateText.TextColor3 = if full then C.inkMute else C.inkDim
+			ui.barText.Text = if full
+				then Strings.storageFullCaption
+				else Strings.storage .. " " .. HudMath.abbreviate(stored) .. " / " .. HudMath.abbreviate(
+					state.storageCap
+				)
+			ui.barText.TextColor3 = if full then C.gold else C.inkDim
 
+			-- Gold Collect when storage is full (StorageFull.dc.html): the reason to come back.
+			local collectColor = if full then COLOR.collectFull else COLOR.collect
 			ui.collectTitle.Text = Strings.collect
 			ui.collectSub.Text = "+" .. HudMath.abbreviate(stored)
-			setEnabled(ui.collect, stored >= 1, COLOR.collect)
+			setEnabled(ui.collect, stored >= 1, collectColor)
 
 			ui.buyTitle.Text = Strings.buyEgg
 			ui.buySub.Text = if free then Strings.free else HudMath.abbreviate(price) .. " " .. Strings.glow
 			setEnabled(ui.buy, free or state.glow >= price, COLOR.buy)
+
+			local hb = ui.hotbar
+			if hb.collect then
+				setEnabled(hb.collect, stored >= 1, collectColor)
+				setSub(hb.collect, "+" .. HudMath.abbreviate(stored))
+				setEnabled(hb.eggs, free or state.glow >= price, COLOR.buy)
+				setSub(hb.eggs, if free then Strings.free else HudMath.abbreviate(price))
+			end
 
 			-- Egg odds for THIS egg: compact tier lines always visible, species in the panel.
 			local tiers, labels = nextOdds(free)
@@ -534,7 +686,7 @@ function HudController.start()
 			ui.carryText.Text = Strings.format(Strings.carrying, { name = species.name, tier = species.tier })
 		end
 
-		-- Lockdown button.
+		-- Lockdown button (rail on phone, Q slot on PC).
 		local available = remotes:FindFirstChild(LOCKDOWN_REMOTE) ~= nil
 		local status, left = lockdownStatus()
 		ui.lockTitle.Text = Strings.lockdown
@@ -550,6 +702,11 @@ function HudController.start()
 		else
 			ui.lockSub.Text = ""
 			setEnabled(ui.lock, true, COLOR.lock)
+		end
+		local hbLock = ui.hotbar.lockdown
+		if hbLock then
+			setEnabled(hbLock, ui.lock.Active, COLOR.lock)
+			setSub(hbLock, ui.lockSub.Text)
 		end
 	end
 
