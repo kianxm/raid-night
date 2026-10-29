@@ -20,6 +20,12 @@ Chunky, toy-like night critters glowing softly in a dark navy moonlit town.
 ## Critters
 
 - **Proportions:** head about 40% of height, big eyes, short stubby limbs, rounded body.
+- **Body plan follows the animal** (Kian, 2026-10-28). A crab scuttles, a whale floats, a bat
+  hangs; critters are not all upright bipeds. The proportions above apply within each body
+  plan. Each critter belongs to one shared plan so rigs and animations are reused: `upright`,
+  `quadruped`, `crawler`, `floater`, `flyer` (a rare one-off, like a serpent, is allowed).
+  Prompts must name the body plan and its pose, because the style references show an upright
+  mouse and will otherwise pull every critter upright.
 - **Silhouette:** recognizable as a black shape at phone size. Test by filling it solid black.
 - **One idea per critter:** the `look` line in Critters.luau. Do not add extra props.
 - **Palette:** from Critters.luau; the first color is the glow.
