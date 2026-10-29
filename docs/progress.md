@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 0 → 1 (Phase 0 gate approved; Phase 1 not started, waiting for Kian) · Last updated: 2026-10-28
+Current phase: 0 → 1 (Phase 0 gate approved, follow-ups done, main promoted; Phase 1 not started, waiting for Kian) · Last updated: 2026-10-28
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -30,8 +30,8 @@ Current phase: 0 → 1 (Phase 0 gate approved; Phase 1 not started, waiting for 
 | C2 | data | — | Done | #59 | 1 | Reviewer APPROVED. Config.Boosts + contracts.md Robux-linked multipliers (D-030) |
 | P0.12 | economy | C2 | Done | #62 | 2 | Reviewer APPROVED; S1/S2/S5 landed: glowBoostFactor({ vip, lanternNight, paidRandomRestricted?, purchasesEnabled }) fails closed, factor clamped to [1, maxGlowBoostFactor()], NaN `now` ignored. 206 tests |
 | P0.5g | data | — | Done | #64, #65 | 1 | Reviewer APPROVED both. Value-based live protection, postLossSafetySeconds, live pair limit, EscrowRecord.kind, simulation reaches protection 53-65x per seed. 225 tests on integration. Follow-ups: D-033 (data), base-measurement question (Kian) |
-| C4 | data | P0.5g | In review | #73, #74 | 1 | D-033 (empty live commits grant nothing, pinned in the simulation), liveProtected NaN test, D-034 grab-time base (`EscrowRecord.liveBaseRate`, transferLive param), contracts.md mirror of #62's money-model rules (may split into C4-b) |
-| P0.5h | raid | P0.5g, C4 | In review | #71 | 1 | CI green. Merge after C4; reviewer pass with C4 (D-034 wiring). Base measured at grab-hold accept (owner signal comes at carry start). Server also hides prompts on closed dens. Optional: pure RaidRules helper for the duplicated window check in `denClosed` | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
+| C4 | data | P0.5g | Done | #73, #74 | 1 | Reviewer APPROVED. D-033, D-034 (`EscrowRecord.liveBaseRate`, transferLive 7th arg), NaN test, contracts.md mirror of #62. P2.8 gate: the factor-1 accrue in EscrowService/Matchmaking must be fixed before `purchases` turns on. Studio-verified (D-033 empty commit, D-034 shrink mid-carry) |
+| P0.5h | raid | P0.5g, C4 | Done | #71 | 1 | Reviewer APPROVED. Base measured at grab-hold accept; source guard pins it; loss time keeps fractional seconds; server hides prompts on closed dens. Studio-verified (single client). 242 tests on integration (f50ab1c) |
 | P0.5i | ui | — | Done | #70 | 1 | Den marker "Protected today" / "Safe for m:ss", own-den chip, steal prompt hidden while protected. Refusal copy built but no channel to show it (D-035). Cosmetic edge: a prompt the server disabled while protection hid it comes back on when protection ends (server still refuses) |
 
 ## Resume here (for a fresh session)
@@ -44,6 +44,9 @@ Read `docs/orchestrator-handoff.md` first; it is the current state. Follow the p
 P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 
 ## Setup notes
+- 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
+  profiles); check profiles through a temporary server Script instead. `StudioMemoryProfiles`
+  is left true in the open edit place (unsaved, unpublished).
 - 2026-10-27: G0 cleared (Kian). Toolchain installed: rojo 7.7.1, StyLua 2.6.0, selene 0.32.0,
   lune 0.11.1 (`rokit.toml`), luau-analyze from the latest Luau release in `~/.local/bin`.
   Rojo Studio plugin installed.
@@ -71,6 +74,9 @@ Not urgent (before Go public; live steals only, async unaffected):
   it, then puts everything back: protected from live steals for the rest of the UTC day for one
   Common. Options: (a) base = the den's peak rate earlier that day/session, (b) protection lifts
   when the den earns more again, (c) losses to friends don't count. Loss-rule change, so yours.
+  Reviewer adds a no-alt variant: after a dropped carry (BeingRaidedLive already fired) the owner
+  moves earners off and the next grab measures the shrunk den. Reviewer recommends (b): compare
+  protection against max(base, current denRate), which closes every variant.
 
 Not urgent: all three are needed before P2.8 ships products, nothing earlier.
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
@@ -108,6 +114,12 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
   floor below ~330 px usable height.
 - Phone emulator: HUD layout and the top-bar fix (P0.6, #17); "Free" egg label on a wiped
   profile.
+- Live loss rules (#71/#73): a second raider grabbing during a carry gets PostLossSafety; a second
+  client sees LiveProtected / LiveGrabReadyAt replicate with a matching countdown; a real owner
+  leaving mid-window leaves the den clean for the next owner; a real owner moving earners via
+  PlaceCritter mid-carry keeps the grab-time base; the owner sees nothing during the 1 s hold;
+  a UTC day roll clears LiveProtected within 0.5 s; no raid-log entry for a real empty steal.
+- Phone emulator: den status chip and markers (P0.5i, #70).
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
@@ -138,6 +150,7 @@ Full log with reasons: `docs/decisions-log.md`.
 
 ## Gate history
 
+- Promotion: integration → main after the post-gate follow-ups (C4, P0.5h, P0.5i), 2026-10-28.
 - Phase 0 exit checks: passed 2026-10-28 (176 tests, CI green on 860c3f4, single-client Studio
   session with no errors; the 2-client session is deferred to Kian's end-of-phase test).
 - Phase 0 gate: APPROVED 2026-10-28 (Kian, in chat), before the friends playtest; the deferred
