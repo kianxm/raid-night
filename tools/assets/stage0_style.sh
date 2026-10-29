@@ -3,6 +3,7 @@
 #
 #   tools/assets/stage0_style.sh            # dry run: prints every prompt and command
 #   tools/assets/stage0_style.sh cost       # asks Higgsfield for the exact cost of each job (free)
+#   tools/assets/stage0_style.sh prompts    # writes each prompt to a file, for MCP generation
 #   DRY_RUN=0 tools/assets/stage0_style.sh  # spends credits: one image per job, no retries
 #
 # Every prompt starts from the STYLE block and ends with the AVOID block, both taken from the
@@ -65,6 +66,12 @@ for entry in "${JOBS[@]}"; do
   prompt="$(build_prompt "$id" "$variant")"
   base="$OUT/style-$n-$id-$variant"
   echo "== style-$n $id ($variant)"
+  if [[ "$mode" == "prompts" ]]; then
+    # Trial accounts can only generate through the Higgsfield MCP: write the prompts for it.
+    printf '%s\n' "$prompt" >"$base.prompt.txt"
+    echo "   wrote $base.prompt.txt"
+    continue
+  fi
   if [[ "$mode" == "cost" ]]; then
     higgsfield generate cost "$IMAGE_MODEL" --prompt "$prompt" --quality "$QUALITY"
     continue
