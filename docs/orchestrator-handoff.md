@@ -9,8 +9,8 @@ promoted to main. STOP state: do not start Phase 1 until Kian says so. Don't ask
 multi-player testing (deferred list in progress.md).
 
 ## In flight
-- C5 (data), branch `agent/data/C5`: D-036 (Kian picked (b)). Then reviewer, integration
-  merge + single-client check, ledger, promote integration → main again, stop.
+Nothing. C5 (#79) and P0.5j (#80) merged; integration promoted to main again after this ledger
+PR. No open feature PRs.
 
 ## Next (only when Kian says "Run Phase 1")
 - Phase 1 tasks P1.1-P1.10 in docs/playbook.md; P1.1 (data) carries D-008 and D-012 TODOs
@@ -24,4 +24,4 @@ multi-player testing (deferred list in progress.md).
 - Ledger edits go through a worktree + PR; ledger PRs merge on green CI.
 - Never switch branches in Kian's main checkout (Rojo); fast-forward only.
 - D-035: grab refusal copy exists but no channel shows it; testers decide.
-- Integration at f50ab1c (242 tests) before this ledger PR.
+- Integration at 973d261 (256 tests). D-036/D-037 close self-protection.
