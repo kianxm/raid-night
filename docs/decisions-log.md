@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-052 · 2026-10-29 · Live revenge token spend waits for the playtest
+Context: raid on #105. Live revenge escapes as a revenge transfer, but transferLive can't name the
+token to spend, so the token stays after a live revenge commits. Decision: hardening backlog, not
+a new escrow contract tonight. Repeat revenges against the same raider stay limited by the live
+pair limit (2/day) and token expiry; nothing is duplicated or lost. Why: D-039 pre-playtest
+scope; the playtest shows whether repeat revenge matters. Reversible: yes.
+
 ### D-051 · 2026-10-29 · Raid UI refusal and revenge-join details
 Context: ui on #102. Decision: the client doesn't check Config.Flags itself; any refused
 StartRaid shows "Can't raid that den now" (no distinct "raids are off" copy until the server
