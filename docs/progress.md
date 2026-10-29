@@ -14,7 +14,7 @@ Current phase: 0 · Last updated: 2026-10-28
 | P0.4 | economy | P0.3 | Todo | | 0 | |
 | P0.5 | raid | P0.2, P0.4, P0.3b | Todo | | 0 | P0.3b added: live steals are cross-profile moves (golden rule 4) |
 | P0.6 | ui | P0.4 | Todo | | 0 | |
-| P0.7 | assets | — | In review | agent/assets/P0.7 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Open: upright-vs-animal body plans |
+| P0.7 | assets | — | In review | agent/assets/P0.7 | 2 | 10 images via Higgsfield MCP (seedream_v4_5, 10 credits, 100 left). Style locked by Kian: ref-01 (finish) + ref-02 (night lighting) in `assets/clean/_style/`. Body plan follows the animal (style bible) |
 | P0.8 | integration | P0.5, P0.6 | Todo | | 0 | |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
@@ -45,8 +45,6 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 - Multi-client check (Studio MCP can't start Test > Clients and Servers): run a 3-player Local
   Server once. Each player in a different den with their name on the sign; Player2 leaving doesn't
   affect Player1; a new join gets the freed den with empty pads. Also folded into P0.8.
-- P0.7 follow-up (before Stage 1 critter prompts): does every critter stand upright on stubby legs
-  (as all three Stage 0 critters did), or does each follow its animal's body plan?
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
