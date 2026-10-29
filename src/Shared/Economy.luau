@@ -93,49 +93,68 @@ function Economy.padCount(denLevel: number): number
 	return math.min(30, 6 + math.floor((denLevel - 1) / 2))
 end
 
-export type GlowBoosts = {
+-- Named fields, not positional booleans, so two flags with opposite meanings can't be swapped.
+export type GlowBoostInputs = {
 	vip: boolean, -- owns the VIP pass (server checks MarketplaceService)
 	lanternNight: boolean, -- a Lantern Night is active in this player's server (server timer)
+	paidRandomRestricted: boolean?, -- PolicyService ArePaidRandomItemsRestricted; nil = unknown
+	purchasesEnabled: boolean, -- Config.Flags.purchases (the kill switch)
 }
 
 --[[
 	The Glow factor for a player's Robux-linked boosts (decision D-030). Bonuses from
 	Config.Boosts stack additively: 1 + VIP bonus + Lantern Night bonus (2.0x, not 1.5 x 1.5).
 	Returns 1 (no boost) when:
-	  - `paidRandomRestricted` (PolicyService ArePaidRandomItemsRestricted) is true, or nil:
-	    fail closed, an unknown policy counts as restricted;
-	  - `purchasesEnabled` is false (callers pass Config.Flags.purchases, the kill switch).
+	  - `paidRandomRestricted` is true, or nil: fail closed, an unknown policy counts as
+	    restricted;
+	  - `purchasesEnabled` is false (callers pass Config.Flags.purchases);
+	  - any required field is missing or not a boolean.
 	Every input must come from the server (PolicyService, MarketplaceService, the server's
 	Lantern Night timer), never from a client request.
 ]]
-function Economy.glowBoostFactor(boosts: GlowBoosts, paidRandomRestricted: boolean?, purchasesEnabled: boolean): number
-	if paidRandomRestricted ~= false or purchasesEnabled ~= true then
+function Economy.glowBoostFactor(inputs: GlowBoostInputs): number
+	if type(inputs) ~= "table" then
+		return 1
+	end
+	if inputs.paidRandomRestricted ~= false or inputs.purchasesEnabled ~= true then
+		return 1
+	end
+	if type(inputs.vip) ~= "boolean" or type(inputs.lanternNight) ~= "boolean" then
 		return 1
 	end
 	local factor = 1
-	if boosts.vip == true then
+	if inputs.vip then
 		factor += Config.Boosts.vipGlowBonus
 	end
-	if boosts.lanternNight == true then
+	if inputs.lanternNight then
 		factor += Config.Boosts.lanternNightGlowBonus
 	end
 	return factor
 end
 
--- A factor accrue can use: a finite number >= 0, otherwise 1, so a bad value never removes
--- Glow or fills storage instantly.
+-- The largest factor glowBoostFactor can return: every Robux-linked bonus at once.
+function Economy.maxGlowBoostFactor(): number
+	return 1 + Config.Boosts.vipGlowBonus + Config.Boosts.lanternNightGlowBonus
+end
+
+-- A factor accrue can use: a number in [1, maxGlowBoostFactor()], otherwise 1 (nil, 0,
+-- negatives, NaN, inf, 1e300). A bad value can never remove Glow, stop earning, or pay more
+-- than every boost together; it still can't fill storage past the cap.
 local function validFactor(factor: number?): number
-	if type(factor) == "number" and factor >= 0 and factor < math.huge then
+	if type(factor) == "number" and factor >= 1 and factor <= Economy.maxGlowBoostFactor() then
 		return factor
 	end
 	return 1
 end
 
 -- Moves income earned since `storedUpdatedAt` into `stored`, up to the storage cap. `factor`
--- (default 1, from glowBoostFactor) multiplies what is earned but not the cap, which stays at
--- the unboosted denRate x storageCapSeconds. Never removes Glow that is already stored, even if
+-- (default 1, from glowBoostFactor; outside [1, maxGlowBoostFactor()] it counts as 1) multiplies
+-- what is earned but not the cap, which stays at the unboosted denRate x storageCapSeconds. Never removes Glow that is already stored, even if
 -- the cap shrank. Returns Glow added. Follow the header's timing rule when passing a factor.
 function Economy.accrue(profile: PlayerProfile, now: number, factor: number?): number
+	if now ~= now then
+		return 0 -- NaN `now`: change nothing (NaN would poison stored and the timestamp)
+	end
 	local elapsed = now - profile.storedUpdatedAt
 	if elapsed <= 0 then
 		return 0

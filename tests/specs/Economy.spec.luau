@@ -711,48 +711,88 @@ end
 
 -- P0.12: Robux-linked Glow multipliers (D-030) ---------------------------------------------------
 
-local NONE = { vip = false, lanternNight = false }
-local VIP = { vip = true, lanternNight = false }
-local LANTERN = { vip = false, lanternNight = true }
-local BOTH = { vip = true, lanternNight = true }
+type BoostPair = { vip: boolean, lanternNight: boolean }
+type Policy = { paidRandomRestricted: boolean?, purchasesEnabled: boolean }
+
+local NONE: BoostPair = { vip = false, lanternNight = false }
+local VIP: BoostPair = { vip = true, lanternNight = false }
+local LANTERN: BoostPair = { vip = false, lanternNight = true }
+local BOTH: BoostPair = { vip = true, lanternNight = true }
+local OPEN: Policy = { paidRandomRestricted = false, purchasesEnabled = true }
+
+-- glowBoostFactor's inputs: the boosts plus a policy, all as named fields.
+local function factorFor(boosts: BoostPair, policy: Policy): number
+	return Economy.glowBoostFactor({
+		vip = boosts.vip,
+		lanternNight = boosts.lanternNight,
+		paidRandomRestricted = policy.paidRandomRestricted,
+		purchasesEnabled = policy.purchasesEnabled,
+	})
+end
 
 tests["glow boosts never apply to a restricted player"] = function()
 	for _, boosts in { NONE, VIP, LANTERN, BOTH } do
-		expect.eq(Economy.glowBoostFactor(boosts, true, true), 1, "restricted")
+		expect.eq(factorFor(boosts, { paidRandomRestricted = true, purchasesEnabled = true }), 1)
 	end
 end
 
 tests["glow boosts fail closed while the policy is unknown"] = function()
 	for _, boosts in { NONE, VIP, LANTERN, BOTH } do
-		expect.eq(Economy.glowBoostFactor(boosts, nil, true), 1, "unknown policy counts as restricted")
+		local unknown: Policy = { paidRandomRestricted = nil, purchasesEnabled = true }
+		expect.eq(factorFor(boosts, unknown), 1, "unknown policy counts as restricted")
 	end
 end
 
 tests["glow boosts are off while purchases are switched off"] = function()
 	for _, boosts in { NONE, VIP, LANTERN, BOTH } do
-		expect.eq(Economy.glowBoostFactor(boosts, false, false), 1, "kill switch")
-		expect.eq(Economy.glowBoostFactor(boosts, true, false), 1, "kill switch and restricted")
+		expect.eq(factorFor(boosts, { paidRandomRestricted = false, purchasesEnabled = false }), 1)
+		expect.eq(factorFor(boosts, { paidRandomRestricted = true, purchasesEnabled = false }), 1)
 	end
+end
+
+tests["glow boosts are off when any field is missing or not a boolean"] = function()
+	local full: Economy.GlowBoostInputs =
+		{ vip = true, lanternNight = true, paidRandomRestricted = false, purchasesEnabled = true }
+	expect.eq(Economy.glowBoostFactor(full), Economy.maxGlowBoostFactor(), "complete inputs boost")
+	for _, field in { "vip", "lanternNight", "paidRandomRestricted", "purchasesEnabled" } do
+		local missing = table.clone(full) :: any
+		missing[field] = nil
+		expect.eq(Economy.glowBoostFactor(missing), 1, `{field} missing`)
+		local wrong = table.clone(full) :: any
+		wrong[field] = 1
+		expect.eq(Economy.glowBoostFactor(wrong), 1, `{field} not a boolean`)
+	end
+	expect.eq((Economy.glowBoostFactor :: any)(nil), 1, "no inputs at all")
+end
+
+tests["glow boosts can't be enabled by swapping positional flags"] = function()
+	-- The old (boosts, paidRandomRestricted, purchasesEnabled) call shape: the extra arguments are
+	-- ignored and the table has no policy fields, so it fails closed instead of boosting.
+	local glowBoostFactor = Economy.glowBoostFactor :: any
+	expect.eq(glowBoostFactor(BOTH, false, true), 1, "old shape")
+	expect.eq(glowBoostFactor(BOTH, true, false), 1, "old shape, swapped")
 end
 
 tests["glow boosts stack additively for an unrestricted player"] = function()
 	local vipBonus = Config.Boosts.vipGlowBonus
 	local lanternBonus = Config.Boosts.lanternNightGlowBonus
-	expect.eq(Economy.glowBoostFactor(NONE, false, true), 1, "no boosts")
-	expect.eq(Economy.glowBoostFactor(VIP, false, true), 1 + vipBonus, "VIP (1.5x at launch values)")
-	expect.eq(Economy.glowBoostFactor(LANTERN, false, true), 1 + lanternBonus, "Lantern Night (1.5x)")
-	expect.eq(Economy.glowBoostFactor(BOTH, false, true), 1 + vipBonus + lanternBonus, "both (2.0x)")
+	expect.eq(factorFor(NONE, OPEN), 1, "no boosts")
+	expect.eq(factorFor(VIP, OPEN), 1 + vipBonus, "VIP (1.5x at launch values)")
+	expect.eq(factorFor(LANTERN, OPEN), 1 + lanternBonus, "Lantern Night (1.5x)")
+	expect.eq(factorFor(BOTH, OPEN), 1 + vipBonus + lanternBonus, "both (2.0x)")
+	expect.eq(factorFor(BOTH, OPEN), Economy.maxGlowBoostFactor(), "both is the maximum")
 	if vipBonus > 0 and lanternBonus > 0 then
 		local multiplied = (1 + vipBonus) * (1 + lanternBonus)
-		expect.truthy(Economy.glowBoostFactor(BOTH, false, true) < multiplied, "added, not multiplied")
+		expect.truthy(factorFor(BOTH, OPEN) < multiplied, "added, not multiplied")
 	end
 end
 
 tests["glow boosts at the launch values"] = function()
 	-- Pins D-030's launch numbers; update with the Config.Boosts values if they are retuned.
-	expect.eq(Economy.glowBoostFactor(VIP, false, true), 1.5)
-	expect.eq(Economy.glowBoostFactor(LANTERN, false, true), 1.5)
-	expect.eq(Economy.glowBoostFactor(BOTH, false, true), 2.0)
+	-- Tests below use factors 1.5 and 2, which accrue accepts only while the maximum is >= 2.
+	expect.eq(factorFor(VIP, OPEN), 1.5)
+	expect.eq(factorFor(LANTERN, OPEN), 1.5)
+	expect.eq(factorFor(BOTH, OPEN), 2.0)
 end
 
 tests["accrue with a factor multiplies what is earned over the window"] = function()
@@ -807,19 +847,35 @@ tests["a boost composes with mutation, placement and rebirth"] = function()
 	expect.near(Economy.accrue(q, NOW + 1, 2), expected, 1e-12, "base x mutation x placement x rebirth x factor")
 end
 
-tests["a bad factor falls back to 1"] = function()
-	for _, bad in { -1, 0 / 0, math.huge } do
+tests["a factor outside [1, max boost] falls back to 1"] = function()
+	local max = Economy.maxGlowBoostFactor()
+	for _, bad in { 0, 0.5, 0.999, -1, 0 / 0, math.huge, -math.huge, 1e300, max + 0.001 } do
+		local p = fixtures.veteran(1, NOW)
+		fixtures.give(p, fixtures.critter("a", "dusk_mouse")) -- 1/s
+		expect.eq(Economy.accrue(p, NOW + 10, bad), 10, `factor {bad}`)
+	end
+	for _, good in { 1, max } do
 		local p = fixtures.veteran(1, NOW)
 		fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
-		expect.eq(Economy.accrue(p, NOW + 10, bad), 10, `factor {bad}`)
+		expect.eq(Economy.accrue(p, NOW + 10, good), 10 * good, `factor {good} is in range`)
 	end
 	local p = fixtures.veteran(1, NOW)
 	fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
-	expect.eq(Economy.accrue(p, NOW + 10, 0), 0, "0 is a valid factor: earns nothing")
+	expect.eq(Economy.collect(p, NOW + 10, 1e300), 10, "collect clamps too")
+end
+
+tests["accrue ignores a NaN now"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse"))
+	p.stored = 5
+	expect.eq(Economy.accrue(p, 0 / 0), 0, "nothing added")
+	expect.eq(p.stored, 5, "stored unchanged")
+	expect.eq(p.storedUpdatedAt, NOW, "timestamp unchanged")
+	expect.eq(Economy.accrue(p, NOW + 10), 10, "later accrues still work")
 end
 
 tests["timing rule: accrue at the old factor before Lantern Night starts and ends"] = function()
-	local factorOn = Economy.glowBoostFactor(LANTERN, false, true)
+	local factorOn = factorFor(LANTERN, OPEN)
 	local start, finish = NOW + 100, NOW + 100 + Config.Boosts.lanternNightSeconds
 
 	-- Following the rule: accrue at 1 when it starts, at the boost when it ends.
