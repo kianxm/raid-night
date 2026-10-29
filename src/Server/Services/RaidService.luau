@@ -65,7 +65,8 @@
 	  [x] P1.3b: onAsyncEscape -> EscrowService.transferAsync (its debit writes the defender's
 	      shield, revenge token, pair count and log)
 	  [ ] data handoff: the raider's Outgoing log, pair count and revenge-token use need a write path
-	  [ ] P1.4: replay frames (positions at 5 Hz + events) for the defender
+	  [x] P1.4b: replay frames (positions at 5 Hz + events), saved by ReplayStore, served by
+	      GetReplay to the raider and the defender only
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -91,6 +92,7 @@ local MatchmakingService = require(script.Parent.MatchmakingService) :: any
 local RaidFolder = script.Parent.Parent.Raid
 local Lockdown = require(RaidFolder.Lockdown)
 local AsyncRaid = require(RaidFolder.AsyncRaid)
+local ReplayStore = require(RaidFolder.ReplayStore)
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
@@ -897,6 +899,7 @@ function RaidService.start()
 			end
 		end
 	)
+	ReplayStore.start(remotes :: Folder) -- GetReplay; AsyncRaid records and saves (P1.4b)
 	AsyncRaid.start({
 		rootOf = rootOf,
 		isCarryingLive = RaidService.isCarrying,

@@ -212,4 +212,27 @@ tests["the grab-time protection base reaches transferLive as its 7th argument (D
 	expect.eq(count(code, "Economy.denRate"), 1, "and nowhere else")
 end
 
+tests["replays: started with RaidService, recorded under pcall, saved without yielding (P1.4b)"] = function()
+	local service = codeOnly(fs.readFile(FILES[1]))
+	local startAt = string.find(service, "function RaidService.start", 1, true)
+	expect.truthy(startAt, "RaidService.start found")
+	local start = string.sub(service, startAt :: number)
+	expect.eq(count(start, "ReplayStore.start(remotes"), 1, "GetReplay is registered in RaidService.start")
+	local code = codeOnly(fs.readFile("src/Server/Raid/AsyncRaid.luau"))
+	expect.eq(count(code, "ReplayStore."), 1, "one ReplayStore call")
+	expect.eq(count(code, "ReplayStore.save("), 1, "and it is the non-yielding save")
+	for call in string.gmatch(code, "[%w_%.%(]*Replay%.record%a+") do
+		expect.truthy(string.find(call, "^pcall%(Replay%.record"), `{call} runs under pcall`)
+	end
+	expect.truthy(string.find(code, "pcall(Replay.newRecorder,", 1, true), "a recorder that cannot start is skipped")
+	local endFirst = string.find(code, "local function endRaid", 1, true)
+	local endLast = string.find(code, "local function grab", 1, true)
+	local finish = string.sub(code, endFirst :: number, endLast :: number)
+	local saveAt = string.find(finish, "saveReplay(raid)", 1, true)
+	local spawnAt = string.find(finish, "task.spawn(", 1, true)
+	expect.truthy(saveAt and spawnAt and saveAt < spawnAt, "saved at the end, before (and apart from) escrow")
+	local save = string.sub(code, string.find(code, "local function saveReplay", 1, true) :: number, endFirst :: number)
+	expect.truthy(string.find(save, "pcall(function()", 1, true), "encode and save are guarded")
+end
+
 return tests
