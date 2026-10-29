@@ -181,6 +181,15 @@ local Config = {
 		eggMaxTier = "Mythic",
 	},
 
+	-- Appendix C onboarding (decision D-070, P2.6f, issue #146).
+	Onboarding = {
+		-- While a player's next onboarding step is "buyEgg", their paid egg costs this many Glow
+		-- instead of Economy.eggPrice (Economy.paidEggPrice). Buying it completes that step, and
+		-- steps only move forward, so it is one egg per player, ever. Same odds as any paid egg.
+		-- 50 puts the second egg at about 1:05 for a 1 Glow/s starter critter (tools/sim/onboarding).
+		buyEggPrice = 50,
+	},
+
 	Matchmaking = {
 		powerTolerance = 0.15, -- targets within +/-15% of the raider's power
 		minWindow = 100, -- ...but never a window narrower than +/-100 power

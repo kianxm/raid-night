@@ -867,9 +867,49 @@ function Economy.isRescueEgg(profile: PlayerProfile): boolean
 		and math.floor(profile.glow + profile.stored) < Economy.eggPrice(profile.denLevel)
 end
 
+--[[
+	Onboarding's second egg (decision D-070, issue #146). What a paid egg costs this player now:
+	Config.Onboarding.buyEggPrice while their next onboarding step is ONBOARDING_EGG_STEP, else
+	eggPrice(denLevel). Buying that egg completes the step (IncomeService), and steps only move
+	forward, so the discount is one egg per player, ever.
+
+	`onboarding` is Profile.onboardingStatus(profile) on the server (Economy cannot require
+	Profile: a cycle), or the client's last OnboardingStatus for a price label. Normal price for
+	nil (no status), a finished or skipped onboarding (old saves read as finished), any other next
+	step, or a malformed status (NaN step included). The discount never raises the price, and a
+	bad Config value (NaN, negative, fractional) falls back to the normal price.
+]]
+Economy.ONBOARDING_EGG_STEP = "buyEgg"
+
+function Economy.paidEggPrice(denLevel: number, onboarding: Net.OnboardingStatus?): number
+	local normal = Economy.eggPrice(denLevel)
+	local status: any = onboarding
+	if
+		type(status) ~= "table"
+		or status.complete ~= false
+		or status.nextStepId ~= Economy.ONBOARDING_EGG_STEP
+		or type(status.step) ~= "number"
+		or status.step ~= status.step
+	then
+		return normal
+	end
+	local discounted: any = Config.Onboarding.buyEggPrice
+	if
+		type(discounted) ~= "number"
+		or discounted ~= discounted
+		or discounted < 0
+		or discounted ~= math.floor(discounted)
+		or not (discounted < normal)
+	then
+		return normal
+	end
+	return discounted
+end
+
 -- What the next egg costs this player in banked Glow (0 for a rescue egg). Accrue first.
-function Economy.eggCost(profile: PlayerProfile): number
-	return if Economy.isRescueEgg(profile) then 0 else Economy.eggPrice(profile.denLevel)
+-- `onboarding` as for paidEggPrice: pass Profile.onboardingStatus(profile) on the server.
+function Economy.eggCost(profile: PlayerProfile, onboarding: Net.OnboardingStatus?): number
+	return if Economy.isRescueEgg(profile) then 0 else Economy.paidEggPrice(profile.denLevel, onboarding)
 end
 
 -- Tier odds of the rescue egg's fixed table: Common, always.
@@ -888,17 +928,24 @@ end
 
 --[[
 	Buys and hatches one egg. Accrues first, so the rescue check sees every Glow earned so far.
-	A paid egg costs eggPrice from banked Glow and rolls a tier capped at roll.maxTier; a rescue
-	egg is free, rolls Common only and is marked untradeable. Either way a species is rolled within
-	the tier and the critter goes on the first free usable pad, or in Inventory if none.
+	A paid egg costs paidEggPrice(denLevel, onboarding) from banked Glow (the onboarding price
+	while the next step is "buyEgg", D-070; the server passes Profile.onboardingStatus(profile)
+	and then completes that step) and rolls a tier capped at roll.maxTier; a rescue egg is free,
+	rolls Common only and is marked untradeable. Either way a species is rolled within the tier and
+	the critter goes on the first free usable pad, or in Inventory if none.
 	Returns the new critter, or nil and a reason with no Glow spent and no critter added (storage
 	may have been accrued, which changes no balance).
 ]]
-function Economy.buyEgg(profile: PlayerProfile, now: number, roll: EggRoll): (Critter?, string?)
+function Economy.buyEgg(
+	profile: PlayerProfile,
+	now: number,
+	roll: EggRoll,
+	onboarding: Net.OnboardingStatus?
+): (Critter?, string?)
 	Economy.accrue(profile, now)
 	local rescue = Economy.isRescueEgg(profile)
-	local cost = if rescue then 0 else Economy.eggPrice(profile.denLevel)
-	if profile.glow < cost then
+	local cost = if rescue then 0 else Economy.paidEggPrice(profile.denLevel, onboarding)
+	if not (profile.glow >= cost) then -- a NaN cost is refused too
 		return nil, "not enough Glow"
 	end
 	if profile.critters[roll.uid] ~= nil then

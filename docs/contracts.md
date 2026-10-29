@@ -229,6 +229,8 @@ line 7 (notification opt-in) is not onboarding.
   in that server, and returns whether it wrote.
 - **Client acknowledgements.** Only `"Client"` steps, only the next one, through `AckOnboarding`.
   The client can never skip ahead or complete a server step.
+- **Onboarding egg price** (D-070, P2.6f). See Eggs: while `nextStepId` is `buyEgg`, a paid egg
+  costs `Config.Onboarding.buyEggPrice`, and buying it completes `buyEgg`, so once per player.
 
 ## Analytics (P2.9, D-059)
 
@@ -972,6 +974,28 @@ their `Config.EggOdds` ratios, renormalized to sum to 1 (`Economy.rollTierUpTo`)
 25%, Rare 12%, Epic 6%, Legendary 1.8%, Mythic 0.2%), tested in `Config.spec`. Secret critters are
 event-only and never in `EggOdds`. The rescue egg rolls from its own Common-only table (from
 P0.4b) and ignores `eggMaxTier` (decision D-004).
+
+**Onboarding egg price** (decision D-070, P2.6f, issue #146). `Config.Onboarding` is a new,
+additive table:
+
+| Key | Type | Value | Meaning |
+| --- | --- | --- | --- |
+| `Config.Onboarding.buyEggPrice` | whole number of Glow, at least 0 | `50` | What a paid egg costs while the player's next onboarding step is `buyEgg` |
+
+`Economy.paidEggPrice(denLevel, onboarding: Net.OnboardingStatus?)` is the price of a paid egg for
+this player now: `buyEggPrice` when `onboarding.complete == false` and `onboarding.nextStepId ==
+"buyEgg"` (`Economy.ONBOARDING_EGG_STEP`), otherwise `Economy.eggPrice(denLevel)`. Normal price for
+a nil, finished or skipped status (saves from before onboarding read as finished), any other next
+step, a malformed status (NaN `step` included), or a `buyEggPrice` that is not a whole number at
+least 0 and below the normal price. `Economy.eggCost(profile, onboarding?)` and
+`Economy.buyEgg(profile, now, roll, onboarding?)` take the same optional status (omitted = normal
+price). The server passes `Profile.onboardingStatus(profile)` (Economy cannot require Profile) and
+reports `buyEgg` right after a paid egg hatches, before analytics or the den push, so the
+discount is one egg per player, ever. Same odds as any paid egg (`eggMaxTier`); the rescue egg and
+its check (`Economy.isRescueEgg`, against the normal price) are unchanged. Clients showing an egg
+price use `Economy.paidEggPrice(denState.denLevel, <their last OnboardingStatus>)`; the station's
+`ProximityPrompt.ObjectText` already does the same on the server. Numbers:
+`lune run tools/sim/onboarding.luau`.
 
 Glow is earn-only at launch (D-028, amended by D-030): no product ever grants Glow directly.
 Robux-bought Glow multipliers (VIP, and the "Lantern Night" server boost from D-029) only
