@@ -328,19 +328,25 @@ tests["successful raids are counted through data's API, never for the tutorial"]
 	local events = codeOf("src/Server/Raid/RaidEvents.luau")
 	local succeeded = source.functionBody(events, "RaidEvents.succeeded") or ""
 	expect.truthy(string.find(succeeded, "DataService.countSuccessfulRaid", 1, true), "data's API")
-	expect.truthy(string.find(succeeded, "pcall(count, userId)", 1, true), "under pcall")
+	expect.truthy(string.find(succeeded, "pcall(count, userId, raidId)", 1, true), "under pcall, per raidId")
 	expect.truthy(string.find(succeeded, "pcall(service.onSuccessfulRaid, player, lifetime)", 1, true), "then notify")
 	local service = codeOf("src/Server/Services/RaidService.luau")
 	expect.eq(count(service, "RaidEvents.succeeded("), 2, "a live escape and an async escape")
 	expect.truthy(
-		string.find(service, "if escaped then%s+RaidEvents%.succeeded%(raiderUserId%)"),
+		string.find(service, "if escaped then%s+RaidEvents%.succeeded%(raiderUserId, raidId%)"),
 		"live: only when the critter moved"
 	)
 	expect.truthy(
-		string.find(service, "if outcome%.escaped then%s+RaidEvents%.succeeded%(run%.raiderUserId%)"),
+		string.find(service, "if outcome%.escaped then%s+RaidEvents%.succeeded%(run%.raiderUserId, run%.raidId%)"),
 		"async: only when credited"
 	)
 	expect.eq(count(codeOf("src/Server/Raid/AsyncRaid.luau"), "RaidEvents.succeeded"), 0, "not twice")
+	-- The raider's RaidEnded goes out before analytics and data's count, which may yield or throw.
+	local pushed = string.find(service, "pcall(sendEnded, player, raidId, escaped, speciesId)", 1, true)
+	local counted = string.find(service, "RaidEvents.succeeded(raiderUserId, raidId)", 1, true)
+	local logged = string.find(service, "RaidEvents.liveEnded(player, escaped, speciesId", 1, true)
+	expect.truthy(pushed and counted and logged, "escape calls found")
+	expect.truthy((pushed :: number) < (logged :: number) and (logged :: number) < (counted :: number), "push first")
 end
 
 tests["the live grab rule sees a tutorial carry, and the shield hides a den's prompts"] = function()

@@ -650,18 +650,19 @@ local function escape(player: Player, carry: Carry)
 			warn(`[RaidService] refresh after raid {raidId} failed: {refreshError}`)
 		end
 		lastEscape = `{line}, escaped {escaped}` -- Studio status only
-		if carry.startedAt then
-			RaidEvents.liveEnded(player, escaped, speciesId, os.clock() - carry.startedAt)
-		end
-		if escaped then
-			RaidEvents.succeeded(raiderUserId) -- the count and the opt-in prompt (P2.7)
-		end
 		if status == "Committed" then
 			debugLog(line)
 		else
 			warn(`[RaidService] {line}`)
 		end
+		-- The raider hears first: nothing below (analytics, data's count) may delay or lose it.
 		pcall(sendEnded, player, raidId, escaped, speciesId)
+		if carry.startedAt then
+			RaidEvents.liveEnded(player, escaped, speciesId, os.clock() - carry.startedAt)
+		end
+		if escaped then
+			RaidEvents.succeeded(raiderUserId, raidId) -- the count and the opt-in prompt (P2.7)
+		end
 	end)
 end
 
@@ -769,7 +770,7 @@ function RaidService.onAsyncEscape(run: AsyncRaid.Escape): RaidRules.EscapeOutco
 		pcall(IncomeService.refresh, player)
 	end
 	if outcome.escaped then
-		RaidEvents.succeeded(run.raiderUserId) -- credited only; a pending escape is not counted
+		RaidEvents.succeeded(run.raiderUserId, run.raidId) -- credited only; a pending escape is not counted
 	end
 	local said = if status == "Committed"
 		then `moved {outcome.speciesId or "no critter"} and {outcome.glow} Glow`

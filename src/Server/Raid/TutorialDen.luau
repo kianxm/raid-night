@@ -23,7 +23,8 @@
 	          street rule. No owner, so no tag; no Lockdown; no live loss rule; no kill switch
 	          (onboarding must not stall when raids are switched off, and no transfer happens).
 	          Display-only Player attributes CarryingUid ("tutorial") / CarryingSpecies.
-	  Drop    Too fast, too high, died, left, or the den closed: the critter goes back on its pad
+	  Drop    Too fast, too high, no live character (dead, reset or not spawned: rootOf is nil), left
+	          the game, or the den closed: the critter goes back on its pad
 	          (try again). RaidEnded { raidId = "", escaped = false } like a live drop.
 	  Escape  Inside their own den: IncomeService.grantTutorialCritter(player), and nothing else
 	          (it claims the stealHome step itself; advancing that step first would spend the claim).

@@ -17,7 +17,7 @@
 	or an async escape whose loot is credited. The tutorial steal never calls it: the opt-in
 	prompt comes after the first REAL raid (Appendix C step 7) and NotificationRules prompts only
 	at a lifetime count of exactly 1. The count goes through DataService.countSuccessfulRaid
-	(data's API; skipped while it does not exist), then NotificationService.onSuccessfulRaid.
+	(data's API, idempotent per raidId; skipped while it does not exist), then NotificationService.onSuccessfulRaid.
 
 	Nothing here yields, throws, or writes a profile; every other service is reached under pcall.
 ]]
@@ -100,13 +100,15 @@ end
 
 -- A live carry ended: escaped is true only when the critter is in the raider's profile.
 function RaidEvents.liveEnded(player: Player, escaped: boolean, speciesId: string, seconds: number)
-	pcall(track, player, "raid_ended", {
-		mode = "Live",
-		escaped = escaped,
-		tierTaken = if escaped then tierOf(speciesId) else "None",
-		glow = 0, -- live steals take no Glow (D-015)
-		durationSeconds = amount(seconds),
-	})
+	pcall(function()
+		track(player, "raid_ended", {
+			mode = "Live",
+			escaped = escaped,
+			tierTaken = if escaped then tierOf(speciesId) else "None",
+			glow = 0, -- live steals take no Glow (D-015)
+			durationSeconds = amount(seconds),
+		})
+	end)
 end
 
 -- RaidFlow's TargetPicked: a StartRaid request for a well-formed target.
@@ -139,16 +141,17 @@ function RaidEvents.asyncEnded(player: Player, outcome: RaidRules.EscapeOutcome?
 end
 
 --[[
-	A successful raid by `userId` (a live escape that moved the critter, or a credited async
-	escape). Counts it on the raider's loaded profile through DataService (never a write here) and
-	gives NotificationService the new lifetime count for the opt-in prompt. Never the tutorial.
+	A successful raid `raidId` by `userId` (a live escape that moved the critter, or a credited
+	async escape). Counts it on the raider's loaded profile through DataService (never a write
+	here; data's count is idempotent per raidId) and gives NotificationService the new lifetime
+	count for the opt-in prompt. Never the tutorial. Callers push RaidEnded before calling this.
 ]]
-function RaidEvents.succeeded(userId: number)
+function RaidEvents.succeeded(userId: number, raidId: string)
 	local count = DataService.countSuccessfulRaid -- data's API (handoff); skipped until it exists
 	if type(count) ~= "function" then
 		return
 	end
-	local ok, lifetime = pcall(count, userId)
+	local ok, lifetime = pcall(count, userId, raidId)
 	if not ok then
 		warn(`[RaidEvents] countSuccessfulRaid for {userId} failed: {lifetime}`)
 		return

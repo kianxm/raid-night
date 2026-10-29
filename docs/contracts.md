@@ -139,8 +139,8 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
   1 is the first, the notification opt-in trigger). Old saves start at 0. Raid counts it
   (`Raid/RaidEvents.succeeded`, P2.6r) after a live escape that moved the critter and after an
   async escape whose loot is credited (not while `pending`), through
-  `DataService.countSuccessfulRaid(userId) -> number?` (data's API; until it exists the count is
-  skipped), then calls `NotificationService.onSuccessfulRaid(player, count)`. The tutorial den
+  `DataService.countSuccessfulRaid(userId, raidId) -> number?` (data's API, idempotent per raidId;
+  until it exists the count is skipped), after the raider's `RaidEnded` push, then calls `NotificationService.onSuccessfulRaid(player, count)`. The tutorial den
   steal is never counted: the opt-in prompt follows the first real raid (Appendix C step 7).
 - **Receipts.** The ProcessReceipt idempotency rule: grant only when `recordReceipt(profile,
   PurchaseId, productId, now)` returns true, in the same step with no yield between, then confirm
