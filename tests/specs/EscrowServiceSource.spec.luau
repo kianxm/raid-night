@@ -100,12 +100,48 @@ tests["an async debit accrues the defender to the debit first, on every path"] =
 	local accrued = string.find(load :: string, "Economy%.accrue%(profile, os%.time%(%)%)")
 	local returned = string.find(load :: string, "return profile")
 	expect.truthy(accrued and returned and (accrued :: number) < (returned :: number), "accrued before use")
-	-- Not loaded anywhere: the offline write accrues before the debit, inside the same write.
+	-- Not loaded anywhere: the offline write runs Escrow.debitAbsentProfile (accrue, then debit;
+	-- Escrow.spec) and nothing else inside the one write.
 	local absent = string.match(store, "debitAbsent = (function.-\n\t\tend),")
 	expect.truthy(absent, "debitAbsent found")
-	local offline = string.find(absent :: string, "Economy%.accrue%(profile, now%)")
-	local debit = string.find(absent :: string, "Escrow%.debitDefender%(profile, record, now%)")
-	expect.truthy(offline and debit and (offline :: number) < (debit :: number), "accrued before the debit")
+	local write = string.match(absent :: string, "DataService%.updateOffline%(defenderId, (function.-\n\t\t\tend)%)")
+	expect.truthy(write, "the offline write's fn found")
+	local body = string.gsub(write :: string, "%s+", " ")
+	expect.eq(
+		body,
+		"function(profile: PlayerProfile) return Escrow.debitAbsentProfile(profile, record, now) end",
+		"it accrues and debits through Escrow.debitAbsentProfile only"
+	)
+end
+
+tests["a profile save counts only when the exact entry, loot included, is saved"] = function()
+	local code = source.codeOnly(source.read(ESCROW))
+	local store = source.functionBody(code, "storeFor") or ""
+	local save = string.match(store, "saveProfile = (function.-\n\t\tend),")
+	expect.truthy(save, "saveProfile found")
+	expect.truthy(string.find(save :: string, "local expected = deepCopy%(entry%)"), "the entry copied before the save")
+	expect.truthy(string.find(save :: string, "return Escrow%.sameApplied%(expected, applied%)"), "matched whole")
+	expect.falsy(string.find(save :: string, "applied%.role =="), "not by role and time alone")
+end
+
+tests["recovery keeps running: the sweep is guarded and each rescan runs on its own thread"] = function()
+	local code = source.codeOnly(source.read(ESCROW))
+	local start = source.functionBody(code, "EscrowService.start") or ""
+	expect.truthy(string.find(start, "local ok, err = pcall%(sweep%)"), "the sweep loop survives an error")
+	expect.eq(count(start, "[^%w_]sweep%(%)"), 0, "never called bare")
+	local sweep = source.functionBody(code, "sweep") or ""
+	expect.truthy(string.find(sweep, "task%.spawn%(recoverUser, userId, true%)"), "rescans spawned")
+	expect.eq(count(sweep, "[^%w_.]recoverUser%(userId, true%)"), 0, "never run inline")
+end
+
+tests["an async transfer whose first record read fails, with nothing earlier in flight, is Refused"] = function()
+	local code = source.codeOnly(source.read(ESCROW))
+	local async = source.functionBody(code, "startAsync") or ""
+	local read = string.find(async, "local readOk, existing = pcall%(read, recordKey%(raidId%)%)")
+	local refused = string.find(async, 'return if earlier then "InFlight" else "Refused"')
+	local firstWrite = string.find(async, "indexAdd%(")
+	expect.truthy(read and refused and firstWrite, "guarded read, refusal and first write found")
+	expect.truthy((refused :: number) < (firstWrite :: number), "refused before anything is written")
 end
 
 tests["a debit message only wakes recovery, and async transfers never take the live path"] = function()

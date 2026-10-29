@@ -395,12 +395,14 @@ local function storeFor(raidId: string, last: Seen): Escrow.Store
 			if entry == nil then
 				error(`profile {profile.userId} has no entry for {raidId} to save`, 0)
 			end
-			local role, at = entry.role, entry.at
+			-- The exact entry the record will carry (loot included), so another server's save of a
+			-- different debit for this raid never confirms this one (Escrow.sameApplied).
+			local expected = deepCopy(entry)
 			local ok, why = DataService.saveNow(profile.userId, function(saved: any): boolean
 				local applied = type(saved) == "table"
 					and type(saved.appliedTransfers) == "table"
 					and saved.appliedTransfers[raidId]
-				return type(applied) == "table" and applied.role == role and applied.at == at
+				return Escrow.sameApplied(expected, applied)
 			end)
 			if not ok then
 				error(`save not confirmed: {why}`, 0)
@@ -443,15 +445,9 @@ local function storeFor(raidId: string, last: Seen): Escrow.Store
 		debitAbsent = function(record: EscrowRecord, now: number): AppliedTransfer?
 			assert(record.raidId == raidId, "escrow store used for another raid")
 			local defenderId = record.defenderUserId
+			-- Accrues the den to the debit, then debits, inside the one write (a repeat writes nothing).
 			local outcome, result = DataService.updateOffline(defenderId, function(profile: PlayerProfile)
-				local fresh = profile.appliedTransfers[raidId] == nil
-				if fresh then
-					-- Offline income up to the debit, so its share of `stored` is taken from that
-					-- (Money model, as in loadProfile).
-					-- P2.8: factor 1; pass Economy.glowBoostFactor once purchases ship.
-					Economy.accrue(profile, now)
-				end
-				return fresh, Escrow.debitDefender(profile, record, now)
+				return Escrow.debitAbsentProfile(profile, record, now)
 			end)
 			if outcome == "done" then
 				return result
@@ -642,7 +638,7 @@ local function sweep()
 		for _, player in Players:GetPlayers() do
 			local userId = player.UserId
 			if isHere(userId) and needsIndex[userId] == nil then
-				recoverUser(userId, true)
+				task.spawn(recoverUser, userId, true) -- one player's error never stops the rest
 			end
 		end
 	end
@@ -821,7 +817,13 @@ local function startAsync(
 	)
 	record.createNonce = HttpService:GenerateGUID(false)
 
-	local existing: EscrowRecord? = read(recordKey(raidId))
+	-- Nothing is written before this read; unless an earlier call for the raid is still awaited
+	-- here, a failed read moved nothing.
+	local readOk, existing = pcall(read, recordKey(raidId))
+	if not readOk then
+		local earlier = retry[raidId] ~= nil or parked[raidId] ~= nil
+		return if earlier then "InFlight" else "Refused", `could not read the raid's record: {existing}`
+	end
 	if existing then
 		if not Escrow.sameTransfer(existing, record) then
 			return "Refused", "raidId already used by a different transfer"
@@ -932,7 +934,10 @@ function EscrowService.start()
 	task.spawn(function()
 		while true do
 			task.wait(SWEEP_SECONDS)
-			sweep()
+			local ok, err = pcall(sweep) -- an error never stops recovery on this server
+			if not ok then
+				warn(`[EscrowService] sweep failed; retrying next tick: {err}`)
+			end
 		end
 	end)
 	game:BindToClose(function()

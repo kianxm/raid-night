@@ -311,6 +311,40 @@ function Escrow.creditRaider(raider: PlayerProfile, record: EscrowRecord, now: n
 	return applied
 end
 
+--[[
+	Whether `saved` (an appliedTransfers entry read back from saved data, any shape) is exactly
+	`expected`: same role, time, Glow and critter, every critter field alike. The server confirms
+	a profile save with it, so a debit only counts once the very entry it will record is saved:
+	a stale session's own debit can never be confirmed by another server's save of a different
+	one for the same raid in the same second (the record's loot is always the surviving debit's).
+]]
+function Escrow.sameApplied(expected: AppliedTransfer, saved: any): boolean
+	if type(saved) ~= "table" then
+		return false
+	end
+	if saved.role ~= expected.role or saved.at ~= expected.at or saved.glow ~= expected.glow then
+		return false
+	end
+	local a, b = expected.critter, saved.critter
+	if a == nil or b == nil then
+		return a == nil and b == nil
+	end
+	if type(b) ~= "table" then
+		return false
+	end
+	for key, value in a :: any do
+		if b[key] ~= value then
+			return false
+		end
+	end
+	for key in b do
+		if (a :: any)[key] == nil then
+			return false
+		end
+	end
+	return true
+end
+
 -- Step 4, on the RECORD. Terminal. Idempotent.
 function Escrow.markCommitted(record: EscrowRecord, now: number)
 	if record.state == "Committed" then

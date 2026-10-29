@@ -586,6 +586,35 @@ tests["a held defender's async debit waits for that server; it stays Pending, ne
 	expect.truthy(raider.critters["fox"])
 end
 
+tests["a save confirms a debit only when the exact entry, loot included, is saved"] = function()
+	local _, defender, record = setup("Async")
+	local applied = Escrow.debitDefender(defender, record, NOW)
+	-- A JSON round trip of the same entry still matches.
+	local saved = table.clone(applied)
+	saved.critter = table.clone(applied.critter :: any)
+	expect.truthy(Escrow.sameApplied(applied, saved), "the same entry")
+	-- A stale session's debit for the same raid in the same second, with other loot, does not.
+	local otherGlow = table.clone(saved)
+	otherGlow.glow += 1
+	expect.falsy(Escrow.sameApplied(applied, otherGlow), "other Glow")
+	local otherCritter = table.clone(saved)
+	otherCritter.critter = table.clone(saved.critter :: any)
+	otherCritter.critter.uid = "owl"
+	expect.falsy(Escrow.sameApplied(applied, otherCritter), "another critter")
+	local noCritter = table.clone(saved)
+	noCritter.critter = nil
+	expect.falsy(Escrow.sameApplied(applied, noCritter), "no critter")
+	local mutated = table.clone(saved)
+	mutated.critter = table.clone(saved.critter :: any)
+	mutated.critter.mutation = "Golden"
+	expect.falsy(Escrow.sameApplied(applied, mutated), "the same uid with other fields")
+	local credit = table.clone(saved)
+	credit.role = "Credit"
+	expect.falsy(Escrow.sameApplied(applied, credit), "another role")
+	expect.falsy(Escrow.sameApplied(applied, nil), "nothing saved")
+	expect.falsy(Escrow.sameApplied(applied, "debit"), "not a table")
+end
+
 tests["an Async record can never be voided, even with no debit saved"] = function()
 	local _, defender, record = setup("Async")
 	expect.falsy(Escrow.void(record, defender, NOW), "refused")
