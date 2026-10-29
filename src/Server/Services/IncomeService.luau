@@ -26,7 +26,8 @@
 	  refresh(player)               re-push DenState and rebuild visuals after another service
 	                                changed the profile (e.g. RaidService after a steal)
 	  setCritterLock(fn?)           fn(userId, uid) -> true while a critter must not move (being
-	                                carried). Locked critters cannot be placed and are not drawn.
+	                                carried). Locked critters cannot be placed, are never swapped
+	                                off their pad by another placement, and are not drawn.
 ]]
 
 local Players = game:GetService("Players")
@@ -303,10 +304,12 @@ local function placeCritter(player: Player, profile: any, uid: any, placement: a
 	if padIndex ~= nil and type(padIndex) ~= "number" then
 		return false
 	end
-	if isLocked(player.UserId, uid) then
-		return false
+	-- Economy.place refuses to move a locked critter, as the mover or as a swapped-out occupant.
+	local userId = player.UserId
+	local function locked(critterUid: string): boolean
+		return isLocked(userId, critterUid)
 	end
-	local ok = Economy.place(profile, uid, placement, padIndex, physicalPads(player), os.time())
+	local ok = Economy.place(profile, uid, placement, padIndex, physicalPads(player), os.time(), locked)
 	if ok then
 		push(player)
 	end

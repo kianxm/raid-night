@@ -229,6 +229,85 @@ tests["placement rejects bad pads, foreign uids, full vaults and guards"] = func
 	expect.truthy(Economy.place(p, "v", "Vault", nil, 6, later), "re-placing in the vault is fine")
 end
 
+-- P0.4c: a placement never moves a carried (locked) critter, directly or as a swap -------------
+
+local function lockedSet(...: string): (string) -> boolean
+	local set = {}
+	for _, uid in { ... } do
+		set[uid] = true
+	end
+	return function(uid: string): boolean
+		return set[uid] == true
+	end
+end
+
+local function expectSpot(p: Types.PlayerProfile, uid: string, placement: string, padIndex: number?)
+	expect.eq(p.critters[uid].placement, placement, `{uid} placement`)
+	expect.eq(p.critters[uid].padIndex, padIndex, `{uid} padIndex`)
+end
+
+tests["placing onto a pad whose occupant is locked is refused and changes nothing"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1)) -- being carried
+	fixtures.give(p, fixtures.critter("pad", "crumb_rat", "Pad", 2))
+	fixtures.give(p, fixtures.critter("inv", "crumb_rat", "Inventory"))
+	fixtures.give(p, fixtures.critter("vault", "crumb_rat", "Vault"))
+	local locked = lockedSet("x")
+	local later = NOW + 10
+	for _, mover in { "inv", "vault", "pad" } do
+		local ok, reason = Economy.place(p, mover, "Pad", 1, 6, later, locked)
+		expect.falsy(ok, `{mover} onto the carried critter's pad`)
+		expect.eq(reason, "pad is busy")
+	end
+	expectSpot(p, "x", "Pad", 1)
+	expectSpot(p, "pad", "Pad", 2)
+	expectSpot(p, "inv", "Inventory", nil)
+	expectSpot(p, "vault", "Vault", nil)
+	expect.eq(p.stored, 0, "refused moves do not accrue")
+	expect.eq(p.storedUpdatedAt, NOW, "refused moves do not accrue")
+end
+
+tests["moving a locked critter itself is refused"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1))
+	fixtures.give(p, fixtures.critter("pad", "crumb_rat", "Pad", 2))
+	local locked = lockedSet("x")
+	local later = NOW + 10
+	for _, target in { { "Pad", 3 }, { "Pad", 2 }, { "Pad", 1 }, { "Vault" }, { "Inventory" } } :: { { any } } do
+		local ok, reason = Economy.place(p, "x", target[1], target[2], 6, later, locked)
+		expect.falsy(ok, `x to {target[1]} {target[2]}`)
+		expect.eq(reason, "critter is busy")
+	end
+	expectSpot(p, "x", "Pad", 1)
+	expectSpot(p, "pad", "Pad", 2)
+	expect.eq(p.storedUpdatedAt, NOW, "refused moves do not accrue")
+end
+
+tests["placement still works around a locked critter"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1)) -- being carried
+	fixtures.give(p, fixtures.critter("a", "crumb_rat", "Pad", 2))
+	fixtures.give(p, fixtures.critter("b", "crumb_rat", "Inventory"))
+	local locked = lockedSet("x")
+	expect.truthy(Economy.place(p, "b", "Pad", 3, 6, NOW, locked), "free pad")
+	expectSpot(p, "b", "Pad", 3)
+	expect.truthy(Economy.place(p, "b", "Pad", 2, 6, NOW, locked), "unlocked occupant swaps")
+	expectSpot(p, "b", "Pad", 2)
+	expectSpot(p, "a", "Pad", 3)
+	expect.truthy(Economy.place(p, "a", "Vault", nil, 6, NOW, locked), "to the vault")
+	expectSpot(p, "x", "Pad", 1)
+end
+
+tests["once the lock lifts the pad can be swapped again"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("x", "dusk_mouse", "Pad", 1))
+	fixtures.give(p, fixtures.critter("b", "crumb_rat", "Inventory"))
+	expect.falsy(Economy.place(p, "b", "Pad", 1, 6, NOW, lockedSet("x")))
+	expect.truthy(Economy.place(p, "b", "Pad", 1, 6, NOW, lockedSet()))
+	expectSpot(p, "b", "Pad", 1)
+	expectSpot(p, "x", "Inventory", nil)
+end
+
 tests["upgrading spends banked Glow and accrues at the old level first"] = function()
 	local p = fixtures.veteran(1, NOW)
 	p.denLevel = 1
