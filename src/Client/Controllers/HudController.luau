@@ -18,6 +18,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Net = require(Shared:WaitForChild("Net")) :: any
 local Economy = require(Shared:WaitForChild("Economy")) :: any
+local Config = require(Shared:WaitForChild("Config")) :: any
 local CritterCatalog = require(Shared:WaitForChild("CritterCatalog")) :: any
 
 local Hud = script.Parent.Parent:WaitForChild("Hud")
@@ -114,6 +115,40 @@ local function makeButton(parent: Instance, name: string, order: number, color: 
 	return b, title, sub
 end
 
+-- The odds of the next bought egg, from Economy's helpers only (D-028). `rescue` comes from the
+-- same HudMath rule as the "Free" label. Returns percent labels aligned with `tiers`.
+local function nextOdds(rescue: boolean): ({ { tier: string, chance: number } }, { string })
+	local tiers = if rescue then Economy.rescueEggTierOdds() else Economy.eggTierOdds(Config.Economy.eggMaxTier)
+	local chances = {}
+	for _, t in tiers do
+		table.insert(chances, t.chance)
+	end
+	return tiers, HudMath.percentLabels(chances)
+end
+
+local function oddsPanelText(tiers: { { tier: string, chance: number } }, labels: { string }, rescue: boolean): string
+	local lines = { if rescue then Strings.oddsRescue else Strings.oddsEqual }
+	for i, t in tiers do
+		table.insert(lines, "")
+		table.insert(lines, `<b>{t.tier}  {labels[i]}</b>`)
+		local species = Economy.speciesOdds(t.tier)
+		if #species > 0 then
+			local names = {}
+			for _, sp in species do
+				local info = CritterCatalog.get(sp.speciesId)
+				table.insert(names, if info then info.name else "?")
+			end
+			local each = HudMath.percentLabels({ 1 })[1]
+			if #species > 1 then
+				each = HudMath.percentLabels(table.create(#species, 1 / #species))[1]
+			end
+			table.insert(lines, table.concat(names, ", "))
+			table.insert(lines, Strings.format(Strings.oddsEach, { pct = each }))
+		end
+	end
+	return table.concat(lines, "\n")
+end
+
 local function setEnabled(b: TextButton, enabled: boolean, color: Color3)
 	b.BackgroundColor3 = if enabled then color else COLOR.disabled
 	b.Active = enabled
@@ -197,9 +232,82 @@ local function build(): { [string]: any }
 	list.Padding = UDim.new(0, 8)
 	list.Parent = column
 
-	local collect, collectTitle, collectSub = makeButton(column, "Collect", 3, COLOR.collect)
-	local buy, buyTitle, buySub = makeButton(column, "BuyEgg", 2, COLOR.buy)
+	local collect, collectTitle, collectSub = makeButton(column, "Collect", 4, COLOR.collect)
+	local buy, buyTitle, buySub = makeButton(column, "BuyEgg", 3, COLOR.buy)
 	local lock, lockTitle, lockSub = makeButton(column, "Lockdown", 1, COLOR.lock)
+
+	-- Always-visible compact tier odds right above Buy Egg (display only). Tapping it opens the
+	-- species panel. Free to open; it never costs anything.
+	local oddsChip = Instance.new("TextButton")
+	oddsChip.Name = "OddsChip"
+	oddsChip.LayoutOrder = 2
+	oddsChip.Size = UDim2.fromScale(1, 0)
+	oddsChip.AutomaticSize = Enum.AutomaticSize.Y
+	oddsChip.BackgroundColor3 = COLOR.panel
+	oddsChip.AutoButtonColor = true
+	oddsChip.Font = BODY_FONT
+	oddsChip.TextSize = 14
+	oddsChip.TextColor3 = COLOR.text
+	oddsChip.RichText = true
+	oddsChip.TextWrapped = true
+	oddsChip.Text = ""
+	round(oddsChip, 12)
+	outline(oddsChip, 2)
+	local chipPad = Instance.new("UIPadding")
+	chipPad.PaddingTop = UDim.new(0, 6)
+	chipPad.PaddingBottom = UDim.new(0, 6)
+	chipPad.PaddingLeft = UDim.new(0, 6)
+	chipPad.PaddingRight = UDim.new(0, 6)
+	chipPad.Parent = oddsChip
+	oddsChip.Parent = column
+
+	-- Odds panel: centered, scrolls, 48 px close button. Hidden until the chip is tapped.
+	local oddsPanel = panel(gui, "OddsPanel", UDim2.new(0, 300, 0.8, 0), UDim2.fromScale(0.5, 0.5))
+	oddsPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+	oddsPanel.Visible = false
+	oddsPanel.ZIndex = 8
+	local oddsTitle = label(oddsPanel, DISPLAY_FONT, 24)
+	oddsTitle.Size = UDim2.new(1, -16, 0, 34)
+	oddsTitle.Position = UDim2.fromOffset(8, 6)
+	oddsTitle.Text = Strings.oddsTitle
+	oddsTitle.ZIndex = 9
+	local oddsScroll = Instance.new("ScrollingFrame")
+	oddsScroll.BackgroundTransparency = 1
+	oddsScroll.BorderSizePixel = 0
+	oddsScroll.Size = UDim2.new(1, -16, 1, -108)
+	oddsScroll.Position = UDim2.fromOffset(8, 44)
+	oddsScroll.CanvasSize = UDim2.new()
+	oddsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	oddsScroll.ScrollBarThickness = 6
+	oddsScroll.ZIndex = 9
+	oddsScroll.Parent = oddsPanel
+	local oddsBody = Instance.new("TextLabel")
+	oddsBody.BackgroundTransparency = 1
+	oddsBody.Size = UDim2.new(1, -8, 0, 0)
+	oddsBody.AutomaticSize = Enum.AutomaticSize.Y
+	oddsBody.Font = BODY_FONT
+	oddsBody.TextSize = 16
+	oddsBody.TextColor3 = COLOR.text
+	oddsBody.TextXAlignment = Enum.TextXAlignment.Left
+	oddsBody.TextYAlignment = Enum.TextYAlignment.Top
+	oddsBody.TextWrapped = true
+	oddsBody.RichText = true
+	oddsBody.ZIndex = 9
+	oddsBody.Parent = oddsScroll
+	local oddsClose = Instance.new("TextButton")
+	oddsClose.Name = "Close"
+	oddsClose.AnchorPoint = Vector2.new(0.5, 1)
+	oddsClose.Size = UDim2.new(1, -16, 0, 48)
+	oddsClose.Position = UDim2.new(0.5, 0, 1, -8)
+	oddsClose.BackgroundColor3 = COLOR.buy
+	oddsClose.Font = DISPLAY_FONT
+	oddsClose.TextSize = 22
+	oddsClose.TextColor3 = COLOR.outline
+	oddsClose.Text = Strings.oddsClose
+	oddsClose.ZIndex = 9
+	round(oddsClose, 14)
+	outline(oddsClose, 3)
+	oddsClose.Parent = oddsPanel
 
 	return {
 		glowText = glowText,
@@ -219,6 +327,10 @@ local function build(): { [string]: any }
 		lock = lock,
 		lockTitle = lockTitle,
 		lockSub = lockSub,
+		oddsChip = oddsChip,
+		oddsPanel = oddsPanel,
+		oddsBody = oddsBody,
+		oddsClose = oddsClose,
 	}
 end
 
@@ -300,6 +412,12 @@ function HudController.start()
 	ui.buy.Activated:Connect(function()
 		request(Net.Requests.BuyEgg, busy)
 	end)
+	ui.oddsChip.Activated:Connect(function()
+		ui.oddsPanel.Visible = not ui.oddsPanel.Visible
+	end)
+	ui.oddsClose.Activated:Connect(function()
+		ui.oddsPanel.Visible = false
+	end)
 	local toastToken = 0
 	local function showToast(text: string, sub: string?)
 		toastToken += 1
@@ -367,7 +485,7 @@ function HudController.start()
 			local elapsed = os.clock() - receivedAt
 			local stored = HudMath.predictStored(state.stored, state.storageCap, state.ratePerSecond, elapsed)
 			local price = Economy.eggPrice(state.denLevel)
-			local free = #state.critters == 0 and math.floor(state.glow + stored) < price
+			local free = HudMath.isRescue(#state.critters, state.glow, stored, price)
 
 			ui.glowText.Text = HudMath.abbreviate(state.glow) .. " " .. Strings.glow
 			local share = if state.storageCap > 0 then math.clamp(stored / state.storageCap, 0, 1) else 0
@@ -383,6 +501,19 @@ function HudController.start()
 			ui.buyTitle.Text = Strings.buyEgg
 			ui.buySub.Text = if free then Strings.free else HudMath.abbreviate(price) .. " " .. Strings.glow
 			setEnabled(ui.buy, free or state.glow >= price, COLOR.buy)
+
+			-- Egg odds for THIS egg: compact tier lines always visible, species in the panel.
+			local tiers, labels = nextOdds(free)
+			local chipLines = { `<b>{Strings.odds}</b>` }
+			for i, t in tiers do
+				table.insert(chipLines, `{t.tier} {labels[i]}`)
+			end
+			local chipText = table.concat(chipLines, "\n")
+			if chipText ~= ui.oddsChipText then
+				ui.oddsChipText = chipText
+				ui.oddsChip.Text = chipText
+				ui.oddsBody.Text = oddsPanelText(tiers, labels, free)
+			end
 		end
 
 		-- Carried critter: display-only Player attribute; "" or absent = not carrying.
