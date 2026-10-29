@@ -59,21 +59,21 @@ Same 10 prompts (`stage0_style.sh prompts` writes them), sent through the MCP
 unlim available for this model). Jobs 06 and 09 were rejected with a 429 rate limit before any job
 was created; they were resubmitted once with identical prompts (no output had existed, so this is
 not a re-roll). Balance 110 -> 100: exactly 1 credit per image. Outputs are 4096x4096 PNGs in
-`assets/raw/_style/`, with `jobs.txt` mapping each file to its job ID. "Kept?" waits for the
-style lock gate; the notes are the assets agent's read against the style bible.
+`assets/raw/_style/`, with `jobs.txt` mapping each file to its job ID. "Kept?" is the style lock
+result (Kian, 2026-10-28: 01 and 02); the notes are the assets agent's read against the style bible.
 
 | Date | Critter | Stage | Model | Credits | Kept? | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-10-28 | dusk_mouse | 0 style-01 turnaround | seedream_v4_5 | 1 | pending gate | Closest to the bible: matte vinyl, one glow (ears), clean silhouette. Framed low and small |
-| 2026-10-28 | dusk_mouse | 0 style-02 night | seedream_v4_5 | 1 | pending gate | Best mood: moonlight, lamp pool, violet fog. Adds a second glow (belly patch) |
-| 2026-10-28 | dusk_mouse | 0 style-03 icon | seedream_v4_5 | 1 | pending gate | Baked-in text tile "Dusk Mouse #7E7" (hex code leaked as text); whiskers; belly glow. Unusable as is |
-| 2026-10-28 | static_crab | 0 style-04 turnaround | seedream_v4_5 | 1 | pending gate | Plush/felt texture, not matte; TV held in front, not worn as shell; human-like feet |
-| 2026-10-28 | static_crab | 0 style-05 night | seedream_v4_5 | 1 | pending gate | Strong scene and read; TV held, not a shell; slightly plush |
-| 2026-10-28 | static_crab | 0 style-06 icon | seedream_v4_5 | 1 | pending gate | Felt texture, extra chest glow, TV held; dark background instead of plain |
-| 2026-10-28 | abyss_angler | 0 style-07 turnaround | seedream_v4_5 | 1 | pending gate | Baked-in title text (misspelled); reads as a shark; extra glowing fish charm. Unusable |
-| 2026-10-28 | abyss_angler | 0 style-08 night | seedream_v4_5 | 1 | pending gate | Moon lure reads well; plush black body, belly glow, stray fishing rods as props |
-| 2026-10-28 | abyss_angler | 0 style-09 icon | seedream_v4_5 | 1 | pending gate | Nice matte finish and moon lure; baked-in rounded app-icon frame; belly glow |
-| 2026-10-28 | abyss_angler | 0 style-10 night_tier | seedream_v4_5 | 1 | pending gate | Legendary glow and motes read; holds a fishing rod with a second moon; plush texture |
+| 2026-10-28 | dusk_mouse | 0 style-01 turnaround | seedream_v4_5 | 1 | yes (ref-01) | Closest to the bible: matte vinyl, one glow (ears), clean silhouette. Framed low and small |
+| 2026-10-28 | dusk_mouse | 0 style-02 night | seedream_v4_5 | 1 | yes (ref-02) | Best mood: moonlight, lamp pool, violet fog. Adds a second glow (belly patch) |
+| 2026-10-28 | dusk_mouse | 0 style-03 icon | seedream_v4_5 | 1 | no | Baked-in text tile "Dusk Mouse #7E7" (hex code leaked as text); whiskers; belly glow. Unusable as is |
+| 2026-10-28 | static_crab | 0 style-04 turnaround | seedream_v4_5 | 1 | no | Plush/felt texture, not matte; TV held in front, not worn as shell; human-like feet |
+| 2026-10-28 | static_crab | 0 style-05 night | seedream_v4_5 | 1 | no | Strong scene and read; TV held, not a shell; slightly plush |
+| 2026-10-28 | static_crab | 0 style-06 icon | seedream_v4_5 | 1 | no | Felt texture, extra chest glow, TV held; dark background instead of plain |
+| 2026-10-28 | abyss_angler | 0 style-07 turnaround | seedream_v4_5 | 1 | no | Baked-in title text (misspelled); reads as a shark; extra glowing fish charm. Unusable |
+| 2026-10-28 | abyss_angler | 0 style-08 night | seedream_v4_5 | 1 | no | Moon lure reads well; plush black body, belly glow, stray fishing rods as props |
+| 2026-10-28 | abyss_angler | 0 style-09 icon | seedream_v4_5 | 1 | no | Nice matte finish and moon lure; baked-in rounded app-icon frame; belly glow |
+| 2026-10-28 | abyss_angler | 0 style-10 night_tier | seedream_v4_5 | 1 | no | Legendary glow and motes read; holds a fishing rod with a second moon; plush texture |
 
 **Patterns for Stage 1 prompts** (to fold into the job templates once the style is locked):
 - Hex codes leak into the image as text. Name colors in words ("pale cyan") and keep hex in briefs.
