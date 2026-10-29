@@ -10,7 +10,7 @@
 	server state.
 	  Grab    Every pad has a "StealPrompt" ProximityPrompt. Holding it asks for a grab; the
 	          server times the hold itself (Config.LiveRaid.grabHoldSeconds) and re-checks
-	          RaidRules.canGrabLive on every frame: kill switch (Escrow.canStartTransfer, the
+	          RaidRules.canGrabLive 10 times a second: kill switch (Escrow.canStartTransfer, the
 	          only Config.Flags read), not your den, owner online and loaded, one carry at a time,
 	          live protection, the pair limit, the post-loss safety window (and no other carry
 	          from that den under way), range to the server pad part. The critter is the one the
@@ -92,6 +92,7 @@ local Net = require(Shared.Net)
 local Plots = require(Shared.Plots)
 local RaidRules = require(Shared.RaidRules)
 local Types = require(Shared.Types)
+local WorldKit = require(Shared.WorldKit)
 local DataService = require(script.Parent.DataService)
 local EscrowService = require(script.Parent.EscrowService)
 local DenWorldService = require(script.Parent.DenWorldService) :: any
@@ -278,6 +279,8 @@ local function refreshDen(plot: number)
 	local protected = if ownerProfile then RaidRules.liveProtected(ownerProfile, os.time()) else nil
 	local loss = if ownerUserId then lastLoss[ownerUserId] else nil
 	local readyAt = if loss then RaidRules.liveGrabReadyAt(loss.serverAt) else nil
+	-- Pads shown (and usable, through Economy.usablePadCount) follow the owner's den level (P2.3).
+	DenWorldService.setShownPads(plot, WorldKit.shownPads(if ownerProfile then ownerProfile.denLevel else 1))
 	local shown = shownDen[plot]
 	if not shown or shown.protected ~= protected or shown.readyAt ~= readyAt then
 		shownDen[plot] = { protected = protected, readyAt = readyAt }
@@ -776,6 +779,8 @@ local function ensurePrompt(plot: number, padIndex: number, pad: BasePart): Prox
 	created.HoldDuration = Config.LiveRaid.grabHoldSeconds + HOLD_GRACE
 	created.MaxActivationDistance = PROMPT_DISTANCE
 	created.RequiresLineOfSight = false
+	-- Pads sit 6 studs apart: show only the nearest F prompt (one tap target on phones).
+	created.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
 	created.Enabled = false
 	created.PromptButtonHoldBegan:Connect(function(player: Player)
 		RaidService.requestGrab(player, plot, padIndex)
@@ -808,9 +813,12 @@ local function syncPrompts()
 	for plot = 1, Plots.Layout.plotCount do
 		local ownerUserId, ownerProfile = ownerOf(plot)
 		local open = on and ownerUserId ~= nil and ownerProfile ~= nil and not denClosed(ownerUserId, ownerProfile)
-		for padIndex, pad in DenWorldService.getPads(plot) do
-			local prompt = ensurePrompt(plot, padIndex, pad)
-			local critter = if ownerProfile then RaidRules.padCritter(ownerProfile, padIndex) else nil
+		-- Only the shown pads, and the profile's critters walked once per den, not once per pad.
+		local byPad = if ownerProfile then RaidRules.padCritters(ownerProfile) else {}
+		local pads = DenWorldService.getPads(plot)
+		for padIndex = 1, DenWorldService.getShownPadCount(plot) do
+			local prompt = ensurePrompt(plot, padIndex, pads[padIndex])
+			local critter = byPad[padIndex]
 			local species = if critter then CritterCatalog.get(critter.speciesId) else nil
 			prompt.Enabled = open and species ~= nil and not isLocked(ownerUserId :: number, (critter :: Critter).uid)
 			prompt.ObjectText = if species then species.name else ""
@@ -966,12 +974,13 @@ function RaidService.start()
 	end
 
 	local carryClock, promptClock = 0, PROMPT_TICK
+	-- Nothing runs every frame: holds, carries and Lockdown at 10 Hz, prompts and den display at 2 Hz.
 	RunService.Heartbeat:Connect(function(dt: number)
-		guard("holds", stepHolds)
 		carryClock += dt
 		promptClock += dt
 		if carryClock >= CARRY_TICK then
 			carryClock = 0
+			guard("holds", stepHolds)
 			guard("lockdown", Lockdown.step)
 			guard("carries", stepCarries)
 		end

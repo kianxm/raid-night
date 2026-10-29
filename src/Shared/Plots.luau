@@ -11,22 +11,35 @@
 	points at the street ("front"), so pads, spawn and sign mirror correctly on both rows.
 	These numbers are world-building constants, not tuning values, so they live here rather
 	than in Config.luau.
+
+	Pads (P2.3): every den has room for maxPads pads in a padColumns-wide grid, filled from the
+	front row (nearest the street) toward the back. How many are shown and usable follows the
+	owner's den level through Economy.padCount (economy owns that curve); this file only says
+	where pad N sits. The grid stays inside |x| < padKeepOutX so the economy station at local
+	x = +/-20 (IncomeService) stays clear.
 ]]
 
 local Plots = {}
 
 Plots.Layout = table.freeze({
 	plotCount = 8,
-	padsPerPlot = 6,
+	maxPads = 30, -- the most pads a den can have (Economy.padCount reaches it at level 49)
 	plotSize = 56, -- square den footprint
 	plotSpacing = 68, -- centre to centre along a row (12 stud gap between dens)
 	rowOffset = 64, -- each row's centre line sits this far from the plaza centre
 	plazaRadius = 24,
-	padSize = 8,
-	padSpacing = 12,
-	padFrontZ = 8, -- local z of the front pad row
+	padColumns = 6,
+	padSize = 5,
+	padPitchX = 6, -- centre to centre across a row
+	padPitchZ = 7, -- centre to centre between rows
+	padFrontZ = 17, -- local z of the front row (pads 1-6); each later row is padPitchZ further back
+	padKeepOutX = 18, -- pads stay inside |x| < this (the economy station stands at x = +/-20)
 	spawnZ = -18, -- local z of the spawn point, behind the pads
 	signZ = -26, -- local z of the owner sign, at the back of the den
+	vaultX = 15, -- vault door prop, back right of the sign
+	vaultZ = -24,
+	lanternX = -15, -- the den's one lamp, back left of the sign
+	lanternZ = -24,
 })
 
 local L = Plots.Layout
@@ -128,12 +141,12 @@ function Plots.toWorld(plot: number, localX: number, localZ: number): (number, n
 	return cx + facing * localX, cz + facing * localZ
 end
 
--- Den-local position of pad 1..6. Pads 1-3 are the front row, 4-6 the back row.
+-- Den-local position of pad 1..maxPads. Pads 1-6 are the front row, 7-12 the next, and so on.
 function Plots.padLocal(pad: number): (number, number)
-	assert(pad >= 1 and pad <= L.padsPerPlot and pad % 1 == 0, `invalid pad {pad}`)
-	local col = (pad - 1) % 3
-	local row = (pad - 1) // 3
-	return (col - 1) * L.padSpacing, L.padFrontZ - row * L.padSpacing
+	assert(pad >= 1 and pad <= L.maxPads and pad % 1 == 0, `invalid pad {pad}`)
+	local col = (pad - 1) % L.padColumns
+	local row = (pad - 1) // L.padColumns
+	return (col - (L.padColumns - 1) / 2) * L.padPitchX, L.padFrontZ - row * L.padPitchZ
 end
 
 function Plots.padPosition(plot: number, pad: number): (number, number)
