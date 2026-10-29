@@ -56,7 +56,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.7 | economy | — | In review | #95 | 1 | Sim + report (in PR description), CI green, 271 tests. Proposal needs Kian: no numeric design range, sets a ~3-week first-rebirth pace (D-045). Found: async loot reads leave-time stored Glow (sent to P1.1); den world builds 6 pads vs design 6→30 (raid, Phase 2); rebirth impossible until eggMaxTier rises (D-003) |
 | P1.8 | economy | P1.7 | Blocked | #96 (stacked on #95) | 1 | Prepared: 3 Config values, sim matches #95's after numbers, 271 tests. Merge only on Kian's approval (D-045) |
 | P1.9 | matchmaking | P1.2 | In review | #94; P1.9b agent/raid/P1.9b | 1 | P1.9b (raid) wires getLiveRevenge into the live steal path. Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
-| P1.10 | integration | P1.6, P1.9 | Todo | | | Multi-client part deferred (Kian) |
+| P1.10 | integration | P1.6, P1.9 | Blocked | #104 (kit) | 1 | Kit + soak runbook ready (docs/playtests/phase1.md). Single-client pass, 30-min soak and 4-client/two-server runs need the merged build in Studio (Kian, D-044) |
 
 ## Setup notes
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
