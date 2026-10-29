@@ -43,6 +43,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "GearMath",
+		load = function()
+			return require("./specs/GearMath.spec")
+		end,
+	},
+	{
 		name = "InventoryMath",
 		load = function()
 			return require("./specs/InventoryMath.spec")

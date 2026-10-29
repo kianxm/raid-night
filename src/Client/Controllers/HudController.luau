@@ -208,12 +208,12 @@ local function build(): { [string]: any }
 					end
 					local pad = child:FindFirstChildOfClass("UIPadding")
 					if pad then
-						local px = if layout.compact then 3 else 6
+						local px = if layout.compact then 1 else 6
 						pad.PaddingTop = UDim.new(0, px)
 						pad.PaddingBottom = UDim.new(0, px)
 					end
-					child.TextSize = if layout.compact then 12 else 14
-					child.TextTruncate = if layout.compact then Enum.TextTruncate.AtEnd else Enum.TextTruncate.None
+					child.TextSize = layout.chipText
+					child.TextTruncate = Enum.TextTruncate.None
 				else
 					child.Size = UDim2.new(1, 0, 0, layout.button)
 				end
@@ -505,12 +505,12 @@ function HudController.start()
 			local isCompact = ui.isCompact()
 			local chipText
 			if isCompact then
-				-- One short line (wraps to two at 130 px): "Odds: C 68.75% · U 31.25%".
+				-- Two tiers per line (6 tiers = 3 lines): "C 55%  U 25%".
 				local parts = {}
 				for i, t in tiers do
 					table.insert(parts, `{string.sub(t.tier, 1, 1)} {labels[i]}`)
 				end
-				chipText = `<b>{Strings.odds}:</b> ` .. table.concat(parts, " · ")
+				chipText = HudMath.chipRows(parts, 2)
 			else
 				local chipLines = { `<b>{Strings.odds}</b>` }
 				for i, t in tiers do

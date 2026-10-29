@@ -144,7 +144,7 @@ local Strings = {
 	denSelected = "{name} selected",
 
 	-- Settings
-	menuSettings = "Gear",
+	menuSettings = "Options",
 	settingsTitle = "Settings",
 	settingsMusic = "Music",
 	settingsSfx = "Sound effects",
@@ -152,6 +152,34 @@ local Strings = {
 	settingsOn = "On",
 	settingsOff = "Off",
 	settingsPercent = "{pct}%",
+
+	-- Gear (raid items)
+	gearTitle = "Your gear",
+	gearButton = "Gear",
+	gearGrapple = "Grapple",
+	gearSmoke = "Smoke",
+	gearDecoy = "Decoy",
+	gearSpeedCoil = "Coil",
+	gearLockpick = "Pick",
+	gearLevel = "Lv {n}",
+	gearCooldownInfo = "Cooldown {s}s",
+	gearUpgrade = "Upgrade",
+	gearComingSoon = "Coming soon",
+	gearNone = "No gear yet",
+	gearCooldown = "Not ready yet",
+	gearNoCharges = "No uses left this raid",
+	gearCarrying = "Hands are full",
+	gearTrapped = "Slowed by a trap",
+	gearOutOfRange = "Too far",
+	gearNoSight = "Can't land there",
+	gearLiveOnly = "Live raids only",
+	gearOff = "Gear is off right now",
+	gearRefused = "Can't use that now",
+	gearNoAim = "Aim at the ground",
+	gearPicking = "Picking...",
+	gearPickDone = "Lock picked!",
+	gearPickBroke = "Pick broke",
+	portalRefresh = "Refresh",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string

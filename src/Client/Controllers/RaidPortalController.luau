@@ -2,6 +2,9 @@
 --[[
 	RaidPortalController (owner: ui agent)
 
+	GetRaidTargets is asked only when the portal opens or the player taps Refresh (each call
+	counts as a portal open in analytics): never on a timer or to redraw an open portal.
+
 	A "Raid" button (left edge, clear of the thumbstick and the right action column) opens the
 	Raid Portal: up to 3 targets, revenge targets on top and marked. Tapping Raid / Revenge
 	requests StartRaid via RaidApi; the server decides if it happens. Display only.
@@ -30,6 +33,8 @@ local message: TextLabel
 local openButton: TextButton
 local busy = false
 local inRaid = false
+local REFRESH_GAP = 4 -- seconds between explicit refreshes (GetRaidTargets: 3 per 10 s)
+local lastRefresh = -math.huge
 
 local function close()
 	portal.Visible = false
@@ -121,7 +126,7 @@ local function addRow(target: any, order: number)
 	end)
 end
 
-local function refresh()
+local function refresh(fresh: boolean?)
 	for _, child in list:GetChildren() do
 		if child:IsA("Frame") or child:IsA("TextLabel") then
 			child:Destroy()
@@ -129,7 +134,7 @@ local function refresh()
 	end
 	setMessage("")
 	task.spawn(function()
-		local targets = RaidApi.getTargets()
+		local targets = RaidApi.getTargets(fresh)
 		-- Revenge rows first, then the order the server gave. Max 3 shown.
 		table.sort(targets, function(a: any, b: any)
 			return a.isRevenge and not b.isRevenge
@@ -147,8 +152,12 @@ local function open()
 	if inRaid then
 		return
 	end
+	if portal.Visible then
+		return -- already open: its list is current until the player asks again
+	end
 	portal.Visible = true
-	refresh()
+	lastRefresh = os.clock()
+	refresh(false)
 end
 
 function RaidPortalController.open()
@@ -172,7 +181,7 @@ function RaidPortalController.start()
 
 	local title = Ui.label(portal, Ui.DISPLAY, 28, COLOR.glow)
 	title.Text = Strings.portalTitle
-	title.Size = UDim2.new(1, -80, 0, 38)
+	title.Size = UDim2.new(1, -176, 0, 38)
 	title.Position = UDim2.fromOffset(12, 6)
 	title.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -180,6 +189,17 @@ function RaidPortalController.start()
 	x.AnchorPoint = Vector2.new(1, 0)
 	x.Position = UDim2.new(1, -8, 0, 6)
 	x.Activated:Connect(close)
+
+	local again = Ui.button(portal, "Refresh", Strings.portalRefresh, COLOR.glow, UDim2.fromOffset(96, 40))
+	again.AnchorPoint = Vector2.new(1, 0)
+	again.Position = UDim2.new(1, -64, 0, 6)
+	again.Activated:Connect(function()
+		if os.clock() - lastRefresh < REFRESH_GAP then
+			return
+		end
+		lastRefresh = os.clock()
+		refresh(true)
+	end)
 
 	list = Instance.new("Frame")
 	list.Name = "List"

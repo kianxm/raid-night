@@ -16,6 +16,8 @@ for _, name in
 		"InventoryController",
 		"DenManageController",
 		"SettingsController",
+		"GearController",
+		"CritterIdleController",
 		"SoundController",
 		"RaidLogController",
 		"DenStatusController",
