@@ -62,6 +62,17 @@ export type RaidEnd = {
 	glow: number,
 }
 
+-- GetReplay's answer (docs/contracts.md, Replays). data is a Shared/Replay.encode string in
+-- format `version`; decode it with Replay.decode. Positions are relative to the pocket den origin.
+export type ReplayPayload = {
+	raidId: string,
+	version: number,
+	raiderUserId: number,
+	defenderUserId: number,
+	startedAt: number, -- unix seconds; frame i is startedAt + i / Replay.HZ
+	data: string,
+}
+
 local Net = {}
 
 -- Client -> server requests (RemoteFunctions unless noted).
@@ -78,7 +89,9 @@ Net.Requests = table.freeze({
 	StartRaid = "StartRaid", -- (targetUserId, revengeRaidId?) -> RaidStart?
 	GrabCritter = "GrabCritter", -- RemoteEvent: (raidId, critterUid)
 	GetRaidLog = "GetRaidLog", -- () -> { RaidLogEntry }
-	GetReplay = "GetReplay", -- (raidId) -> compressed replay frames
+	-- (raidId) -> ReplayPayload?; nil when missing, expired (7 days), not yet saved, or the caller
+	-- is neither the raider nor the defender of that raid.
+	GetReplay = "GetReplay",
 	-- (revengeRaidId) -> RevengeJoinStatus. Live revenge (P1.9): join the server of the raider who
 	-- robbed you, if they are online. Needs Config.Flags.raids and asyncRaids. Never spends the token.
 	JoinRevengeServer = "JoinRevengeServer",
@@ -107,6 +120,7 @@ Net.Limits = table.freeze({
 	GetRaidTargets = 3,
 	ReportBlocked = 2,
 	JoinRevengeServer = 2,
+	GetReplay = 3,
 })
 
 --[[
