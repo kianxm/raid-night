@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-056 · 2026-10-29 · Studio test sessions write test-id keys to the place's DataStores (amends D-019)
+Context: the soak needs forced shutdowns in DataStore mode, which only accepted a real loaded
+raider, so the overnight run used Kian's account (D-055). Decision: in Studio only (IsStudio +
+`ServerStorage.StudioTestSessions` + test id <= -1,000,000 + DataStore mode), DataService can hold
+a real ProfileStore session for a test id; escrow recovers it like a player. Escrow writes leave
+negative ids out of UserIds. Test raids use test ids against test ids only. Delete the
+`Player_-100000x`, `Escrow_soak-*` and `Open_-100000x` keys after a soak. Why: soak without real
+accounts. Reviewer approved (#112). Reversible: yes.
+
 ### D-055 · 2026-10-29 · Studio check of preview/phase1 by temporary script sync
 Context: no Phase 1 server code had run in Roblox, and merges wait for Kian (D-044). Decision: the
 integration agent synced preview/phase1's 27 changed scripts into the open, unsaved edit place
