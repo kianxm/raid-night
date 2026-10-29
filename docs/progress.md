@@ -81,7 +81,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | C6b | data | C6 | In review | #126 (stacked on #123) | 1 | 396 tests. Settings + onboarding remotes, RateLimit.luau, steps 0-6 server-advanced (raidLogTip client ack only). Reviewer (xhigh) APPROVED. D-064 |
 | P2.6r | raid | C6b, P2.3, P2.6e | Todo | | 0 | Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
 | P2.4t | economy | P2.4, P2.8 | Todo | | 0 | Tuning proposal after eggMaxTier → Mythic (den 40 on day 2.7); prepared on a branch, stop for Kian |
-| P2.6e | economy | C6b | In progress | agent/economy/P2.6e (stacked on C6b) | 1 | advanceOnboarding call points, one-time untradeable tutorial critter grant, setShownPads (D-064) |
+| P2.6e | economy | C6b | In review | #130 (stacked on #126) | 1 | 407 tests. Onboarding call points; free-egg auto-place also marks `place`; grantTutorialCritter (dusk_mouse, untradeable, once, keyed on stealHome: raid must NOT advance stealHome first; use tutorialCritterAvailable); setShownPads. No contract change. Was: advanceOnboarding call points, one-time untradeable tutorial critter grant, setShownPads (D-064) |
 | P2.8b | data | P2.8 | In progress | agent/data/P2.8b (stacked on #127) | 1 | EscrowService loadProfile + seedTestSession through the factor helper |
 | P2.8m | matchmaking | P2.8 | Todo | | 0 | SnapshotService build accrues through the helper; raid scout perk |
 | P2.8c | economy | P2.8, P2.9, P2.10 | Todo | | 0 | DenState.vaultSlots, GetShopOffers remote (additive Net, D-059); Economy.buyGear + UpgradeGear; economy analytics call points (P2.9) |
