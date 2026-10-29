@@ -24,7 +24,11 @@ Current phase: 0 (at the Phase 0 gate) · Last updated: 2026-10-28
 | P0.6c | ui | — | Done | #46 | 1 | Fixes #41. Raider toast on RaidEnded (stolen / dropped / not confirmed). Studio-verified |
 | P0.8 | integration | P0.5, P0.6, P0.6b | Done | #20, #44 | 2 | Kit ready (corrected against the build, #44). Single-client Studio pass passed twice, output clean (stand-in for the 2-client exit check). Private publish and the multi-client session are Kian's, at the gate |
 | P0.9 | economy | — | In progress | agent/economy/P0.9 | 1 | Egg odds helpers (tier, rescue, species, next egg) matching the real rolls; Glow packs out of PurchaseService (D-028) |
-| P0.10 | ui | P0.9 | Todo | | 0 | Egg odds on screen before every egg purchase, from P0.9's helpers (D-028) |
+| P0.10 | ui | P0.9 | Done | #51 | 1 | Odds chip + panel (D-028). Studio-checked. Fixes for #54 (phone layout) and #55 (per-species rounding) in P0.10b |
+| P0.11 | economy | — | Done | #53 | 1 | PurchaseService catalog header for D-029 |
+| P0.10b | ui | P0.10 | In progress | agent/ui/P0.10b | 1 | Fixes #54, #55 |
+| C2 | data | — | Todo | | 0 | Config.Boosts (vipGlowBonus 0.5, lanternNightGlowBonus 0.5, lanternNightSeconds 900) + contracts.md Robux-linked multiplier rule (D-030). Reviewer |
+| P0.12 | economy | C2 | Todo | | 0 | Pure Robux-linked Glow multiplier by policy flag + accrue factor + tests; PurchaseService header (D-030) |
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 

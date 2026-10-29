@@ -18,3 +18,8 @@ does not have, and a policy problem during the launch spike is unrecoverable.
 eggs, so selling Glow for Robux would make every egg a paid random item. Glow packs move to the
 Phase 2 paid-randomness mini-phase with PolicyService region checks and a reviewer audit. Egg
 odds are shown on screen for every egg from Phase 0 anyway.
+
+**Amended 2026-10-28 (Kian, D-030).** Robux-bought Glow multipliers (VIP 1.5×, Lantern Night)
+are Robux-linked: for players whose PolicyService info restricts paid random items they never
+apply, so those players' Glow stays earn-only and eggs stay purchasable. Both products ship only
+after the reviewer policy audit and PolicyService check in P2.8.
