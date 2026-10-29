@@ -31,32 +31,13 @@ Current phase: 0 → 1 (Phase 0 gate approved; Phase 1 not started, waiting for 
 | P0.12 | economy | C2 | Done | #62 | 2 | Reviewer APPROVED; S1/S2/S5 landed: glowBoostFactor({ vip, lanternNight, paidRandomRestricted?, purchasesEnabled }) fails closed, factor clamped to [1, maxGlowBoostFactor()], NaN `now` ignored. 206 tests |
 | P0.5g | data | — | Done | #64, #65 | 1 | Reviewer APPROVED both. Value-based live protection, postLossSafetySeconds, live pair limit, EscrowRecord.kind, simulation reaches protection 53-65x per seed. 225 tests on integration. Follow-ups: D-033 (data), base-measurement question (Kian) |
 | C4 | data | P0.5g | In progress | agent/data/C4 | 1 | D-033 (empty live commits grant nothing, pinned in the simulation), liveProtected NaN test, D-034 grab-time base (`EscrowRecord.liveBaseRate`, transferLive param), contracts.md mirror of #62's money-model rules (may split into C4-b) |
-| P0.5h | raid | P0.5g, C4 | Todo | | 0 | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
-| P0.5i | ui | P0.5h | Todo | | 0 | Show "Protected today" and the post-loss countdown from den LiveProtected / LiveGrabReadyAt (display only) |
+| P0.5h | raid | P0.5g, C4 | In review | #71 | 1 | CI green. Merge after C4; reviewer pass with C4 (D-034 wiring). Base measured at grab-hold accept (owner signal comes at carry start). Server also hides prompts on closed dens. Optional: pure RaidRules helper for the duplicated window check in `denClosed` | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
+| P0.5i | ui | — | Done | #70 | 1 | Den marker "Protected today" / "Safe for m:ss", own-den chip, steal prompt hidden while protected. Refusal copy built but no channel to show it (D-035). Cosmetic edge: a prompt the server disabled while protection hid it comes back on when protection ends (server still refuses) |
 
 ## Resume here (for a fresh session)
 
-State at handover (2026-10-28): integration green, all Phase 0 tasks done except the post-gate
-follow-ups below. Kian approved the Phase 0 gate; he will say when to start Phase 1.
-1. #62 (P0.12): DONE (merged).
-2. #64 + #65 (P0.5g): DONE (merged). Follow-up data PR C4: D-033 (empty live commits grant
-   nothing; pin in the simulation), plus a liveProtected NaN unit test, plus D-034 (Kian picked
-   base option (b): the den's rate at the grab); then the contracts.md mirror (item 4) in the
-   same or next PR.
-3. Then P0.5h (raid; also fix the stale "owner hit the loss cap" warning text to name protection;
-   measure the grab-time base and pass it to transferLive, D-034): RaidService wiring per the canGrabLive changes in #64's description
-   (lastLiveLossAt in server memory, set on Committed and on give-up while InFlight; in-flight
-   refusal; den attributes LiveProtected / LiveGrabReadyAt). Then P0.5i (ui) display.
-4. Data mirror PR: copy into docs/contracts.md (rules in #62's description): Money model:
-   earned = base × mutation × placement × rebirth × factor; cap uses the unboosted rate; accrue
-   at the old factor before any factor change; a factor outside [1, Economy.maxGlowBoostFactor()]
-   counts as 1; a NaN `now` changes nothing. Robux-linked multipliers: glowBoostFactor({ vip,
-   lanternNight, paidRandomRestricted?, purchasesEnabled }) returns 1 when restricted is true or
-   nil, purchases are off, or a required field is missing/non-boolean; else 1 + bonuses (additive).
-5. Studio single-client recheck after P0.5h/i (integration agent; Kian's main checkout must be
-   fast-forwarded for Rojo; never switch branches there).
-6. Promote integration → main with a merge commit (Kian approved the gate; "do what you need").
-Open questions for Kian are under Blocked. Orchestrator ledger edits go through a worktree.
+Read `docs/orchestrator-handoff.md` first; it is the current state. Follow the playbook's
+"Context discipline" (section 2).
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
@@ -114,7 +95,8 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
   crossing the gap between neighbouring dens drops as SkippedStreet (fails safe); check jitter
   doesn't cause false drops; moveRefill 1.1 feels fair.
 - 2 players: a critter being carried is never auto-placed or redrawn (#47; covered by a Lune spec).
-- 2 players: limit refusals (PairLimit, daily loss cap) show no message; judge if testers need one.
+- 2 players: limit refusals (PairLimit, LiveProtected, PostLossSafety) show no message; judge if testers
+  need one (D-035: copy is ready, needs a GrabRefused push).
 - Phone emulator: compact HUD column actually switches on a real small screen (#57), and the
   floor below ~330 px usable height.
 - Phone emulator: HUD layout and the top-bar fix (P0.6, #17); "Free" egg label on a wiped

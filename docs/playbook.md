@@ -37,9 +37,10 @@ Repeat until every task in the phase is `Done`:
    (`.claude/agents/<agent>.md`) in its own git worktree, branch `agent/<agent>/<task-id>`.
    Give it the task prompt from this file, prefixed with the template in section 4.
    Mark it `In progress` with the branch name.
-3. **Check.** When an agent reports done, verify its **Done when** list yourself:
-   `lune run tests/run.luau`, `stylua --check src tests tools`, `selene src`, and
-   `luau-analyze src/Shared/*.luau src/Shared/Data/*.luau`, plus the task's own checks.
+3. **Check.** When an agent reports done, have the `integration` agent verify its **Done when**
+   list: `lune run tests/run.luau`, `stylua --check src tests tools`, `selene src`,
+   `luau-analyze src/Shared/*.luau src/Shared/Data/*.luau`, the task's own checks and its
+   playtest. It replies with pass/fail per check plus at most 5 lines on any failure.
 4. **Review.** If the task touches contracts, `Escrow.luau`, `Profile.luau`, persistence or
    purchases, run the `reviewer` subagent. Blocking findings go back to the same agent.
 5. **Integrate.** Hand passing PRs to the `integration` agent: merge into `integration`,
@@ -115,6 +116,22 @@ Reversible: yes (Config).
 Kian reads the log in the gate report and can overturn any decision; the orchestrator then
 turns the reversal into tasks.
 
+### Context discipline
+
+- You never read source files, diffs or full test/lint output. You read only
+  `docs/progress.md`, `docs/decisions-log.md`, `docs/orchestrator-handoff.md` and agent reports.
+- Checks are delegated: loop step 3 goes to the `integration` agent (pass/fail per check, at most
+  5 lines on any failure).
+- Every agent report is capped at 15 lines: status, PR link, checks result, decisions it needs,
+  handoffs. No code, no logs, no diffs (section 4 template).
+- Decisions are short. Decide, write the log entry, move on. No long deliberation in chat.
+- Handoff file: after every merge wave, overwrite `docs/orchestrator-handoff.md` (max 40 lines):
+  phase, tasks in flight with branches, what's next, open "Ask Kian" items, anything you'd
+  otherwise have to remember.
+- Planned restarts: after every merge wave, or after 4 completed tasks, whichever comes first,
+  write the handoff, then stop and tell Kian "Ready for a fresh session." On startup, read the
+  handoff before anything else.
+
 ---
 
 ## 3. Progress ledger (`docs/progress.md`)
@@ -150,7 +167,9 @@ Statuses: `Todo`, `In progress`, `In review`, `Done`, `Blocked`.
 > Work only in your owned paths, in this worktree and branch. If you need a contract change
 > or a file outside your lane, stop and report it instead of making it. Finish with a PR into
 > `integration` containing: what changed, how you tested it, a Studio playtest plan for the
-> integration agent, and anything handed to another owner. Done when: `<done-when list>`.
+> integration agent, and anything handed to another owner. Your final report to the
+> orchestrator is at most 15 lines: status, PR link, checks result, decisions you need,
+> handoffs. No code, no logs, no diffs. Done when: `<done-when list>`.
 
 ## 5. Gate report format (posted at every gate)
 
