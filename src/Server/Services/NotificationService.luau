@@ -15,6 +15,8 @@
 
 	Server API (called by other services; none of these may throw):
 	  onLoss(event)                       a defender lost something in a raid (see LossReport).
+	                                      raiderName is the Roblox DisplayName/username, never
+	                                      player-typed text.
 	                                      Call after the escrow debit has committed, from the
 	                                      raider's server, for online and offline defenders.
 	  onStorageSample(userId, stored, capacity)
@@ -87,7 +89,8 @@ local function track(event: string, fields: { [string]: any })
 	end
 end
 
-local function loadState(userId: number): Rules.State
+-- nil = the stored state could not be read: callers fail closed (no send).
+local function loadState(userId: number): Rules.State?
 	local cached = cache[userId]
 	if cached then
 		return cached
@@ -104,11 +107,71 @@ local function loadState(userId: number): Rules.State
 				promptedAt = if type(value.promptedAt) == "number" then value.promptedAt else nil,
 			}
 		elseif not ok then
-			warn(`[Notifications] state read failed for {userId}`)
+			warn(`[Notifications] state read failed for {userId}; skipping`)
+			return nil
 		end
 	end
 	cache[userId] = state
 	return state
+end
+
+-- Claims today's send slot in the store before the POST so two servers cannot both send.
+-- The transform re-reads the stored record (never the local cache) and aborts if today is taken.
+-- Returns true plus the previous lastSentDay (for release), or false when not claimed.
+local function claimDay(userId: number, now: number): (boolean, number?)
+	local today = Rules.dayOf(now)
+	if not store then
+		local cached = cache[userId] or {}
+		if cached.lastSentDay == today then
+			return false, nil
+		end
+		local previous = cached.lastSentDay
+		cached.lastSentDay = today
+		cache[userId] = cached
+		return true, previous
+	end
+	local previous: number? = nil
+	local ok, result = pcall(function()
+		return (store :: DataStore):UpdateAsync(tostring(userId), function(old)
+			local record: { [string]: any } = if type(old) == "table" then old else {}
+			if record.lastSentDay == today then
+				return nil -- abort: already claimed today
+			end
+			previous = if type(record.lastSentDay) == "number" then record.lastSentDay else nil
+			return {
+				lastSentDay = today,
+				glowLossPending = record.glowLossPending == true,
+				promptedAt = if type(record.promptedAt) == "number" then record.promptedAt else nil,
+			}
+		end)
+	end)
+	if not ok then
+		warn(`[Notifications] claim failed for {userId}; skipping`)
+		return false, nil
+	end
+	-- UpdateAsync returns nil when the transform aborted.
+	return result ~= nil, previous
+end
+
+-- Gives the slot back after a failed POST (best effort; only if it is still our claim).
+local function releaseDay(userId: number, now: number, previous: number?)
+	local today = Rules.dayOf(now)
+	local cached = cache[userId]
+	if cached and cached.lastSentDay == today then
+		cached.lastSentDay = previous
+	end
+	if not store then
+		return
+	end
+	pcall(function()
+		(store :: DataStore):UpdateAsync(tostring(userId), function(old)
+			if type(old) ~= "table" or old.lastSentDay ~= today then
+				return nil
+			end
+			old.lastSentDay = previous
+			return old
+		end)
+	end)
 end
 
 local function saveState(userId: number, state: Rules.State)
@@ -216,6 +279,9 @@ function NotificationService.onLoss(report: LossReport)
 		local userId = report.defenderUserId
 		local now = os.time()
 		local state = loadState(userId)
+		if not state then
+			return
+		end
 		local event: Rules.LossEvent = {
 			kind = report.kind,
 			raidId = report.raidId,
@@ -230,12 +296,18 @@ function NotificationService.onLoss(report: LossReport)
 			return
 		end
 
+		local claimed, previous = claimDay(userId, now)
+		if not claimed then
+			return
+		end
 		local sent = postNotification(userId, "revenge", {
 			raider = Rules.cleanParam(report.raiderName) :: string,
 			critter = Rules.cleanParam(report.critterName) :: string,
 		}, Rules.launchData(report.raidId))
-		if sent then
-			saveState(userId, Rules.afterSend(state, "revenge", true, now))
+		if not sent then
+			releaseDay(userId, now, previous)
+		else
+			cache[userId] = Rules.afterSend(state, "revenge", true, now)
 			track("notification_sent", { userId = userId, category = "revenge", raidId = report.raidId })
 		end
 	end)
@@ -248,12 +320,21 @@ function NotificationService.onStorageSample(userId: number, stored: number, cap
 	task.spawn(withLock, userId, function()
 		local now = os.time()
 		local state = loadState(userId)
+		if not state then
+			return
+		end
 		local decision =
 			Rules.decideStorage(state, stored, capacity, Config.Notifications.storageNearlyFullShare, now, true)
 		if decision.action ~= "Send" then
 			return
 		end
-		if postNotification(userId, "storage", {}, nil) then
+		local claimed, previous = claimDay(userId, now)
+		if not claimed then
+			return
+		end
+		if not postNotification(userId, "storage", {}, nil) then
+			releaseDay(userId, now, previous)
+		else
 			saveState(userId, Rules.afterSend(state, "storage", true, now))
 			track("notification_sent", { userId = userId, category = "storage" })
 		end
@@ -272,6 +353,9 @@ function NotificationService.onSuccessfulRaid(player: Player, successfulRaids: n
 	task.spawn(withLock, player.UserId, function()
 		local now = os.time()
 		local state = loadState(player.UserId)
+		if not state then
+			return
+		end
 		if not Rules.shouldPromptOptIn(state, successfulRaids, now, true) then
 			return
 		end
