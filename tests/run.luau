@@ -85,6 +85,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "OnboardingMath",
+		load = function()
+			return require("./specs/OnboardingMath.spec")
+		end,
+	},
+	{
 		name = "HudMath",
 		load = function()
 			return require("./specs/HudMath.spec")

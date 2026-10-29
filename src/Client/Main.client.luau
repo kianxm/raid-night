@@ -23,6 +23,8 @@ for _, name in
 		"DenStatusController",
 		"RaidPortalController",
 		"RaidHudController",
+		"OnboardingController",
+		"OptInController",
 	}
 do
 	local controller = require(Controllers:WaitForChild(name)) :: any
