@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-054 · 2026-10-29 · One revenge raid per token
+Context: data on #109: "spending" a token only marked its shield bypass used, so a second +10%
+revenge raid stayed possible within the pair limit. Decision: an Async credit that moves
+something removes the named revenge token; a failed or empty revenge raid keeps it. Live revenge
+still doesn't spend (D-052). Why: revenge is one answer to one raid; the bonus can't be farmed.
+Reversible: yes (one line).
+
 ### D-053 · 2026-10-29 · Failed raids don't count toward the pair limit; raider-side commit is core
 Context: raid on #106. Decision: only an escape that moves something counts toward the same-pair
 daily limit (as live steals); timeout, tag and retreat don't. The raider-side raid-log entry, the
