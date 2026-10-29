@@ -109,6 +109,46 @@ export type OnboardingStatus = {
 	complete: boolean, -- finished or skipped (and every save from before onboarding): show none
 }
 
+-- Gear (P2.10). UseGear's answer. `readyAt` is server time (workspace:GetServerTimeNow()) when
+-- that gear can be used again; `charges` the uses left in the current async raid (nil outside one).
+-- `reason` is a GearRules.Reason when refused.
+export type GearUseResult = {
+	ok: boolean,
+	reason: string?,
+	readyAt: number?,
+	charges: number?,
+}
+
+-- GetGear's rows, one per gear id, in Profile.GEAR_IDS order. level 0 = not owned.
+export type GearSlot = {
+	id: Types.GearId,
+	level: number,
+	readyAt: number, -- server time; 0 = ready
+	charges: number?, -- uses left in the current async raid; nil outside one
+	liveOnly: boolean, -- true for the lockpick
+}
+
+-- GearUsed push, for effects only (the server already applied everything). Times are server time.
+--   Used         grapple (`position` = landing, `from` = take-off), smoke (`position`, `radius`,
+--                `endsAt`), decoy (`position` = start, `direction`, `endsAt`), speedCoil
+--                (`endsAt`), lockpick (pick started: `plot`, `endsAt` = when it completes)
+--   Done         a lockpick finished: the picker may enter `plot` until that Lockdown ends
+--   Interrupted  a lockpick broke (`reason`: GearRules.Reason Moved, Caught or NoLockdown)
+--   Ended        a decoy was popped early (or a smoke/decoy cleared at a raid's end)
+export type GearEvent = {
+	userId: number,
+	gearId: Types.GearId,
+	state: "Used" | "Done" | "Interrupted" | "Ended",
+	at: number,
+	endsAt: number?,
+	position: any?, -- Vector3
+	from: any?, -- Vector3
+	direction: any?, -- Vector3, unit, on X/Z
+	radius: number?,
+	plot: number?,
+	reason: string?,
+}
+
 local Net = {}
 
 -- Client -> server requests (RemoteFunctions unless noted).
@@ -150,6 +190,14 @@ Net.Requests = table.freeze({
 	-- Profile.ONBOARDING_STEPS, e.g. "raidLogTip"), and only the next step. true = recorded now or
 	-- already behind the player; false = refused. Every other step advances from server events.
 	AckOnboarding = "AckOnboarding",
+	-- (gearId, target?) -> GearUseResult. target: a Vector3 aim point for the grapple, ignored by
+	-- the rest. The server checks ownership, cooldown, charges, raid kind, range, line of sight and
+	-- Lockdown, and moves or spawns everything itself (P2.10).
+	UseGear = "UseGear",
+	GetGear = "GetGear", -- () -> { GearSlot }
+	-- (gearId) -> boolean. Buy (level 0 -> 1) or upgrade one gear item with Glow. Not served yet:
+	-- economy owns the Glow spend (handoff, P2.10); clients must not call it until it ships.
+	UpgradeGear = "UpgradeGear",
 })
 
 -- Server -> client pushes (RemoteEvents).
@@ -162,6 +210,8 @@ Net.Pushes = table.freeze({
 	RevengeJoinStatus = "RevengeJoinStatus",
 	-- (OnboardingStatus) after every step the player completes (server event or AckOnboarding)
 	OnboardingChanged = "OnboardingChanged",
+	-- (GearEvent) gear effects: to every player for the shared world, to the raider for a pocket
+	GearUsed = "GearUsed",
 })
 
 -- Max requests per player per 10 seconds, enforced server-side.
@@ -179,6 +229,9 @@ Net.Limits = table.freeze({
 	SaveSettings = 3,
 	GetOnboarding = 3,
 	AckOnboarding = 3,
+	UseGear = 6,
+	GetGear = 5,
+	UpgradeGear = 5,
 })
 
 --[[

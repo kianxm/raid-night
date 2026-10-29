@@ -13,7 +13,10 @@
 	       defender's raid lock, a pooled pocket, and the raider is moved in. When this server
 	       holds the defender's profile (Studio test dens) its loss count and shield are used.
 	Raid   10 times a second: timer (Config.Raid.durationSeconds), RaidRules.pocketStep, traps,
-	       guards. Walk speed = base x carrySpeedMultiplier(weight) x trap slow, set here.
+	       guards. Walk speed = base x carrySpeedMultiplier(weight) x trap slow, set here, with the
+	       raider's speed coil (Gear.speeds: the budget allows the coil until its grace ends).
+	Gear   (P2.10, Raid/Gear.luau) gearContext(player) tells Gear about the raid; guards step
+	       through GearRules.pocketGuardStep with the raider's smoke and decoy.
 	Grab   Net.Requests.GrabCritter (raidId, critterUid), or a pad's prompt: RaidRules.canGrabAsync
 	       against the raid's own snapshot copy and layout, server positions. One carry at a time.
 	       Too fast or too high while carrying, or a Trapdoor: the critter goes back to its pad.
@@ -56,6 +59,8 @@ local DenWorldService = require(Services.DenWorldService) :: any
 local MatchmakingService = require(Services.MatchmakingService) :: any
 local SnapshotService = require(Services.SnapshotService) :: any
 local Pocket = require(script.Parent.Pocket)
+local Gear = require(script.Parent.Gear)
+local GearRules = require(Shared.GearRules)
 local ReplayStore = require(script.Parent.ReplayStore)
 
 type DenSnapshot = Types.DenSnapshot
@@ -143,21 +148,24 @@ local function humanoidOf(player: Player): Humanoid?
 	return if character then character:FindFirstChildOfClass("Humanoid") else nil
 end
 
--- Sets and returns the raider's walk speed: carry weight and any trap slow.
+-- Sets the raider's walk speed (carry weight, speed coil, any trap slow) and returns the speed the
+-- movement budget allows: the coil's until its grace ends (P2.10).
 local function applyWalkSpeed(raid: Raid): number
 	local carry = raid.carry
 	local speed = StarterPlayer.CharacterWalkSpeed
 	if carry then
 		speed = RaidRules.carryWalkSpeed(speed, carry.weight)
 	end
+	local set, allowed = Gear.speeds(raid.player, speed, carry ~= nil)
 	if workspace:GetServerTimeNow() < raid.slowUntil then
-		speed *= raid.slow
+		set *= raid.slow
+		allowed *= raid.slow
 	end
 	local humanoid = humanoidOf(raid.player)
 	if humanoid then
-		humanoid.WalkSpeed = speed
+		humanoid.WalkSpeed = set
 	end
-	return speed
+	return allowed
 end
 
 -- Replay (P1.4b): recording may never affect the raid, so every call is guarded.
@@ -401,9 +409,18 @@ local function stepRaid(raid: Raid)
 		end
 	end
 	local alerted = now < raid.alertUntil
+	-- Gear (P2.10): smoke hides the raider from guards, a decoy draws them off.
+	local hidden = Gear.pocketHidden(player, raid.raidId, x, z)
+	local decoy = Gear.pocketDecoy(player, raid.raidId)
+	local here = { x = x, z = z }
 	for i, guard in raid.guards do
-		local tagged = RaidRules.guardStep(guard, raid.layout.guardRoutes[i], x, z, dt, alerted)
+		local tagged, reached =
+			GearRules.pocketGuardStep(guard, raid.layout.guardRoutes[i], here, hidden, decoy, dt, alerted)
 		Pocket.moveGuard(raid.pocket, i, guard.x, guard.z)
+		if reached then
+			Gear.popDecoy(player)
+			decoy = nil
+		end
 		if tagged then
 			return endRaid(raid, "Tagged")
 		end
@@ -645,6 +662,20 @@ local function testHook(command: string, targetUserId: any, revengeRaidId: any):
 		return if lastReplay == "" then "no replay saved yet" else lastReplay
 	end
 	return `unknown command {command}`
+end
+
+-- What Raid/Gear.luau needs to know about a player's pocket raid (P2.10); nil = not in one.
+function AsyncRaid.gearContext(player: Player): Gear.AsyncContext?
+	local raid = raids[player]
+	if raid == nil or raid.ended then
+		return nil
+	end
+	return {
+		raidId = raid.raidId,
+		pocket = raid.pocket,
+		carrying = raid.carry ~= nil,
+		trapped = workspace:GetServerTimeNow() < raid.slowUntil and raid.slow < 1,
+	}
 end
 
 function AsyncRaid.start(injected: Api)

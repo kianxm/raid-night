@@ -115,6 +115,12 @@ local SPECS: { { name: string, load: () -> { [string]: () -> () } } } = {
 		end,
 	},
 	{
+		name = "GearRules",
+		load = function()
+			return require("./specs/GearRules.spec")
+		end,
+	},
+	{
 		name = "Replay",
 		load = function()
 			return require("./specs/Replay.spec")
