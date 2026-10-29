@@ -45,11 +45,17 @@ local SIM = {
 	physicalPads = 30, -- design: pads 6 -> 30 (the Phase 0 world builds 6)
 }
 
--- Scenarios: Config overrides as "Section.key" = value. "Before" rows use the real Config.
-local PROPOSED = {
-	["Economy.upgradeCostBase"] = 500,
-	["Economy.eggPriceGrowth"] = 1.32,
-	["Economy.eggPriceBase"] = 150,
+-- Scenarios: Config overrides as "Section.key" = value, or "EggOdds.<Tier>" = weight.
+-- P1_8: the values Kian approved at the Phase 1 gate (P1.8), i.e. Config before P2.4t.
+local P1_8 = { ["Economy.eggPriceBase"] = 150, ["Economy.eggPriceGrowth"] = 1.32 }
+-- P2.4t option B: a steeper egg price plus doubled Legendary/Mythic odds (paid for by Rare).
+-- Changes the published odds, so it needs a design call (and HudMath.spec / contracts.md updates).
+local ODDS = {
+	["Economy.eggPriceBase"] = 450,
+	["Economy.eggPriceGrowth"] = 1.28,
+	["EggOdds.Rare"] = 0.10,
+	["EggOdds.Legendary"] = 0.036,
+	["EggOdds.Mythic"] = 0.004,
 }
 local PHASE2 = { ["Economy.eggMaxTier"] = "Mythic" } -- D-003: Phase 2 raises the egg cap (live from P2.4)
 local PHASE1_CAP = { ["Economy.eggMaxTier"] = "Uncommon" } -- the Phase 0-1 cap, for before/after rows
@@ -65,14 +71,21 @@ local function merge(...: { [string]: any }): { [string]: any }
 end
 
 local SCENARIOS = {
-	{ name = "current", note = "Config as it is (eggMaxTier Mythic since P2.4)", overrides = {} },
-	{ name = "phase1-cap", note = "Config + eggMaxTier Uncommon (Phase 0-1, before P2.4)", overrides = PHASE1_CAP },
-	{ name = "phase2", note = "Config + eggMaxTier Mythic (D-003)", overrides = PHASE2 },
-	{ name = "proposed", note = "phase2 + proposed values", overrides = merge(PHASE2, PROPOSED) },
+	{ name = "current", note = "Config as it is (P2.4t proposal, eggMaxTier Mythic)", overrides = {} },
 	{
-		name = "proposed-p1",
-		note = "proposed values with the Phase 1 egg cap",
-		overrides = merge(PHASE1_CAP, PROPOSED),
+		name = "no-change",
+		note = "P1.8 values with eggMaxTier Mythic (Config before P2.4t)",
+		overrides = merge(PHASE2, P1_8),
+	},
+	{
+		name = "phase1-cap",
+		note = "P1.8 values with eggMaxTier Uncommon (the Phase 1 mid-game pace)",
+		overrides = merge(P1_8, PHASE1_CAP),
+	},
+	{
+		name = "odds",
+		note = "option B: egg price 450 x1.28, Rare 10%, Legendary 3.6%, Mythic 0.4%",
+		overrides = merge(PHASE2, ODDS),
 	},
 }
 
@@ -125,9 +138,24 @@ local function loadShared(overrides: { [string]: any }): { [string]: any }
 			for key, value in overrides do
 				local section, field = string.match(key, "^(%w+)%.(%w+)$")
 				local tbl = section and module[section]
-				assert(tbl and type(tbl[field]) == type(value), `override {key} does not match Config's shape`)
-				tbl[field] = value
+				if section == "EggOdds" then
+					-- EggOdds.<Tier>=weight sets that tier's weight; the weights must still sum to 1.
+					local entry = nil
+					for _, e in tbl do
+						entry = if e.tier == field then e else entry
+					end
+					assert(entry and type(value) == "number", `override {key}: no EggOdds tier {field}`)
+					entry.weight = value
+				else
+					assert(tbl and type(tbl[field]) == type(value), `override {key} does not match Config's shape`)
+					tbl[field] = value
+				end
 			end
+			local total = 0
+			for _, e in module.EggOdds do
+				total += e.weight
+			end
+			assert(math.abs(total - 1) < 1e-9, `EggOdds weights sum to {total}, not 1`)
 			module = deepFreeze(module)
 		end
 		cache[name] = module
@@ -504,6 +532,22 @@ local function report(run: { [string]: any })
 				0
 			)} |`
 		)
+	end
+	-- Time per level band: each player's own days and hours from one level to the next, then the
+	-- median over the players who reached both ends (level 1 is day 0, 0 h).
+	print("\n| Level band | Players | Days in band (median) | Hours played in band (median) |")
+	print("| --- | --- | --- | --- |")
+	for _, band in { { 1, 10 }, { 10, 20 }, { 20, 30 }, { 30, 40 }, { 40, 50 } } do
+		local from, to = band[1], band[2]
+		local function span(field: string): { number }
+			return column(results, function(r)
+				local a = if from == 1 then { days = 0, played = 0 } else r.levelAt[from]
+				local b = r.levelAt[to]
+				return if a and b then b[field] - a[field] else nil
+			end)
+		end
+		local days = span("days")
+		print(`| {from} -> {to} | {#days} | {fmt(quantile(days, 0.5))} | {fmt(quantile(span("played"), 0.5))} |`)
 	end
 	print(
 		"\n| Day | Players still playing | Den level | Glow held at last session end | Egg price | Held / egg price |"

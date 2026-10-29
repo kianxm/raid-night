@@ -169,8 +169,10 @@ local Config = {
 		maxDenLevel = 50,
 		upgradeCostBase = 500,
 		upgradeCostGrowth = 1.35, -- cost(level) = base * growth^(level - 1)
-		eggPriceBase = 150,
-		eggPriceGrowth = 1.32, -- egg price scales with den level
+		-- P2.4t (proposal, needs Kian): 150 x1.32 -> 400 x1.26. Pricier early eggs slow the
+		-- mid-game the Mythic cap sped up; the flatter growth keeps the ~3-week first rebirth.
+		eggPriceBase = 400,
+		eggPriceGrowth = 1.26, -- egg price scales with den level
 		rebirthMinTier = "Legendary", -- must own at least one critter of this tier or higher
 		-- Highest tier a bought egg can hatch. Tiers up to it keep their EggOdds ratios,
 		-- renormalized (Economy.rollTierUpTo). Phase 0-1 used "Uncommon"; Phase 2 raised it to
