@@ -80,7 +80,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.11 | assets | — | Blocked | | 0 | No credits (D-057); sound hooks ship empty in P2.5 |
 | C6b | data | C6 | In review | #126 (stacked on #123) | 1 | 396 tests. Settings + onboarding remotes, RateLimit.luau, steps 0-6 server-advanced (raidLogTip client ack only). Reviewer (xhigh) APPROVED. D-064 |
 | P2.6r | raid | C6b, P2.3, P2.6e | In progress | agent/raid/P2.6r → preview/phase2 | 1 | Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
-| P2.4t | economy | P2.4 | In progress | agent/economy/P2.4t → preview/phase2 (PROPOSAL) | 1 | Tuning proposal after eggMaxTier → Mythic (den 40 on day 2.7); prepared on a branch, stop for Kian |
+| P2.4t | economy | P2.4 | Blocked | #138 (PROPOSAL, not in preview) | 1 | Needs Kian. ~200 value sets swept: none gives both level 40 ~day 16.7 and ~3-week rebirth. Options: (1) eggPriceBase 400, growth 1.26 (L40 day 4.7, rebirth median 23.8, Glow held ~15 egg prices at day 21); (2) odds x2 for Legendary/Mythic (design + ui/odds changes); (3) no change (L40 day 2.7, rebirth 21.7); (4) new task: egg tiers unlock by den level. Was: Tuning proposal after eggMaxTier → Mythic (den 40 on day 2.7); prepared on a branch, stop for Kian |
 | P2.6e | economy | C6b | In review | #130 (stacked on #126) | 1 | 407 tests. Onboarding call points; free-egg auto-place also marks `place`; grantTutorialCritter (dusk_mouse, untradeable, once, keyed on stealHome: raid must NOT advance stealHome first; use tutorialCritterAvailable); setShownPads. No contract change. Was: advanceOnboarding call points, one-time untradeable tutorial critter grant, setShownPads (D-064) |
 | P2.8b | data | P2.8 | In review | #132 (stacked on #127) | 1 | 402 tests. Escrow loadProfile + seedTestSession accrue via the helper (setGlowAccrue hook registered in EscrowService.start); absent defenders stay factor 1. Reviewer (xhigh) APPROVED; PENDING now empty with #133. Was: EscrowService loadProfile + seedTestSession through the factor helper |
 | P2.8m | matchmaking | P2.8 | In review | #133 → preview/phase2 | 1 | Snapshot accrue via helper (PENDING entry removed), raid_portal_opened + RaidFlow Portal step. Raid scout undefined → Kian (proposal: +1 target for owners). Reviewer APPROVED |
@@ -119,6 +119,7 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 - Merges: the permission check refuses `gh pr merge` (D-044/D-058). Phase 1 ledger #116 and every
   Phase 2 PR wait for you; merge order is in the gate report.
 - Higgsfield credits for P2.1/P2.2/P2.11 generation, and Asset Gate 1 picks (#87).
+- P2.4t tuning after eggMaxTier → Mythic (#138): pick option 1-4 (see the P2.4t row).
 
 P2.8 product questions (defaults chosen in D-061; confirm or overturn at the gate):
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
