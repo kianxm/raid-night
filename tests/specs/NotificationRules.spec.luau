@@ -107,4 +107,23 @@ tests["launch data round trips the raidId and rejects other data"] = function()
 	expect.truthy(#Rules.launchData(string.rep("a", 43)) <= Rules.MAX_LAUNCH_DATA)
 end
 
+tests["noteRaid dedupes a raidId, stays bounded, and state transitions keep the list"] = function()
+	local list, isNew = Rules.noteRaid(nil, "raid-1")
+	expect.truthy(isNew)
+	expect.eq(#list, 1)
+	local again, isNewAgain = Rules.noteRaid(list, "raid-1")
+	expect.falsy(isNewAgain)
+	expect.eq(#again, 1)
+	for i = 1, Rules.MAX_SEEN_RAIDS + 5 do
+		list = Rules.noteRaid(list, `r{i}`)
+	end
+	expect.eq(#list, Rules.MAX_SEEN_RAIDS)
+	expect.falsy(select(2, Rules.noteRaid(list, `r{Rules.MAX_SEEN_RAIDS + 5}`)))
+	expect.truthy(select(2, Rules.noteRaid(list, "raid-1"))) -- aged out
+	local state: Rules.State = { seenRaids = list }
+	expect.eq(Rules.afterSend(state, "revenge", true, NOW).seenRaids, list)
+	expect.eq(Rules.afterGlowLoss(state).seenRaids, list)
+	expect.eq(Rules.afterPrompt(state, NOW).seenRaids, list)
+end
+
 return tests
