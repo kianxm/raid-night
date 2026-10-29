@@ -24,11 +24,10 @@ local SNAPSHOT = "src/Server/Services/SnapshotService.luau"
 local GUARDED = { "Economy%.accrue", "Economy%.collect", "Economy%.changeGlowInputs" }
 
 -- Factor-1 accrues of an online player outside the helper, waiting for their owner (handoffs in
--- the P2.8 PR). When one lands, remove it here; the guard fails until you do.
-local PENDING: { [string]: number } = {
-	["src/Server/Services/EscrowService.luau"] = 1, -- data: loadProfile -> IncomeService.accrue
-	["src/Server/Services/DataService.luau"] = 1, -- data: seedTestSession -> IncomeService.accrue
-}
+-- the P2.8 PR). When one lands, remove it here; the guard fails until you do. Landed: data's
+-- EscrowService loadProfile and DataService seedTestSession (P2.8b, IncomeService.accrue).
+-- Snapshots (matchmaking) are tracked separately in pendingNow.
+local PENDING: { [string]: number } = {}
 
 local function count(text: string, pattern: string): number
 	return select(2, string.gsub(text, pattern, ""))
