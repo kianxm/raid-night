@@ -36,6 +36,36 @@ tests["flags are frozen so no service can flip one at runtime"] = function()
 	end)
 end
 
+-- Boosts: Robux-bought Glow multipliers (decision D-030) ----------------------------------------
+
+-- The approved Config.Boosts keys (docs/contracts.md). Adding or removing one is a contract change.
+local BOOST_KEYS = { "vipGlowBonus", "lanternNightGlowBonus", "lanternNightSeconds" }
+
+tests["every boost value is present, finite and non-negative"] = function()
+	for _, key in BOOST_KEYS do
+		local value = (Config.Boosts :: any)[key]
+		expect.eq(type(value), "number", `Boosts.{key}`)
+		expect.truthy(value >= 0 and value < math.huge, `Boosts.{key} is finite and non-negative, got {value}`)
+	end
+end
+
+tests["no unlisted boost keys"] = function()
+	for key in Config.Boosts :: any do
+		expect.truthy(table.find(BOOST_KEYS, key) ~= nil, `unexpected key Boosts.{key}`)
+	end
+end
+
+tests["a Lantern Night lasts 15 minutes"] = function()
+	expect.eq(Config.Boosts.lanternNightSeconds, 900, "Boosts.lanternNightSeconds")
+end
+
+tests["boosts are frozen so no service can change one at runtime"] = function()
+	expect.truthy(table.isfrozen(Config.Boosts), "Config.Boosts is frozen")
+	expect.throws(function()
+		(Config.Boosts :: any).vipGlowBonus = 10
+	end)
+end
+
 -- Economy.eggMaxTier (decision D-003) -----------------------------------------------------------
 
 tests["eggMaxTier is a tier eggs can hatch"] = function()

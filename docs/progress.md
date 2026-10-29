@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 0 (at the Phase 0 gate) · Last updated: 2026-10-28
+Current phase: 0 → 1 (Phase 0 gate approved; Phase 1 not started, waiting for Kian) · Last updated: 2026-10-28
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -27,11 +27,33 @@ Current phase: 0 (at the Phase 0 gate) · Last updated: 2026-10-28
 | P0.10 | ui | P0.9 | Done | #51 | 1 | Odds chip + panel (D-028). Studio-checked. Fixes for #54 (phone layout) and #55 (per-species rounding) in P0.10b |
 | P0.11 | economy | — | Done | #53 | 1 | PurchaseService catalog header for D-029 |
 | P0.10b | ui | P0.10 | Done | #57 | 1 | Fixes #54 (compact column on short screens, fit tested 320-900 px) and #55 (true per-species odds). Studio-simulated; real phone check deferred |
-| C2 | data | — | In review | #59 | 1 | Config.Boosts + contracts.md Robux-linked multiplier rule (D-030). Reviewer running |
-| P0.12 | economy | C2 | Todo | | 0 | Pure Robux-linked Glow multiplier by policy flag + accrue factor + tests; PurchaseService header (D-030) |
-| P0.5g | data | — | In progress | agent/data/C3 | 1 | D-031 live loss rules: Config.LiveRaid (postLossSafetySeconds 60, maxStealsPerPairPerDay 2, protectionLossShare 0.5), optional liveLossBaseRate/liveLossRateToday, EscrowRecord.kind, value-based debit, pure rules + tests, contracts.md. Reviewer |
+| C2 | data | — | Done | #59 | 1 | Reviewer APPROVED. Config.Boosts + contracts.md Robux-linked multipliers (D-030) |
+| P0.12 | economy | C2 | Done | #62 | 2 | Reviewer APPROVED; S1/S2/S5 landed: glowBoostFactor({ vip, lanternNight, paidRandomRestricted?, purchasesEnabled }) fails closed, factor clamped to [1, maxGlowBoostFactor()], NaN `now` ignored. 206 tests |
+| P0.5g | data | — | In review | #64, #65 | 1 | Stacked; merge #64 then #65 together (#64 alone would let the count cap empty-commit live steals). 210 tests. Reviewer running |
 | P0.5h | raid | P0.5g | Todo | | 0 | RaidService: postLossSafetySeconds timer (server memory), in-flight refusal, new canGrabLive inputs, transferLive kind Live, den attributes LiveProtected / LiveGrabReadyAt |
 | P0.5i | ui | P0.5h | Todo | | 0 | Show "Protected today" and the post-loss countdown from den LiveProtected / LiveGrabReadyAt (display only) |
+
+## Resume here (for a fresh session)
+
+State at handover (2026-10-28): integration green, all Phase 0 tasks done except the post-gate
+follow-ups below. Kian approved the Phase 0 gate; he will say when to start Phase 1.
+1. #62 (P0.12): DONE (merged).
+2. #64 + #65 (P0.5g): a reviewer was running. If no review is posted, run a fresh `reviewer` on
+   both (focus: recordLiveLoss exactly once incl. recovery, empty-commit side effects, old data,
+   value rule gaming, canGrabLive order). Fix → re-review → merge #64 then #65.
+3. Then P0.5h (raid): RaidService wiring per the canGrabLive changes in #64's description
+   (lastLiveLossAt in server memory, set on Committed and on give-up while InFlight; in-flight
+   refusal; den attributes LiveProtected / LiveGrabReadyAt). Then P0.5i (ui) display.
+4. Data mirror PR: copy into docs/contracts.md (rules in #62's description): Money model:
+   earned = base × mutation × placement × rebirth × factor; cap uses the unboosted rate; accrue
+   at the old factor before any factor change; a factor outside [1, Economy.maxGlowBoostFactor()]
+   counts as 1; a NaN `now` changes nothing. Robux-linked multipliers: glowBoostFactor({ vip,
+   lanternNight, paidRandomRestricted?, purchasesEnabled }) returns 1 when restricted is true or
+   nil, purchases are off, or a required field is missing/non-boolean; else 1 + bonuses (additive).
+5. Studio single-client recheck after P0.5h/i (integration agent; Kian's main checkout must be
+   fast-forwarded for Rojo; never switch branches there).
+6. Promote integration → main with a merge commit (Kian approved the gate; "do what you need").
+Open questions for Kian are under Blocked. Orchestrator ledger edits go through a worktree.
 
 ## Phase 1: Async core (not started; entry needs the Phase 0 gate)
 
@@ -59,7 +81,16 @@ P1.1 to P1.10 all `Todo`. See `docs/playbook.md`.
 
 ## Blocked (needs Kian)
 
-- None right now.
+Not urgent: all three are needed before P2.8 ships products, nothing earlier.
+- Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
+  vault slot (Vault critters earn 50%), auto-collect, shield, timer skips (undefined; if any
+  skip covers income it grants Glow), event pass rewards, raid scout, and VIP's "non-Glow
+  perks" (undefined). D-030 only switches off the two multipliers. Should all of these be
+  Robux-linked too (off or reduced for restricted players), or classified one by one in the
+  P2.8 audit?
+- Does VIP's 1.5× apply to offline income (accrue covers both), or only while online?
+- Restricted buyers: should Lantern Night be hidden from players whose policy restricts paid
+  random items, and should the VIP description say the Glow bonus isn't available everywhere?
 
 ## Deferred to the end-of-phase session (Kian, 2026-10-28)
 
@@ -117,6 +148,7 @@ Full log with reasons: `docs/decisions-log.md`.
 
 - Phase 0 exit checks: passed 2026-10-28 (176 tests, CI green on 860c3f4, single-client Studio
   session with no errors; the 2-client session is deferred to Kian's end-of-phase test).
-- Phase 0 gate: PENDING (Kian). Waiting for the friends playtest; do not start Phase 1.
+- Phase 0 gate: APPROVED 2026-10-28 (Kian, in chat), before the friends playtest; the deferred
+  multi-person checks stay open for when testers are available. Do not start Phase 1 until Kian says so.
 - G0: cleared 2026-10-27 (Kian, in chat)
 - Style lock: cleared 2026-10-28 (Kian picked ref-01 + ref-02; body plan follows the animal)

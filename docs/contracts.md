@@ -296,14 +296,38 @@ Tiers up to it keep their `Config.EggOdds` ratios, renormalized to sum to 1
 Phase 2 raises it to `"Mythic"`. The rescue egg rolls from its own Common-only table (from
 P0.4b) and ignores `eggMaxTier` (decision D-004).
 
-Glow is earn-only at launch (D-028): no product may grant Glow for Robux. The "Lantern Night"
-server boost (D-029) multiplies Glow earned in play (+50% for everyone in the server, 15 min);
-it never grants Glow directly, and it needs a reviewer policy audit and PolicyService checks
-before it ships (does a Robux-bought earning boost make Glow eggs paid random items?). Glow buys eggs, so
+Glow is earn-only at launch (D-028, amended by D-030): no product ever grants Glow directly.
+Robux-bought Glow multipliers (VIP, and the "Lantern Night" server boost from D-029) only
+multiply Glow earned in play, and they follow the Robux-linked rule in the next section: they
+never apply to a player whose PolicyService info restricts paid random items. Glow buys eggs, so
 Glow packs would make every egg a paid random item; they ship only in the Phase 2
 paid-randomness mini-phase with on-screen odds, PolicyService region checks and a reviewer
 audit. Egg odds are shown on screen for every egg from Phase 0, from Economy's odds helpers
 (Config.EggOdds after the eggMaxTier renormalization; rescue egg: Common 100%).
+
+## Robux-linked Glow multipliers
+
+Decision D-030. Lantern Night is a Glow multiplier. All Robux-bought Glow multipliers (VIP 1.5×,
+Lantern Night) are Robux-linked. For a player whose PolicyService info restricts paid random
+items, they never apply: VIP keeps its non-Glow perks; other players' Lantern Nights don't boost
+them; so their Glow stays earn-only and eggs stay purchasable for them. Egg odds are shown
+everywhere. Both products are gated on the reviewer policy audit and the PolicyService check in
+P2.8. Bonuses stack additively (Config.Boosts). The policy check must fail closed: if
+PolicyService can't be read for a player, treat them as restricted (no Robux-linked
+multiplier). The multiplier is computed by Economy (pure, tested) and applied through
+Economy.accrue's factor (economy's P0.12).
+
+The restriction is `ArePaidRandomItemsRestricted` in the player's PolicyService info. Values
+live in `Config.Boosts`:
+
+| Key | Launch value | Meaning |
+| --- | --- | --- |
+| `vipGlowBonus` | 0.5 | VIP pass: +50% Glow (1.5× on its own) |
+| `lanternNightGlowBonus` | 0.5 | Lantern Night: +50% Glow for everyone in the server who isn't restricted |
+| `lanternNightSeconds` | 900 | How long one Lantern Night lasts (15 min) |
+
+Additive means VIP plus Lantern Night is 1 + 0.5 + 0.5 = 2.0×, not 1.5 × 1.5. Adding or removing
+a key is a contract change; `Config.spec` checks the keys and that every value is non-negative.
 
 ## Tradeability
 
