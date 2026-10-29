@@ -116,10 +116,19 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
 - Live protection (D-036/D-037): an owner buying an egg after a protecting loss (auto-place lifts
   protection); an owner vaulting during a carry from a refilled den (the steal still lands).
 
+## Hardening backlog (triage after the phase playtest, D-039)
+
+Exploit and fairness edge cases that lose nothing and fail safe. One line each: what, where it
+came from, rough size. Not fixed before the phase's human playtest; then kept, scheduled or
+dropped based on real play.
+
+- (empty)
+
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and
   `integration`: changes only by PR, required status check `check` (CI), no force-push, no
   deletion, 0 approvals, no bypass. Ledger updates go through PRs too; no direct commits.
+  Batch them: one ledger PR per merge wave, `gh pr merge --auto` (D-039).
 
 ## Decisions
 

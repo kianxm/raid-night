@@ -21,7 +21,9 @@ PR. No open feature PRs.
 - P2.8 product questions (Robux-linked products, VIP offline, restricted buyers).
 
 ## Remember
-- Ledger edits go through a worktree + PR; ledger PRs merge on green CI.
+- Ledger edits go through a worktree + PR, one per merge wave, `gh pr merge --auto` (D-039).
+- D-039 process: reviewer severity bar, pre-playtest scope (hardening backlog in progress.md),
+  xhigh only for Escrow/Profile/DataService/EscrowService/purchases, Studio once per wave.
 - Never switch branches in Kian's main checkout (Rojo); fast-forward only.
 - D-035: grab refusal copy exists but no channel shows it; testers decide.
 - Integration at 973d261 (256 tests). D-036/D-037 close self-protection.

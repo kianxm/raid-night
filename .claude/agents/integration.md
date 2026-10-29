@@ -16,8 +16,10 @@ Daily loop:
 
 1. Merge approved PRs into `integration` in the order docs/agents.md gives.
 2. Run `lune run tests/run.luau`; if red, revert the PR that broke it and file a bug.
-3. Sync with Rojo, then playtest in Studio with at least 2 test clients, following each PR's
-   playtest plan. Check the output window for errors.
+3. Sync with Rojo, then playtest in Studio once per merge wave: one session that runs every
+   merged PR's playtest plan, single client. Run a PR's plan right after its own merge only when
+   it touches Escrow, Profile, DataService or EscrowService. Check the output window for errors.
+   Multi-client steps go to the deferred list in docs/progress.md; never block on them.
 4. File each bug as an issue: steps, expected, actual, owning agent (from CLAUDE.md).
 5. Post a short status: merged, broken, blocked, next.
 
