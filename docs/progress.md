@@ -78,9 +78,10 @@ the stack (D-058). Profile fields for the phase come in one batch, C6 (D-059).
 | P2.9 | data | C6 | In progress | agent/data/P2.9 (stacked on C6) | 1 | Analytics events (Appendix A) + funnels |
 | P2.10 | raid | C6, P2.3 | In progress | agent/raid/P2.10 (stacked on C6) | 1 | Gear (live only for lockpick) |
 | P2.11 | assets | — | Blocked | | 0 | No credits (D-057); sound hooks ship empty in P2.5 |
-| C6b | data | C6 | In progress | agent/data/C6b (stacked on C6) | 1 | Settings + onboarding remotes and server handlers (D-063) |
-| P2.6r | raid | C6b, P2.3 | Todo | | 0 | Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
+| C6b | data | C6 | In review | #126 (stacked on #123) | 1 | 396 tests. Settings + onboarding remotes, RateLimit.luau, steps 0-6 server-advanced (raidLogTip client ack only). Reviewer (xhigh) running. D-064 |
+| P2.6r | raid | C6b, P2.3, P2.6e | Todo | | 0 | Tutorial den next door, new-player 30-min shield on live steals, countSuccessfulRaid + onSuccessfulRaid at escape (D-063) |
 | P2.4t | economy | P2.4, P2.8 | Todo | | 0 | Tuning proposal after eggMaxTier → Mythic (den 40 on day 2.7); prepared on a branch, stop for Kian |
+| P2.6e | economy | C6b | In progress | agent/economy/P2.6e (stacked on C6b) | 1 | advanceOnboarding call points, one-time untradeable tutorial critter grant, setShownPads (D-064) |
 | P2.12 | integration | all | Todo | | 0 | Closed-test build + kit; access setup is Kian's |
 
 ## Setup notes

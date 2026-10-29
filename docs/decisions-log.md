@@ -3,6 +3,13 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-064 · 2026-10-29 · No onboarding skip yet; tutorial steal is a one-time grant
+Context: data on #126. Decision: no skip remote for now (the guided steal is the hook; revisit
+after the closed test). The tutorial den has no defender profile, so its steal grants one fixed
+Common critter marked untradeable, at most once per player (economy, P2.6e), called by raid at
+the tutorial escape; nothing goes through Escrow. Why: simplest path to the onboarding exit check;
+no free critter farming; rule 4 untouched. Reversible: yes.
+
 ### D-063 · 2026-10-29 · C6 follow-ups: who wires remotes, accessories stay with the buyer, gear 0 = not owned
 Context: data on #123. Decision: (1) data writes the server handlers and Net remotes for settings
 and onboarding (C6b, stacked on C6); onboarding steps advance server-side from real events, the
