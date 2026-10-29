@@ -285,7 +285,9 @@ local function endRaid(raid: Raid, reason: string)
 			else
 				-- Escrow may still have the raid (the raider's Open_ index): never claim "nothing".
 				warn(`[AsyncRaid] onAsyncEscape for raid {raid.raidId} failed: {result}`)
-				outcome = RaidRules.asyncEscapeOutcome("InFlight", nil, carry.speciesId, 0, os.time())
+				local inFlight = RaidRules.asyncEscapeOutcome("InFlight", nil, carry.speciesId, 0, os.time())
+				outcome = inFlight
+				rememberShield(raid.defenderUserId, inFlight.shieldUntil) -- before the lock releases
 			end
 		end
 		pcall(MatchmakingService.releaseLock, raid.defenderUserId, raid.raidId)
