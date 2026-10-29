@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: zooms in a quick loop leaving a ring of sparkles",
+    "stolen": "gotcha pose when stolen: a quick show-off gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2.5,
     "texture": 1024,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "comet_ferret",
-  "idleAnimation": "zooms in a quick loop leaving a ring of sparkles",
   "look": "sleek white ferret trailing a sparkling comet tail",
   "name": "Comet Ferret",
   "notes": "",
@@ -16,6 +20,7 @@
     "#9FD8FF",
     "#141A33"
   ],
+  "personality": "show-off",
   "status": "prompts-ready",
   "tier": "Rare"
 }

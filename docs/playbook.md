@@ -36,17 +36,25 @@ Repeat until every task in the phase is `Done`:
 2. **Dispatch.** Start up to **4** ready tasks at once, each as its named subagent
    (`.claude/agents/<agent>.md`) in its own git worktree, branch `agent/<agent>/<task-id>`.
    Give it the task prompt from this file, prefixed with the template in section 4.
-   Mark it `In progress` with the branch name.
+   Mark it `In progress` with the branch name. **Effort:** agents run at their file's default.
+   Spawn `data` and `reviewer` at `xhigh` only when the task or PR touches `Escrow.luau`,
+   `Profile.luau`, DataService, EscrowService or purchases (D-039).
 3. **Check.** When an agent reports done, have the `integration` agent verify its **Done when**
    list: `lune run tests/run.luau`, `stylua --check src tests tools`, `selene src`,
    `luau-analyze src/Shared/*.luau src/Shared/Data/*.luau`, the task's own checks and its
    playtest. It replies with pass/fail per check plus at most 5 lines on any failure.
 4. **Review.** If the task touches contracts, `Escrow.luau`, `Profile.luau`, persistence or
-   purchases, run the `reviewer` subagent. Blocking findings go back to the same agent.
-5. **Integrate.** Hand passing PRs to the `integration` agent: merge into `integration`,
-   rerun tests, sync with Rojo, playtest in Studio per the PR's plan. Only the integration
-   agent drives Studio. Merge one PR at a time.
-6. **Record.** Update the ledger: `Done` with the PR link, or back to `Todo` with the reason.
+   purchases, run the `reviewer` subagent; never for UI, copy, assets or docs-only PRs. Only the
+   reviewer's BLOCKING findings (its severity bar) go back to the same agent, and a re-review
+   checks only those. Suggestions go to the hardening backlog in `docs/progress.md`, not into a
+   fix round. One fix round per PR; a second only for a duplication or loss path.
+5. **Integrate.** Hand passing PRs to the `integration` agent: merge into `integration` one PR
+   at a time, rerunning tests after each. Studio runs once per merge wave, covering every merged
+   PR's playtest plan in one session; only Escrow, Profile, DataService or EscrowService PRs get
+   their own Studio run right after merging. Only the integration agent drives Studio.
+6. **Record.** Once per merge wave, not per event: one ledger PR that updates `docs/progress.md`,
+   `docs/decisions-log.md` and the handoff together, merged with `gh pr merge --auto` so nobody
+   waits on CI. Ledger notes are one line each (status, PR, test count); details live in the PR.
 7. **Decide or escalate.** When an agent raises a question (including a contract change),
    apply the decision policy below. Decide it yourself if you can, log it, and unblock.
    Escalate only "Ask Kian" items, or a task that fails its checks **3 times** after you
@@ -64,7 +72,14 @@ When all tasks are `Done`: run the phase's **Exit checks**. If they pass, stop a
   require a `reviewer` pass, update docs/contracts.md, then unblock dependents.
 - Never spend credits beyond the phase budget, buy ads, publish publicly, change prices on a
   live game, or touch a live place.
-- Keep PRs under ~400 changed lines; split bigger tasks.
+- Keep PRs under ~400 changed lines, or up to ~800 when the change must be reviewed as one unit
+  (don't split a reviewed unit into stacked `-b` PRs).
+- **Pre-playtest scope** (D-039). Until a phase's human playtest has run, fix right away only
+  duplication or loss of critters, Glow or purchases; client trust; and policy. Other exploit
+  and fairness edge cases (gaming your own protection, timing tricks, rare races that fail safe)
+  go to the hardening backlog in `docs/progress.md`, one line each, and are triaged after the
+  playtest, when real play shows which ones matter. No new decision-log entry for a backlog
+  item until it is scheduled.
 - If the escrow simulation ever fails on `integration`, stop everything else and fix it first.
 
 ### Decision policy
@@ -89,8 +104,9 @@ who has read the design doc, and write down why.
 4. Fair to the player being raided: loss stings but never wipes or traps anyone.
 5. Prefer reversible: Config values over code, optional fields over migrations, kill
    switches on anything risky.
-6. Close future exploits now when it is cheap (example: mark rescue-egg critters untradeable
-   before trading exists).
+6. Close future exploits now when it is cheap: a few lines in the PR already open, with no new
+   fix round, decision or contract change (example: mark rescue-egg critters untradeable before
+   trading exists). Otherwise it goes to the hardening backlog (see Pre-playtest scope).
 7. Simplest thing that passes the phase gate.
 
 **Ask Kian (mark Blocked):**
@@ -170,7 +186,8 @@ Statuses: `Todo`, `In progress`, `In review`, `Done`, `Blocked`.
 > Work only in your owned paths, in this worktree and branch. If you need a contract change
 > or a file outside your lane, stop and report it instead of making it. Finish with a PR into
 > `integration` containing: what changed, how you tested it, a Studio playtest plan for the
-> integration agent, and anything handed to another owner. Your final report to the
+> integration agent, and anything handed to another owner. Read only the docs/contracts.md
+> sections for what you touch, not the whole page. Your final report to the
 > orchestrator is at most 15 lines: status, PR link, checks result, decisions you need,
 > handoffs. No code, no logs, no diffs. Done when: `<done-when list>`.
 

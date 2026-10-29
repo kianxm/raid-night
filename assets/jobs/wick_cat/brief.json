@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: chases its own tail flame in a circle",
+    "stolen": "gotcha pose when stolen: a quick playful gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "wick_cat",
-  "idleAnimation": "chases its own tail flame in a circle",
   "look": "small black cat with a candle flame burning on the tip of its tail",
   "name": "Wick Cat",
   "notes": "",
@@ -16,6 +20,7 @@
     "#2B2B33",
     "#120F14"
   ],
+  "personality": "playful",
   "status": "prompts-ready",
   "tier": "Uncommon"
 }

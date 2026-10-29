@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: bobs up and down, then accidentally zaps itself",
+    "stolen": "gotcha pose when stolen: a quick dreamy gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "puddle_jelly",
-  "idleAnimation": "bobs up and down, then accidentally zaps itself",
   "look": "land jellyfish floating like a balloon with dangling glowing tendrils",
   "name": "Puddle Jelly",
   "notes": "",
@@ -16,6 +20,7 @@
     "#7FD4FF",
     "#1A1433"
   ],
+  "personality": "dreamy",
   "status": "prompts-ready",
   "tier": "Uncommon"
 }

@@ -28,7 +28,7 @@ lune run tools/assets/build_prompts.luau fox      # ids containing "fox"
 ```
 
 Writes `assets/jobs/<id>/front.txt`, `side.txt`, `back.txt`, `icon.txt` and `brief.json`
-(name, tier, palette, idle animation, triangle and texture budgets), plus
+(name, tier, personality, palette, the three-animation set, triangle and texture budgets), plus
 `assets/jobs/INDEX.md`.
 
 ## Stage 2: concept images
@@ -60,7 +60,8 @@ gives much better meshes than a single image.
 - [ ] Pivot at the feet, facing -Z
 - [ ] One material; texture at the tier's size; glow feature on its own material for emissive
 - [ ] Clean names: `<id>_mesh`, `<id>_mat`, `<id>_glow`
-- [ ] Idle animation from `brief.json`, 1-3 seconds, looping
+- [ ] The three animations from `brief.json` (`animations`): happy den idle 1-3 seconds looping,
+  sneaky carried walk looping, gotcha pose one-shot. No distressed poses (style bible)
 - [ ] Export to `assets/clean/<id>/model.fbx`
 
 ## Stage 5: import and record

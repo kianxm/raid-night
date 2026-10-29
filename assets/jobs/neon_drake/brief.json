@@ -1,4 +1,9 @@
 {
+  "animations": {
+    "carried": "sneaky walk while carried: tiptoes in the air and glances side to side, in on the heist, never struggling",
+    "denIdle": "happy idle in the den: tries to breathe fire and coughs out a smoke ring instead",
+    "stolen": "gotcha pose when stolen: a quick cocky gotcha, in on the joke, never sad or scared"
+  },
   "budget": {
     "heightStuds": 3,
     "texture": 1024,
@@ -7,7 +12,6 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "neon_drake",
-  "idleAnimation": "tries to breathe fire and coughs out a smoke ring instead",
   "look": "tiny dragon with dragonfly wings outlined in hot pink neon",
   "name": "Neon Drake",
   "notes": "",
@@ -16,6 +20,7 @@
     "#3EE6FF",
     "#1A0F26"
   ],
+  "personality": "cocky",
   "status": "prompts-ready",
   "tier": "Epic"
 }
