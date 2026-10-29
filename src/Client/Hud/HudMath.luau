@@ -45,6 +45,54 @@ function HudMath.isRescue(critterCount: number, glow: number, stored: number, pr
 	return critterCount == 0 and math.floor(glow + stored) < price
 end
 
+-- Actions column fit (#54). The column is 3 buttons + the odds chip + 3 gaps, anchored above
+-- the jump button (`reserve` px kept clear at the bottom) and must stay below the top inset
+-- (`topMargin`). `height` is the usable ScreenGui height (CoreUISafeInsets already removes the
+-- Roblox top bar). Layouts go from roomiest to most compact; the last is the floor.
+export type ColumnLayout = {
+	name: string,
+	button: number,
+	chip: number,
+	gap: number,
+	reserve: number,
+	compact: boolean,
+}
+
+HudMath.COLUMN_TOP_MARGIN = 8
+
+local COLUMN_LAYOUTS: { ColumnLayout } = {
+	{ name = "full", button = 58, chip = 54, gap = 8, reserve = 150, compact = false },
+	{ name = "compact", button = 46, chip = 36, gap = 6, reserve = 120, compact = true },
+}
+
+function HudMath.columnHeight(layout: ColumnLayout): number
+	return layout.button * 3 + layout.chip + layout.gap * 3
+end
+
+-- First layout whose column (plus reserve and top margin) fits `height`; else the compact floor.
+function HudMath.columnLayout(height: number): ColumnLayout
+	for _, layout in COLUMN_LAYOUTS do
+		if HudMath.columnHeight(layout) + layout.reserve + HudMath.COLUMN_TOP_MARGIN <= height then
+			return layout
+		end
+	end
+	return COLUMN_LAYOUTS[#COLUMN_LAYOUTS]
+end
+
+-- Top edge of the column from the top of the usable area (negative = overflows).
+function HudMath.columnTop(height: number, layout: ColumnLayout): number
+	return height - layout.reserve - HudMath.columnHeight(layout)
+end
+
+-- "Each" line for n equally likely species: the true value rounded to 2 decimals, never forced
+-- to sum to 100 (#55). 9 -> "11.11%", 10 -> "10%", 3 -> "33.33%".
+function HudMath.eachLabel(n: number): string
+	local text = string.format("%.2f", 100 / math.max(1, n))
+	text = string.gsub(text, "0+$", "")
+	text = string.gsub(text, "%.$", "")
+	return text .. "%"
+end
+
 -- Chances (0..1, summing to 1) -> percent strings that visibly sum to 100%.
 -- Rounding: work in hundredths of a percent, floor each, then give the leftover hundredths
 -- to the largest remainders (ties to the earlier entry). Trailing zeros are trimmed, so
