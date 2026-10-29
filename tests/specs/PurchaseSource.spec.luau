@@ -150,6 +150,16 @@ tests["ProcessReceipt grants in one place, only on processReceipt's PurchaseGran
 		"PurchaseGranted only for processReceipt's answer"
 	)
 	local decide = source.functionBody(code, "decide") or ""
+	-- B1 (#127): wait for the load (and the policy) before deciding, then fetch both again.
+	local waitAt = string.find(decide, "DataService%.getProfile%(userId%) ~= nil")
+	local refetchAt = string.find(decide, "local profile = DataService%.getProfile%(userId%)")
+	local stepsAt = string.find(decide, "Economy%.processReceipt%(")
+	expect.truthy(
+		waitAt and refetchAt and stepsAt and waitAt < refetchAt and refetchAt < stepsAt,
+		"wait, re-fetch, decide"
+	)
+	expect.truthy(string.find(decide, "state%.policyDone"), "a Robux-linked first grant waits for the policy")
+	expect.eq(count(decide, "IncomeService%.refresh%("), 0, "refresh runs on its own thread (refreshLater)")
 	expect.truthy(string.find(decide, "Profile%.recordReceipt%("), "receipts through C6's helper")
 	expect.truthy(string.find(decide, "DataService%.saveNow%("), "a confirmed save")
 	expect.truthy(string.find(decide, "data%.receipts%[purchaseId%]"), "the save must hold the receipt")

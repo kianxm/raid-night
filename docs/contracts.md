@@ -754,7 +754,10 @@ for Robux, and nothing sells back a stolen critter. Everything is off while
   an item the player may not get answers `NotProcessedYet` and grants nothing.
 - Reversing a D-061 default is one value: an item's `robuxLinked` or `offerRestricted`, or
   `vipBoostsOffline`. `Purchases.spec` pins the audit: every Glow-raising item is `robuxLinked`,
-  Lantern Night is not offered to restricted players, no product kind is random or grants Glow.
+  Lantern Night and VIP (D-065) are not offered to restricted players, no product kind is random
+  or grants Glow.
+- Pass ownership: `UserOwnsGamePassAsync` at join, and after `PromptGamePassPurchaseFinished`
+  only once `UserOwnsGamePassAsync` confirms it (a few retries; still false = not owned).
 
 Pure rules (Economy): `purchaseOffered(item, policy)`, `perkActive(item, owns, policy)`
 (policy = `{ paidRandomRestricted?, purchasesEnabled }`), `productById(productId)`,
@@ -790,7 +793,12 @@ answers. IncomeService does the final accrue in `DataService.onProfileReleasing`
 5. `DataService.saveNow` confirming `receipts[PurchaseId]` in the saved data, then
    `PurchaseGranted`; a failed save is `NotProcessedYet`.
 
-The player not in the server, the profile not loaded, or an error anywhere: `NotProcessedYet`.
+Before step 1, while the player is in the server, PurchaseService waits up to 60 s for the
+profile to load and, for a first grant of a Robux-linked product, for the PolicyService read to
+finish, then fetches player and profile again. Roblox may redeliver only at join, before the
+load (which waits for a dead server's lock after a forced shutdown). The player gone, the profile
+still not loaded, or an error anywhere: `NotProcessedYet`. `IncomeService.refresh` after a grant
+runs on its own thread, so it can never turn a saved grant into `NotProcessedYet`.
 `Purchases.spec` simulates forced shutdowns at every step with redeliveries: each purchase is
 granted exactly once.
 

@@ -218,9 +218,10 @@ tests["policy audit: every item that raises or protects Glow is Robux-linked"] =
 	for _, key in GLOW_LINKED_PRODUCTS do
 		expect.eq((Config.Purchases.products :: any)[key].robuxLinked, true, `products.{key}`)
 	end
-	-- D-061 (3): Lantern Night is hidden from restricted players; VIP is offered (non-Glow perks).
+	-- D-061 (3): Lantern Night is hidden from restricted players. D-065: so is VIP (its non-Glow
+	-- perks are not defined, so a restricted buyer would get nothing).
 	expect.eq(Config.Purchases.products.lanternNight.offerRestricted, false, "Lantern Night hidden")
-	expect.eq(Config.Purchases.passes.vip.offerRestricted, true, "VIP offered")
+	expect.eq(Config.Purchases.passes.vip.offerRestricted, false, "VIP hidden (D-065)")
 end
 
 tests["no product is random or grants Glow, and every entry is well-formed"] = function()
@@ -409,6 +410,11 @@ end
 -- the live copy (whatever was not saved is gone); Roblox redelivers every unacknowledged receipt
 -- whenever the player is in a server. Grants are "gem" accessories, so the saved count must end
 -- equal to the number of purchases: none lost, none doubled.
+--
+-- Redelivered before load (reviewer B1 on #127): on a join Roblox redelivers at once, while the
+-- profile is still loading (after a forced shutdown the load waits for the dead server's lock).
+-- With `waitForLoad` the server waits for the load, as PurchaseService's decide does; without
+-- it, it answers NotProcessedYet, and a receipt only ever redelivered at join is never granted.
 
 local CRASH = "forced shutdown"
 
@@ -423,19 +429,31 @@ local function deepCopy(value: any): any
 	return copy
 end
 
-local function simulate(seed: number, purchases: number)
+-- Returns how many purchases were never acknowledged (always 0 when waitForLoad, or it fails).
+local function simulate(seed: number, purchases: number, waitForLoad: boolean): number
 	local rng = rngLib.new(seed)
 	local saved: PlayerProfile = deepCopy(den(NOW))
 	local live: PlayerProfile? = deepCopy(saved)
+	local loading = false -- the player is in a new server whose profile load has not finished
 	local queue: { string } = {} -- unacknowledged PurchaseIds, oldest first
 	local productOf: { [string]: number } = {}
 	local acknowledged: { [string]: number } = {}
 	local made = 0
 
+	local function finishLoad()
+		if loading then
+			live = deepCopy(saved)
+			loading = false
+		end
+	end
+
 	local function deliver(purchaseId: string)
+		if not live and loading and waitForLoad then
+			finishLoad() -- the server waits for the load before deciding
+		end
 		local profile = live
 		if not profile then
-			return
+			return -- NotProcessedYet: nobody here, or the profile is not loaded yet
 		end
 		local crashAt = if rng.chance(0.15) then rng.int(1, 3) else 0 -- 1 after grant, 2 mid-save, 3 after save
 		local saveFails = rng.chance(0.15)
@@ -490,9 +508,11 @@ local function simulate(seed: number, purchases: number)
 			saved = deepCopy(live) -- ProfileStore autosave
 		elseif roll < 0.8 then
 			live = nil -- forced shutdown with nothing in flight
+			loading = false
 		elseif not live then
-			live = deepCopy(saved) -- the player joins a new server
+			loading = true -- the player joins a new server; Roblox redelivers before the load
 			redeliverAll()
+			finishLoad()
 		end
 		local current = live
 		if current then
@@ -500,15 +520,18 @@ local function simulate(seed: number, purchases: number)
 		end
 		expect.truthy(Profile.accessoryCount(saved, "gem") <= made, `step {step}: saved never doubles`)
 	end
-	-- Drain: the player keeps coming back until Roblox has nothing left to redeliver.
+	-- Drain: the player keeps rejoining, and Roblox redelivers only at each join, before the load.
 	for _ = 1, 200 do
 		if #queue == 0 then
 			break
 		end
-		if not live then
-			live = deepCopy(saved)
-		end
+		live = nil
+		loading = true
 		redeliverAll()
+		finishLoad()
+	end
+	if not waitForLoad then
+		return #queue
 	end
 	expect.eq(#queue, 0, `seed {seed}: every purchase acknowledged`)
 	for id, count in acknowledged do
@@ -516,12 +539,24 @@ local function simulate(seed: number, purchases: number)
 		expect.truthy(Profile.hasReceipt(saved, id), `seed {seed}: {id} saved`)
 	end
 	expect.eq(Profile.accessoryCount(saved, "gem"), made, `seed {seed}: each purchase granted exactly once`)
+	return 0
 end
 
 tests["forced shutdowns mid-purchase never double-grant or lose a purchase (simulation)"] = function()
 	for seed = 1, 40 do
-		simulate(seed, 60)
+		simulate(seed, 60, true)
 	end
+end
+
+tests["a receipt redelivered before the profile loads is granted once the server waits for the load"] = function()
+	-- The waiting server drains every seed (checked inside simulate). Answering at once instead
+	-- leaves purchases unacknowledged on every rejoin: the case B1 fixes is really exercised.
+	local stuck = 0
+	for seed = 1, 40 do
+		simulate(seed, 60, true)
+		stuck += simulate(seed, 60, false)
+	end
+	expect.truthy(stuck > 0, "without the wait, some purchase is never acknowledged")
 end
 
 return tests

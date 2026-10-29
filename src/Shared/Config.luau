@@ -128,7 +128,8 @@ local Config = {
 		currentEventId = "",
 		-- Game passes: ownership is a MarketplaceService check, never saved.
 		passes = {
-			vip = { id = 0, price = 399, robuxLinked = true, offerRestricted = true },
+			-- D-065: not offered to restricted players (its non-Glow perks are not defined).
+			vip = { id = 0, price = 399, robuxLinked = true, offerRestricted = false },
 			vaultSlot = { id = 0, price = 199, robuxLinked = true, offerRestricted = false },
 			autoCollect = { id = 0, price = 149, robuxLinked = true, offerRestricted = false },
 			raidScout = { id = 0, price = 249, robuxLinked = true, offerRestricted = false },
