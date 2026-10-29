@@ -9,16 +9,15 @@ promoted to main. STOP state: do not start Phase 1 until Kian says so. Don't ask
 multi-player testing (deferred list in progress.md).
 
 ## In flight
-Nothing. No open feature PRs.
+- C5 (data), branch `agent/data/C5`: D-036 (Kian picked (b)). Then reviewer, integration
+  merge + single-client check, ledger, promote integration → main again, stop.
 
 ## Next (only when Kian says "Run Phase 1")
 - Phase 1 tasks P1.1-P1.10 in docs/playbook.md; P1.1 (data) carries D-008 and D-012 TODOs
   (escrow GDPR ids, record cleanup, void tombstone before async debits).
-- Before going public: Kian's answer on planned self-protection (Blocked), then data + raid.
 - P2.8 hard gate: factor-1 accrue in EscrowService/Matchmaking fixed before `purchases` on.
 
 ## Ask Kian (not blocking)
-- Planned self-protection via a cheap live loss (options a/b/c; reviewer recommends b).
 - P2.8 product questions (Robux-linked products, VIP offline, restricted buyers).
 
 ## Remember

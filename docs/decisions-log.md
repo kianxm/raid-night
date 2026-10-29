@@ -3,6 +3,15 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-036 · 2026-10-28 · Live protection measures against max(base, current den rate) (Kian)
+Context: data on #73, reviewer on #73/#71: D-034 doesn't stop a planned shrink (empty the den
+but one Common, lose it to an alt or after a dropped carry, refill: a day of live protection).
+Decision: option (b). A den is live-protected only while today's live losses reach
+protectionLossShare of max(liveLossBaseRate, Economy.denRate(den now)). Refilling the den lifts
+protection; a real loss still protects (the den's rate drops with it). Applies everywhere
+liveProtected is used (grab, escrow debit, den attribute). Scheduled as C5 (data); reviewer pass.
+Reversible: yes.
+
 ### D-035 · 2026-10-28 · Grab refusal reasons stay unshown in Phase 0
 Context: ui on #70: the refusal copy for LiveProtected / PostLossSafety is built and tested, but
 no remote delivers a grab refusal reason to the client (GrabCritter has no reply). Decision: no
