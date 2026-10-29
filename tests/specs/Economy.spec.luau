@@ -308,6 +308,116 @@ tests["once the lock lifts the pad can be swapped again"] = function()
 	expectSpot(p, "x", "Inventory", nil)
 end
 
+-- P0.4d: Phase 0 auto-placement of Inventory critters (D-027) -----------------------------------
+
+local function aged(critter: Types.Critter, acquiredAt: number): Types.Critter
+	critter.acquiredAt = acquiredAt
+	return critter
+end
+
+tests["autoPlace puts a stolen critter on the first free pad and accrues first"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 1)) -- 1 Glow/s
+	fixtures.give(p, fixtures.critter("c", "dusk_mouse", "Pad", 3))
+	fixtures.give(p, fixtures.critter("stolen", "crumb_rat", "Inventory"))
+	local moved = Economy.autoPlace(p, 6, NOW + 10)
+	expect.eq(moved, 1, "moved")
+	expectSpot(p, "stolen", "Pad", 2)
+	expect.eq(p.stored, 20, "accrued at the old rate (2/s) before the new critter landed")
+	expect.eq(p.storedUpdatedAt, NOW + 10)
+	expect.eq(Economy.denRate(p), 2 + 3, "the placed critter now earns")
+end
+
+tests["autoPlace places the overflow egg once a pad frees up"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1 -- 6 pads
+	for pad = 1, 6 do
+		fixtures.give(p, fixtures.critter(`p{pad}`, "dusk_mouse", "Pad", pad))
+	end
+	p.glow = Economy.eggPrice(1)
+	local critter = Economy.buyEgg(p, NOW, egg("egg", 0, 0)) :: Types.Critter
+	expect.eq(critter.placement, "Inventory", "full pads: the egg waits in Inventory")
+	expect.eq(Economy.autoPlace(p, 6, NOW), 0, "no free pad, nothing moves")
+	expectSpot(p, "egg", "Inventory", nil)
+	expect.truthy(Economy.place(p, "p4", "Vault", nil, 6, NOW))
+	expect.eq(Economy.autoPlace(p, 6, NOW + 1), 1)
+	expectSpot(p, "egg", "Pad", 4)
+	expectSpot(p, "p4", "Vault", nil)
+end
+
+tests["autoPlace fills pads oldest first, ties by uid, until pads run out"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	for pad = 1, 4 do
+		fixtures.give(p, fixtures.critter(`p{pad}`, "dusk_mouse", "Pad", pad))
+	end
+	fixtures.give(p, aged(fixtures.critter("young", "crumb_rat", "Inventory"), 300))
+	fixtures.give(p, aged(fixtures.critter("old-b", "crumb_rat", "Inventory"), 100))
+	fixtures.give(p, aged(fixtures.critter("old-a", "crumb_rat", "Inventory"), 100))
+	expect.eq(Economy.autoPlace(p, 6, NOW), 2, "two free pads")
+	expectSpot(p, "old-a", "Pad", 5)
+	expectSpot(p, "old-b", "Pad", 6)
+	expectSpot(p, "young", "Inventory", nil)
+end
+
+tests["autoPlace never touches Vault or Guard critters and never displaces"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, fixtures.critter("v", "crumb_rat", "Vault"))
+	fixtures.give(p, fixtures.critter("g", "crumb_rat", "Guard"))
+	fixtures.give(p, fixtures.critter("a", "dusk_mouse", "Pad", 1))
+	expect.eq(Economy.autoPlace(p, 6, NOW + 10), 0, "nothing in Inventory")
+	expectSpot(p, "v", "Vault", nil)
+	expectSpot(p, "g", "Guard", nil)
+	expectSpot(p, "a", "Pad", 1)
+	expect.eq(p.storedUpdatedAt, NOW, "no move, no accrual")
+end
+
+tests["autoPlace never moves a locked critter"] = function()
+	local p = fixtures.veteran(1, NOW)
+	fixtures.give(p, aged(fixtures.critter("carried", "crumb_rat", "Inventory"), 1))
+	fixtures.give(p, aged(fixtures.critter("free", "crumb_rat", "Inventory"), 2))
+	expect.eq(Economy.autoPlace(p, 6, NOW, lockedSet("carried")), 1)
+	expectSpot(p, "carried", "Inventory", nil)
+	expectSpot(p, "free", "Pad", 1)
+	expect.eq(Economy.autoPlace(p, 6, NOW + 5, lockedSet("carried")), 0, "still locked")
+	expect.eq(Economy.autoPlace(p, 6, NOW + 5, lockedSet()), 1, "placed once the lock lifts")
+	expectSpot(p, "carried", "Pad", 2)
+end
+
+tests["autoPlace with no free pad changes nothing"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1
+	for pad = 1, 6 do
+		fixtures.give(p, fixtures.critter(`p{pad}`, "dusk_mouse", "Pad", pad))
+	end
+	fixtures.give(p, fixtures.critter("inv", "crumb_rat", "Inventory"))
+	expect.eq(Economy.autoPlace(p, 6, NOW + 10), 0)
+	expectSpot(p, "inv", "Inventory", nil)
+	expect.eq(p.stored, 0, "no move, no accrual")
+	expect.eq(p.storedUpdatedAt, NOW, "no move, no accrual")
+	expect.eq(Economy.autoPlace(p, 0, NOW + 10), 0, "no den world (0 physical pads)")
+	expectSpot(p, "inv", "Inventory", nil)
+end
+
+tests["autoPlace respects den level and physical pads"] = function()
+	local p = fixtures.veteran(1, NOW)
+	p.denLevel = 1 -- 6 unlocked
+	for i = 1, 10 do
+		fixtures.give(p, aged(fixtures.critter(`i{string.format("%02d", i)}`, "crumb_rat", "Inventory"), i))
+	end
+	expect.eq(Economy.autoPlace(p, 4, NOW), 4, "only 4 pads built")
+	expect.eq(Economy.autoPlace(p, 30, NOW), 2, "level 1 unlocks 6 even with 30 built")
+	for uid, critter in p.critters do
+		if critter.placement == "Pad" then
+			expect.truthy((critter.padIndex :: number) <= 6, `{uid} on an unlocked pad`)
+		end
+	end
+	p.denLevel = 3 -- 7 unlocked
+	expect.eq(Economy.autoPlace(p, 30, NOW), 1, "an upgrade unlocks one more pad")
+	expectSpot(p, "i07", "Pad", 7)
+	expectSpot(p, "i08", "Inventory", nil)
+end
+
 tests["upgrading spends banked Glow and accrues at the old level first"] = function()
 	local p = fixtures.veteran(1, NOW)
 	p.denLevel = 1

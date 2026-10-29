@@ -7,7 +7,13 @@
 	the placeholder critter visuals on the pads in sync.
 
 	Invariant: Economy.accrue(profile, now) runs BEFORE any change to placements or den level
-	(Economy.place, upgradeDen and buyEgg do it themselves).
+	(Economy.place, upgradeDen, buyEgg and autoPlace do it themselves).
+
+	Phase 0 rule (decision D-027, issue #43): every push first runs Economy.autoPlace, so Inventory
+	critters (a stolen critter, an egg hatched with full pads) fill free usable pads, oldest first,
+	and show in the den. It never displaces a critter, never touches the Vault and skips locked
+	(carried) critters. Side effect: a critter moved to Inventory comes straight back to a free pad.
+	Revisit when P2.5 adds an inventory UI (placing from Inventory becomes the player's choice).
 
 	Remotes live in ReplicatedStorage.Remotes, named exactly as in Shared/Net.luau:
 	  RemoteFunctions GetDenState, Collect, PlaceCritter, BuyEgg, UpgradeDen
@@ -23,8 +29,9 @@
 	model draws which critter is kept in a server table (`drawn`), never read back from them.
 
 	Server API:
-	  refresh(player)               re-push DenState and rebuild visuals after another service
-	                                changed the profile (e.g. RaidService after a steal)
+	  refresh(player)               auto-place Inventory critters (D-027), re-push DenState and
+	                                rebuild visuals after another service changed the profile
+	                                (e.g. RaidService after a steal)
 	  setCritterLock(fn?)           fn(userId, uid) -> true while a critter must not move (being
 	                                carried). Locked critters cannot be placed, are never swapped
 	                                off their pad by another placement, and are not drawn.
@@ -249,7 +256,13 @@ local function push(player: Player)
 	if not profile then
 		return
 	end
-	Economy.accrue(profile, os.time())
+	local now = os.time()
+	Economy.accrue(profile, now)
+	-- D-027 (Phase 0): Inventory critters fill free pads. Needs the den world (0 pads = no-op).
+	local userId = player.UserId
+	Economy.autoPlace(profile, physicalPads(player), now, function(uid: string): boolean
+		return isLocked(userId, uid)
+	end)
 	denChanged:FireClient(player, Economy.denState(profile))
 	renderDen(player, profile)
 	local plot = DenWorldService.getPlot(player)

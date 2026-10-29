@@ -270,6 +270,52 @@ function Economy.place(
 	return true, nil
 end
 
+--[[
+	Phase 0 auto-placement (decision D-027): moves Inventory critters onto free usable pads, oldest
+	`acquiredAt` first (ties by uid), until the free pads or the Inventory run out. It only fills
+	empty pads (never swaps or displaces), never touches Vault or Guard critters, and never moves a
+	locked critter (`isLocked(uid)`, a raider is carrying it). Accrues first when it moves anything,
+	because a placed critter changes the den's rate. Returns how many critters it moved.
+]]
+function Economy.autoPlace(
+	profile: PlayerProfile,
+	physicalPads: number,
+	now: number,
+	isLocked: ((uid: string) -> boolean)?
+): number
+	local waiting: { Critter } = {}
+	for uid, critter in profile.critters do
+		if critter.placement == "Inventory" and not (isLocked and isLocked(uid)) then
+			table.insert(waiting, critter)
+		end
+	end
+	if #waiting == 0 then
+		return 0
+	end
+	local free: { number } = {}
+	for pad = 1, Economy.usablePadCount(profile.denLevel, physicalPads) do
+		if not Economy.padOccupant(profile, pad) then
+			table.insert(free, pad)
+		end
+	end
+	local count = math.min(#waiting, #free)
+	if count == 0 then
+		return 0
+	end
+	table.sort(waiting, function(a: Critter, b: Critter): boolean
+		if a.acquiredAt ~= b.acquiredAt then
+			return a.acquiredAt < b.acquiredAt
+		end
+		return a.uid < b.uid
+	end)
+	Economy.accrue(profile, now)
+	for i = 1, count do
+		waiting[i].placement = "Pad"
+		waiting[i].padIndex = free[i]
+	end
+	return count
+end
+
 -- Spends banked Glow to raise the den one level. Accrues first so the old storage cap applies
 -- to time already earned.
 function Economy.upgradeDen(profile: PlayerProfile, now: number): (boolean, string?)
