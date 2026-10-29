@@ -47,7 +47,7 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 | Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) APPROVED both; fix round for two loss-adjacent items (D-049). Own Studio run waits for merge (D-044) |
+| P1.1 | data | — | In review | #97, #98 (stacked) | 1 | #97 pure async rules + EscrowSimulation; #98 messages, one-shot offline write, transferAsync, 60 s sweep, dupe alarm, D-008 ids, D-026. 269 tests. Async loot accrues to debit time. Reviewer (xhigh) APPROVED both; fix round (D-049) re-reviewed APPROVED (275 tests; mutation runs). Own Studio run waits for merge (D-044) |
 | P1.2 | matchmaking | P1.1 | Done | #91 | 1 | Reviewer APPROVED. Studio single-client plan passed (targets from test-account snapshots, locks, blocks, presence). Only offline dens are async targets (D-043). 271 tests |
 | P1.3 | raid | P1.1, P1.2 | In progress | P1.3a: #100, #101 (stacked), in review; P1.3b: Todo | 1 | Split (D-046). #100 contracts + pure rules, #101 server + pocket den: reviewer APPROVED both, 286 tests (D-050). P1.3b in progress (agent/raid/P1.3b, + P1.4b stacked). P1.3b = escrow handoff, shield, revenge token, logs, pair limit, markRaidLogSeen (after P1.1 fix round) |
 | P1.4 | raid | P1.3 | In progress | P1.4a: #99 (approved); P1.4b: Todo | 1 | Split (D-046). #99: 3-min raid = 1,768 bytes, ±0.25 stud, reviewer APPROVED (decode fuzzed), 281 tests; GetReplay limit 3 and 7-day index cleanup approved (D-048). P1.4b = hook into raids after P1.3a, using save() not saveNow() |
@@ -155,6 +155,7 @@ dropped based on real play.
 - Raider's own block list is session-only until their first ReportBlocked; fall back to the last snapshot (reviewer #91; small).
 - Studio hook `targets` also skips the `raids` gate; doc says asyncRaids only (reviewer #91; Studio only, doc fix).
 - Escrow (reviewer #98): a debit finished in another server is credited only on the raider server's next retry (up to 30 min backoff); a crashed server's stale lock keeps a defender "held" until they return (consider ProfileStore's 630 s assume-dead); unbounded MessageAsync retry threads during an outage (one pending send per user+raid); the dupe alarm can't see a critter both parties own (assert at credit); an erased defender save errors forever (park it). All fail safe.
+- Escrow follow-ups (re-review #97/#98): two sameApplied asserts (different `at`; saved critter with an extra field); a repeat transferAsync after Commit or a dupe alarm whose read fails reports Refused though the loot moved (status only).
 - Finished escrow records are never deleted (D-008 cleanup deferred, D-047; storage growth only; proposal in #98).
 - ReplayStore: cap expired-replay deletes per save (~4) so a returning raider's 64-delete burst can't drain the DataStore budget; delete the dropped list even if SetAsync fails; cache fetched records; finite startedAt check (reviewer #99; small).
 - DenSnapshot has no losses-today count, so StartRaid assumes 0 (the escrow debit still enforces the cap) (raid #100; matchmaking; small).
