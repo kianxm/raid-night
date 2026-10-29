@@ -180,12 +180,21 @@ local function saveState(userId: number, state: Rules.State)
 		return
 	end
 	local ok = pcall(function()
-		(store :: DataStore):UpdateAsync(tostring(userId), function()
-			return {
-				lastSentDay = state.lastSentDay,
-				glowLossPending = state.glowLossPending,
-				promptedAt = state.promptedAt,
-			}
+		(store :: DataStore):UpdateAsync(tostring(userId), function(old)
+			-- Merge into the stored record; never lower lastSentDay (another server may have
+			-- claimed a later day).
+			local record: { [string]: any } = if type(old) == "table" then old else {}
+			local storedDay = if type(record.lastSentDay) == "number" then record.lastSentDay else nil
+			local day = state.lastSentDay
+			if storedDay ~= nil and (day == nil or storedDay > day) then
+				day = storedDay
+			end
+			record.lastSentDay = day
+			record.glowLossPending = state.glowLossPending
+			if state.promptedAt ~= nil then
+				record.promptedAt = state.promptedAt
+			end
+			return record
 		end)
 	end)
 	if not ok then
