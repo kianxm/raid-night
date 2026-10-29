@@ -3,6 +3,20 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-015 · 2026-10-28 · Phase 0 live steals take the critter only
+Decision: transferLive glowRequested = 0 for live steals in Phase 0; stored Glow is only taken by
+async raids (Phase 1). Why: simplest loop for the "is stealing fun" gate. Reversible: yes.
+
+### D-014 · 2026-10-28 · P0.5 does not wait on P0.4b
+Decision: start P0.5 right after C1. P0.5 identifies critters from the defender's profile and
+server pad positions, never model attributes, so the IncomeService cleanup in P0.4b is not a
+prerequisite. Why: critical path. Reversible: n/a.
+
+### D-013 · 2026-10-28 · Lockdown blocks revenge raiders too
+Context: reviewer on #22. Decision: an active Lockdown blocks entry for every live raider,
+revenge included. Why: revenge skipping a shield does not mean skipping the owner's active
+defense; one simple rule. Reversible: yes.
+
 ### D-012 · 2026-10-28 · #11 re-review suggestions done now, in P0.3a
 Context: reviewer approved #11 with 7 non-blocking suggestions. Decision: do 1-5 and 7 in P0.3a
 (index timestamp refresh on re-add, prove session ownership before voiding, retry party from
