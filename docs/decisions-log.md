@@ -3,6 +3,18 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-034 · 2026-10-28 · Live protection base is the den's rate at the grab (Kian)
+Context: reviewer on #64: measured at the first live debit, the base can be shrunk during the
+carry (the owner is alerted at the grab and can move high earners to Inventory/Vault), buying
+full-day protection with one cheap loss. Decision: option (b). The base is Economy.denRate of
+the den at the moment of the grab, before the owner can be alerted. Orchestrator details:
+RaidService measures it when the grab is accepted (the earliest server event the owner can see),
+keeps it with the carry and passes it to EscrowService.transferLive; the Live EscrowRecord gains
+optional `liveBaseRate: number?`, set at create and never changed (retries pass the same value),
+finite and >= 0 or refused at create. At the debit, the day's first live loss uses the record's
+liveBaseRate; a record without it (older records, async) falls back to denRate at the debit.
+Reviewer pass (contract). Reversible: yes (optional field).
+
 ### D-033 · 2026-10-28 · Empty live commits grant nothing
 Context: reviewer on #65. Decision: when a live debit takes nothing (den protected) and Glow is
 0, still write the appliedTransfers entry (idempotency), but skip the defender's shield, revenge
