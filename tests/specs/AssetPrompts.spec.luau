@@ -12,6 +12,7 @@ tests["every critter has a known body plan, and no art entry is orphaned"] = fun
 		local art = Prompts.ART[species.id]
 		expect.truthy(art, `{species.id} has no Prompts.ART entry`)
 		expect.truthy(Prompts.BODY_PLANS[art.bodyPlan], `{species.id} has unknown body plan {art.bodyPlan}`)
+		expect.truthy(type(art.glow) == "string" and art.glow ~= "", `{species.id} names no glowing feature`)
 	end
 	for id in Prompts.ART do
 		expect.truthy(ids[id], `Prompts.ART has {id}, which is not in the catalog`)

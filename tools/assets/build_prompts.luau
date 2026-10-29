@@ -74,7 +74,7 @@ for _, species in critters do
 		id = species.id,
 		name = species.name,
 		tier = species.tier,
-		look = species.look,
+		look = Prompts.look(species),
 		personality = species.personality,
 		bodyPlan = Prompts.ART[species.id].bodyPlan,
 		pose = Prompts.pose(species),

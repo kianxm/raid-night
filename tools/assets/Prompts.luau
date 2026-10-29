@@ -16,11 +16,11 @@ local Prompts = {}
 
 Prompts.STYLE = "Stylized 3D game character for a cozy nighttime game. Chunky toy-like shapes, soft rounded "
 	.. "silhouette, oversized head about 40 percent of body height, big expressive eyes, short stubby "
-	.. "limbs. Smooth matte vinyl toy surface with toon shading, no fuzz, no felt, no plush texture. "
+	.. "limbs only where the animal has limbs. Smooth matte vinyl toy surface with toon shading, no fuzz, no felt, no plush texture. "
 	.. "Clean simple shapes and textures, no fine detail. Readable silhouette at small size."
 
 Prompts.AVOID = "Avoid photorealism, realistic fur strands, text, letters, numbers, labels, logos, watermarks, "
-	.. "frames, borders, existing cartoon characters, franchise mascots, human faces, weapons, gore, scary "
+	.. "frames, borders, strings, ropes, hooks or hangers, existing cartoon characters, franchise mascots, human faces, weapons, gore, scary "
 	.. "or sexualized features, sad, crying, injured or frightened expressions or poses."
 
 -- Body plans are shared so rigs and animations are reused (style bible, "Body plan follows the
@@ -29,57 +29,126 @@ Prompts.BODY_PLANS = {
 	upright = "standing upright on two short legs, arms relaxed",
 	quadruped = "standing on all four short legs like an animal, not upright like a person",
 	crawler = "low to the ground in its natural animal posture, not standing upright like a person",
-	floater = "floating in the air a little above the ground, nothing touching the ground, not standing",
+	floater = "floating in the air a little above the ground with no legs, nothing touching the ground",
 	flyer = "hovering in the air with its wings spread and its legs tucked, not standing",
 	serpent = "long serpentine body coiled in a loose ring, not standing upright",
 }
 
--- Every critter's plan. A critter may also override its pose when the plan's default would
--- fight its `look` line.
+-- Every critter's plan and its one glowing feature (named, or the model puts the glow anywhere).
+-- A critter may also override its pose when the plan's default would fight its `look` line, and
+-- (rarely, pending a catalog change by its owner) the `look` line itself.
 Prompts.ART = {
-	dusk_mouse = { bodyPlan = "upright" },
-	lantern_snail = { bodyPlan = "crawler", pose = "gliding low on its soft foot, shell on its back" },
-	puddle_newt = { bodyPlan = "crawler", pose = "on four short splayed legs, belly close to the ground" },
-	pebble_toad = { bodyPlan = "crawler", pose = "squatting low on all four legs like a toad" },
-	sock_moth = { bodyPlan = "flyer" },
-	snooze_bat = { bodyPlan = "flyer", pose = "hanging upside down by its feet, wings folded around its body" },
-	blinkbug = { bodyPlan = "flyer" },
-	crumb_rat = { bodyPlan = "upright" },
-	button_beetle = { bodyPlan = "crawler", pose = "on six short legs, body low and round" },
-	fuzz_owlet = { bodyPlan = "upright", pose = "standing upright on two tiny feet, wings folded at its sides" },
-	drama_possum = { bodyPlan = "quadruped" },
-	neon_shrimp = { bodyPlan = "floater", pose = "floating curled in the air, tiny gloves raised" },
-	moonquill = { bodyPlan = "quadruped" },
-	boo_mole = { bodyPlan = "floater", pose = "floating like a little ghost, body fading into a wispy tail" },
-	lid_raccoon = { bodyPlan = "upright" },
-	nimbus_lamb = { bodyPlan = "quadruped" },
-	puddle_jelly = { bodyPlan = "floater" },
-	streetlamp_frog = { bodyPlan = "upright" },
-	wick_cat = { bodyPlan = "quadruped" },
-	noodle_weasel = { bodyPlan = "quadruped" },
+	dusk_mouse = { bodyPlan = "upright", glow = "its oversized ears" },
+	lantern_snail = {
+		bodyPlan = "crawler",
+		glow = "its paper lantern shell",
+		pose = "a real snail body with no arms and no legs: one soft foot sliding along the ground, the lantern shell on its back",
+	},
+	puddle_newt = {
+		bodyPlan = "crawler",
+		glow = "the stripe down its back",
+		pose = "on four short splayed legs, belly close to the ground",
+	},
+	pebble_toad = {
+		bodyPlan = "crawler",
+		glow = "the speckled spots on its skin",
+		pose = "squatting low on all four legs like a toad",
+	},
+	sock_moth = { bodyPlan = "flyer", glow = "the tips of its feathery antennae" },
+	-- Kian, 2026-10-29: the bat hovers instead of hanging (no ceiling to rig against). `look` overrides
+	-- the catalog line until the economy owner updates Critters.luau to match.
+	snooze_bat = {
+		bodyPlan = "flyer",
+		glow = "the pompom on its nightcap",
+		look = "chubby purple bat in a floppy nightcap, dozing in mid-air",
+		pose = "hovering right side up with its wings spread, eyes closed, legs tucked; not hanging, nothing holds it up",
+	},
+	blinkbug = { bodyPlan = "flyer", glow = "its lightbulb-shaped tail" },
+	crumb_rat = { bodyPlan = "upright", glow = "the cracker crumb it is hugging" },
+	button_beetle = {
+		bodyPlan = "crawler",
+		glow = "the four holes in its button shell",
+		pose = "on six short legs, body low and round",
+	},
+	fuzz_owlet = {
+		bodyPlan = "upright",
+		glow = "its huge eyes",
+		pose = "standing upright on two tiny feet, wings folded at its sides",
+	},
+	drama_possum = { bodyPlan = "quadruped", glow = "its tail tip" },
+	neon_shrimp = {
+		bodyPlan = "floater",
+		glow = "its long antennae",
+		pose = "floating curled in the air, tiny gloves raised",
+	},
+	moonquill = { bodyPlan = "quadruped", glow = "the tips of its quills" },
+	boo_mole = {
+		bodyPlan = "floater",
+		glow = "its translucent ghostly body",
+		pose = "floating like a little ghost, body fading into a wispy tail",
+	},
+	lid_raccoon = { bodyPlan = "upright", glow = "the rim of its trash can lid" },
+	nimbus_lamb = { bodyPlan = "quadruped", glow = "the little lightning flickers inside its storm cloud wool" },
+	puddle_jelly = {
+		bodyPlan = "floater",
+		glow = "its dangling tendrils",
+		pose = "a jellyfish body with no arms and no legs: a round bell floating in the air, tendrils dangling below",
+	},
+	streetlamp_frog = { bodyPlan = "upright", glow = "the bulb of its miniature streetlamp" },
+	wick_cat = { bodyPlan = "quadruped", glow = "the candle flame on its tail" },
+	noodle_weasel = { bodyPlan = "quadruped", glow = "its collar" },
 	static_crab = {
 		bodyPlan = "crawler",
-		pose = "scuttling on short crab legs, the television worn on its back as its shell",
+		glow = "the television screen",
+		pose = "scuttling on short crab legs, claws empty, the television worn on its back like a hermit crab shell with the screen facing forward above its eyes",
 	},
-	crescent_fox = { bodyPlan = "quadruped" },
-	patchwork_bear = { bodyPlan = "upright" },
-	dj_owl = { bodyPlan = "upright", pose = "standing upright on two short feet, wings resting on the turntable" },
-	shroom_fawn = { bodyPlan = "quadruped" },
-	bubble_otter = { bodyPlan = "floater", pose = "floating on its back inside the bubble, paws on its belly" },
-	comet_ferret = { bodyPlan = "quadruped" },
-	tick_toad = { bodyPlan = "crawler", pose = "sitting up like a frog on its back legs, belly facing forward" },
-	aurora_pup = { bodyPlan = "quadruped" },
-	mirror_cat = { bodyPlan = "quadruped" },
-	pocket_whale = { bodyPlan = "floater" },
-	ufo_hamster = { bodyPlan = "floater", pose = "sitting inside its saucer, which floats above the ground" },
-	neon_drake = { bodyPlan = "flyer" },
-	storm_hare = { bodyPlan = "floater", pose = "sitting on its small thundercloud, which floats above the ground" },
-	lunar_kitsune = { bodyPlan = "quadruped" },
-	abyss_angler = { bodyPlan = "floater", pose = "floating as if swimming, lure held up in front of its face" },
-	king_bandit = { bodyPlan = "upright" },
-	nebula_owl = { bodyPlan = "upright", pose = "standing upright on two short feet, wings opened wide" },
-	eclipse_wyrm = { bodyPlan = "serpent" },
-	midnight_mew = { bodyPlan = "floater" },
+	crescent_fox = { bodyPlan = "quadruped", glow = "its crescent moon tail" },
+	patchwork_bear = { bodyPlan = "upright", glow = "its fabric patches" },
+	dj_owl = {
+		bodyPlan = "upright",
+		glow = "its tiny turntable",
+		pose = "standing upright on two short feet, wings resting on the turntable",
+	},
+	shroom_fawn = { bodyPlan = "quadruped", glow = "the mushroom clusters on its antlers" },
+	bubble_otter = {
+		bodyPlan = "floater",
+		glow = "the soap bubble around it",
+		pose = "floating on its back inside the bubble, paws on its belly",
+	},
+	comet_ferret = { bodyPlan = "quadruped", glow = "its comet tail" },
+	tick_toad = {
+		bodyPlan = "crawler",
+		glow = "the pocket watch face in its belly",
+		pose = "sitting up like a frog on its back legs, belly facing forward",
+	},
+	aurora_pup = { bodyPlan = "quadruped", glow = "its aurora mane" },
+	mirror_cat = { bodyPlan = "quadruped", glow = "the moon reflected on its chrome coat" },
+	pocket_whale = { bodyPlan = "floater", glow = "its constellation spots" },
+	ufo_hamster = {
+		bodyPlan = "floater",
+		glow = "the rim lights of its flying saucer",
+		pose = "sitting inside its saucer, which floats above the ground",
+	},
+	neon_drake = { bodyPlan = "flyer", glow = "the neon outlines of its wings" },
+	storm_hare = {
+		bodyPlan = "floater",
+		glow = "its lightning-bolt ears",
+		pose = "sitting on its small thundercloud, which floats above the ground",
+	},
+	lunar_kitsune = { bodyPlan = "quadruped", glow = "its three moon-phase tails" },
+	abyss_angler = {
+		bodyPlan = "floater",
+		glow = "its full-moon lure",
+		pose = "floating as if swimming, lure held up in front of its face",
+	},
+	king_bandit = { bodyPlan = "upright", glow = "its trash can lid crown" },
+	nebula_owl = {
+		bodyPlan = "upright",
+		glow = "the swirling galaxy in its wings",
+		pose = "standing upright on two short feet, wings opened wide",
+	},
+	eclipse_wyrm = { bodyPlan = "serpent", glow = "the eclipse ring of its coiled body" },
+	midnight_mew = { bodyPlan = "floater", glow = "its single huge moon eye" },
 }
 
 -- Rarity raises attitude: Commons stay simple, Uncommons get a touch more, Rare and above get the most.
@@ -192,14 +261,20 @@ local function colorLine(species): string
 	for i = 2, #species.palette do
 		table.insert(others, Prompts.colorName(species.palette[i]))
 	end
-	return `Its one glowing feature glows softly in {Prompts.colorName(species.palette[1])}, with no other glowing `
-		.. `parts. Other colors: {table.concat(others, " and ")}. No extra props or accessories beyond the `
+	local glow = Prompts.ART[species.id].glow
+	return `Its one glowing feature is {glow}, which glows softly in {Prompts.colorName(species.palette[1])}, with `
+		.. `no other glowing parts. Other colors: {table.concat(others, " and ")}. No extra props or accessories beyond the `
 		.. `ones named.`
 end
 
 function Prompts.expressionLine(species): string
 	local tone = EXPRESSION_BY_TIER[species.tier] or EXPRESSION_RARE_AND_ABOVE
 	return `Expression: {species.personality}, {tone}.`
+end
+
+-- The critter's look line: its art override, else the catalog's.
+function Prompts.look(species): string
+	return Prompts.ART[species.id].look or species.look
 end
 
 -- The critter's body plan pose: its own override, else its plan's default.
@@ -210,13 +285,13 @@ function Prompts.pose(species): string
 end
 
 function Prompts.view(species, view: string): string
-	return `{Prompts.STYLE} Character: {species.name}, {species.look}. Body: {Prompts.pose(species)}. `
+	return `{Prompts.STYLE} Character: {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}. `
 		.. `{Prompts.expressionLine(species)} {view} view, full body, centered and filling most of the frame, `
 		.. `orthographic camera, evenly lit, plain mid-grey background. {colorLine(species)} {Prompts.AVOID}`
 end
 
 function Prompts.icon(species): string
-	return `{Prompts.STYLE} Character portrait of {species.name}, {species.look}. Body: {Prompts.pose(species)}. `
+	return `{Prompts.STYLE} Character portrait of {species.name}, {Prompts.look(species)}. Body: {Prompts.pose(species)}. `
 		.. `{Prompts.expressionLine(species)} Three-quarter view, head and body centered and filling the frame, `
 		.. `soft rim light, plain flat light-grey background. {colorLine(species)} {Prompts.AVOID}`
 end

@@ -13,7 +13,7 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "snooze_bat",
-  "look": "chubby purple bat hanging upside down in a floppy nightcap",
+  "look": "chubby purple bat in a floppy nightcap, dozing in mid-air",
   "name": "Snooze Bat",
   "notes": "",
   "palette": [
@@ -22,7 +22,7 @@
     "#1A1530"
   ],
   "personality": "sleepy",
-  "pose": "hanging upside down by its feet, wings folded around its body",
+  "pose": "hovering right side up with its wings spread, eyes closed, legs tucked; not hanging, nothing holds it up",
   "status": "prompts-ready",
   "tier": "Common"
 }
