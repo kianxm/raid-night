@@ -4,6 +4,10 @@
 	(chunky rounded panels, thick outlines, Fredoka numbers, Gotham body); one accent per screen.
 ]]
 
+local TweenService = game:GetService("TweenService")
+
+local SettingsState = require(script.Parent.Parent:WaitForChild("Hud"):WaitForChild("SettingsState"))
+
 local Ui = {}
 
 Ui.COLOR = {
@@ -148,6 +152,18 @@ function Ui.card(parent: Instance, name: string, order: number, height: number):
 	Ui.outline(c, 2)
 	c.Parent = parent
 	return c
+end
+
+-- Short pop-in for a screen that just opened. Skipped entirely under Reduced motion.
+function Ui.pop(frame: GuiObject)
+	if SettingsState.get().reducedMotion then
+		return
+	end
+	local scale = frame:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
+	scale.Scale = 0.92
+	scale.Parent = frame
+	TweenService:Create(scale, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 })
+		:Play()
 end
 
 function Ui.screenGui(name: string, order: number, parent: Instance): ScreenGui

@@ -142,6 +142,16 @@ local Strings = {
 	denToVault = "To Vault",
 	denToBag = "To Bag",
 	denSelected = "{name} selected",
+
+	-- Settings
+	menuSettings = "Gear",
+	settingsTitle = "Settings",
+	settingsMusic = "Music",
+	settingsSfx = "Sound effects",
+	settingsReducedMotion = "Reduced motion",
+	settingsOn = "On",
+	settingsOff = "Off",
+	settingsPercent = "{pct}%",
 }
 
 function Strings.format(template: string, values: { [string]: string }): string
