@@ -171,8 +171,14 @@ Prompts.ART = {
 	},
 	midnight_mew = {
 		bodyPlan = "floater",
+		pose = "floating above the ground, its lower body dissolving into drifting stardust instead of legs",
 		glow = "its single huge crescent-moon eye",
-		look = "a creature from another world with a cat-like silhouette made of living night sky: its body is a deep starfield with drifting nebula wisps, its ears trail off into smoke, and one single huge crescent-moon eye sits in the center of its face and it has no other eyes, with a halo of tiny orbiting stars",
+		-- Kian, 2026-10-29: the full-galaxy body from front-03 (top figure), redrawn as an original
+		-- silhouette (front-06, front-07); the first crop sat too close to a famous cat mascot.
+		look = "a creature whose entire body is a window into a deep purple starry galaxy with nebula clouds: "
+			.. "one smooth rounded teardrop shape for head and body, two tall pointed ears trailing wisps of "
+			.. "smoke, no whiskers, no mouth, one single glowing crescent-moon eye in the center of its face and "
+			.. "no other eyes, a long curling tail, and a thin glowing ring of light orbiting it with tiny stars",
 	},
 }
 

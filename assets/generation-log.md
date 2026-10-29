@@ -168,6 +168,9 @@ designs and a tier line, and every critter except dusk_mouse dropped the mouse s
 "Secret tier"-style labels as captions, and defaulted to a two-legged vinyl figure for fish,
 serpents and void creatures. Prompts now omit names and tier words; "no legs" poses help but don't
 fully stop it. Balance after: 27 credits.
+| 2026-10-29 | midnight_mew | front-03 crop | (local crop) | 0 | concept | Kian picked the top galaxy figure in front-03. Cropped to `front-03-top-crop.png`, uploaded as media `5375ade7-cd50-495c-8b6a-1cc64a8d3dc2`. Its silhouette (wide head, whiskers) sat close to a famous cat mascot, so it was used for the concept only |
+| 2026-10-29 | midnight_mew | front-06 | seedream_v4_5 + crop ref | 1 | pending | Galaxy teardrop body, tall smoky ears, centered crescent eye, orbit ring, curling tail; stubby legs fading into stardust. Original silhouette |
+| 2026-10-29 | midnight_mew | front-07 | seedream_v4_5 + crop ref | 1 | pending | Same concept, floating with a stardust trail and no legs; small in frame |
 
 Batch 1 lessons (folded into `tools/assets/Prompts.luau`): "short stubby limbs" adds limbs to
 limbless animals, so it now applies only where the animal has limbs; unnamed glows land anywhere,

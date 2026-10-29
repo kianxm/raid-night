@@ -13,7 +13,7 @@
   "eventOnly": true,
   "humanArtPass": true,
   "id": "midnight_mew",
-  "look": "a creature from another world with a cat-like silhouette made of living night sky: its body is a deep starfield with drifting nebula wisps, its ears trail off into smoke, and one single huge crescent-moon eye sits in the center of its face and it has no other eyes, with a halo of tiny orbiting stars",
+  "look": "a creature whose entire body is a window into a deep purple starry galaxy with nebula clouds: one smooth rounded teardrop shape for head and body, two tall pointed ears trailing wisps of smoke, no whiskers, no mouth, one single glowing crescent-moon eye in the center of its face and no other eyes, a long curling tail, and a thin glowing ring of light orbiting it with tiny stars",
   "name": "The Midnight Mew",
   "notes": "",
   "palette": [
@@ -22,7 +22,7 @@
     "#2A0A3D"
   ],
   "personality": "enigmatic",
-  "pose": "floating in the air a little above the ground, its body tapering away instead of legs, nothing touching the ground",
+  "pose": "floating above the ground, its lower body dissolving into drifting stardust instead of legs",
   "status": "prompts-ready",
   "tier": "Secret"
 }
