@@ -4,32 +4,27 @@ Updated 2026-10-29. Read this first on startup, then docs/progress.md. Follow th
 "Context discipline" (section 2).
 
 ## Phase
-Phase 1 running, unattended overnight (D-041): decide technical calls, log them, skip anything
-needing a human or live environment into "Needs Kian", stop at the Phase 1 gate with the report.
+Phase 1 at its human gate. All tasks coded, checked and reviewed, but nothing past #91 is merged:
+the permission check refuses `gh pr merge` (D-044). Gate report posted (see Gate history).
 
 ## In flight
-- P1.1 data (xhigh): agent/data/P1.1. Escrow.Store, messages/offline debits, recovery, alarm,
-  D-008/D-012#6/D-026 TODOs. Reviewer at xhigh + own Studio run after merge.
-- P1.7 economy: agent/economy/P1.7. Sim + proposal; orchestrator approves if in design ranges.
-- P1.9 matchmaking: agent/matchmaking/P1.9. Live revenge server side; UI button is P1.6.
-- #92 (P1.5b fix for #90): open, merge refused by permission check twice. Needs Kian.
+Nothing. Open PRs: #92-#110 (minus #91/#89 merged). `preview/phase1` (a6ad68f) = every PR except
+#96 merged in order, conflicts resolved, 340 tests green. Ledger PR #93 holds D-041..D-054.
 
-## Next
-- P1.3 (raid) when P1.1 merges. Prompt must include: StartRaid re-checks blocks both ways and
-  flags; refuse async raid if presence fresh; take/release lock on every end; pass the
-  snapshot's power to noteRaided; strip DenSnapshot.blockedUserIds from client payloads;
-  RaidStart carries gatePosition + endsAt (UI asks); server-written RaidLogSeenAt (UI asks).
-- P1.4 after P1.3; P1.6 after P1.3 (branch from integration, not #92); P1.8 after P1.7.
-- P1.10: single-client soak in Studio only; multi-client part deferred.
+## Next (after Kian)
+1. Kian merges (preview/phase1 in one go, or PR by PR per docs/playtests/phase1.md) and decides
+   #96 (P1.8 tuning).
+2. Integration agent: fast-forward the main checkout, run the single-client pass (escrow PRs get
+   their own run), then the 30-min soak (P1.10). File fixes as tasks.
+3. asyncRaids on only after every pre-P1.1 server has shut down (D-049).
+4. Phase 1 gate playtest with friends (deferred multi-client list in progress.md).
 
 ## Ask Kian
-- Merge #92 / allow integration agent merges of reviewed PRs.
+- Merge permission/merges (D-044); #92 first.
+- P1.7/P1.8 pacing: approve ~3-week first rebirth, pick another, or keep values (D-045).
 - P2.8 product questions (not urgent).
 
 ## Remember
-- D-044: merges are refused by the permission check. Stack dependent tasks on the parent PR
-  branch; Kian merges in order; ledger stays on the open ledger PR (#93).
-- Auto-merge is disabled on the repo: merge ledger PRs by hand after CI (`gh pr checks --watch`).
-- Ledger worktree: $CLAUDE_JOB_DIR/tmp/wt-ledger (job 26a0a7a7).
+- Ledger worktree: $CLAUDE_JOB_DIR/tmp/wt-ledger (job 26a0a7a7), branch ledger-p1-wave1 (#93).
 - Never switch branches in Kian's main checkout (Rojo); fast-forward only.
-- Integration at b075020 (271 tests) + #89 merged (9575905).
+- integration at b075020 (271 tests): #88, #89, #91 merged this phase.
