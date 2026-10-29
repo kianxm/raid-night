@@ -108,7 +108,7 @@ export type AppliedTransfer = {
 -- helpers, which turn a corrupt stored value into its default and refuse bad input.
 
 -- [persisted, PlayerProfile.settings] Options the player chose (P2.5). A missing field means
--- Profile.SETTINGS_DEFAULTS. Written only by Profile.applySettings.
+-- Profile.SETTINGS_DEFAULTS. Written only by Profile.applySettings, which saves all three.
 export type PlayerSettings = {
 	musicVolume: number?, -- 0 to 1, in steps of 0.01
 	sfxVolume: number?, -- 0 to 1, in steps of 0.01
@@ -117,7 +117,9 @@ export type PlayerSettings = {
 
 -- [persisted, PlayerProfile.onboarding] First-five-minutes progress (P2.6, playbook Appendix C).
 export type OnboardingState = {
-	step: number, -- the last Appendix C step completed: 0 (none) to Profile.ONBOARDING_LAST_STEP
+	-- How many of Profile.ONBOARDING_STEPS are done, in order: 0 (none) to
+	-- Profile.ONBOARDING_LAST_STEP. The list is persisted meaning: append-only once shipped.
+	step: number,
 	completedAt: number?, -- unix seconds onboarding finished or was skipped; nil = still in it
 }
 

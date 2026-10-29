@@ -114,8 +114,8 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
 
 | Field | Type | Missing means | Helpers | Task |
 | --- | --- | --- | --- | --- |
-| `settings` | `PlayerSettings?` (`musicVolume`, `sfxVolume`: 0-1 in 0.01 steps; `reducedMotion`) | `Profile.SETTINGS_DEFAULTS`: 1, 1, false | `settingsOf`, `applySettings(profile, request)` | P2.5 |
-| `onboarding` | `OnboardingState?` (`step` 0-5, `completedAt?`) | complete (an old save) | `isOnboardingComplete`, `onboardingStep`, `advanceOnboarding`, `completeOnboarding` | P2.6 |
+| `settings` | `PlayerSettings?` (`musicVolume`, `sfxVolume`: 0-1 in 0.01 steps; `reducedMotion`) | `Profile.SETTINGS_DEFAULTS`: 0.6, 0.8, false (the client's defaults) | `settingsOf`, `cleanSettings(request)`, `applySettings(profile, request)` | P2.5 |
+| `onboarding` | `OnboardingState?` (`step`: steps of `ONBOARDING_STEPS` done, 0-6; `completedAt?`) | complete (an old save) | `ONBOARDING_STEPS`, `onboardingStepIndex`, `isOnboardingComplete`, `onboardingStep`, `onboardingStatus`, `advanceOnboardingTo` (server events), `acknowledgeOnboarding` (client acks), `completeOnboarding`; low-level `advanceOnboarding` | P2.6 |
 | `successfulRaids` | `number?` | 0 | `successfulRaids`, `countSuccessfulRaid` | P2.7, P2.9 |
 | `gear` | `{ [GearId]: number }?` | level 0 (not owned) | `GEAR_IDS`, `isGearId`, `gearLevel`, `setGearLevel` | P2.10 |
 | `receipts` | `{ [string]: PurchaseReceipt }?` (`productId`, `at`) | none granted | `hasReceipt`, `recordReceipt`, `MAX_RECEIPTS` (100) | P2.8 |
@@ -123,15 +123,16 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
 | `accessories` | `{ [string]: number }?` (accessory id -> count) | none owned | `accessoryCount`, `grantAccessory` | P2.8 |
 
 - **Onboarding.** `Profile.new` (the ProfileStore template) is the only place that sets a Phase 2
-  field: `onboarding = { step = 0 }`, so a new save starts it. Steps are Appendix C's 1-5
-  (`Profile.ONBOARDING_LAST_STEP`); they only move forward, reaching 5 sets `completedAt`, and
-  `completeOnboarding` is a skip that keeps the step reached. DataService must never reconcile
-  the template into an existing save (ProfileStore's `Reconcile`; a source test checks): that would
-  send every existing player through onboarding.
-- **Settings.** `applySettings` takes the client's table as untrusted: only the three keys, the
-  right types and finite volumes (clamped to 0..1, rounded to 0.01), or the whole request is
-  refused. A key never set reads as its default; `settings.reducedMotion == nil` means the player
-  never chose.
+  field: `onboarding = { step = 0 }`, so a new save starts it. `step` counts the steps of
+  `Profile.ONBOARDING_STEPS` done, in order (C6b, below); `ONBOARDING_LAST_STEP` (6) is all of
+  them. Steps only move forward, reaching the last sets `completedAt`, and `completeOnboarding` is
+  a skip that keeps the step reached. DataService must never reconcile the template into an
+  existing save (ProfileStore's `Reconcile`; a source test checks): that would send every existing
+  player through onboarding.
+- **Settings.** `cleanSettings` takes the client's table as untrusted: all three settings must be
+  there with the right types and finite volumes (clamped to 0..1, rounded to 0.01), or the whole
+  request is refused; any other key is ignored and never read. `applySettings` saves the cleaned
+  three, replacing what was saved. A key never set reads as its default.
 - **Successful raids.** The lifetime count of raids and live steals the player escaped from,
   counted once per raid by the raider's own server (`countSuccessfulRaid` returns the new count;
   1 is the first, the notification opt-in trigger). Old saves start at 0.
@@ -153,6 +154,53 @@ profile loaded in its own server (`DataService.getProfile`), never on another se
   is written by the raider's server for an offline defender, and a profile field would need a
   second cross-server write to the defender's key. The older `notificationPromptedAt` field stays
   in the shape (no removal without a migration), but nothing writes it.
+
+### Settings and onboarding remotes (C6b, decisions D-059, D-063)
+
+DataService owns the handlers. Additive only: no profile shape change, no migration. Every request
+counts against its `Net.Limits` entry per player (`Shared/RateLimit.luau`: fixed 10 s windows on
+the server's `os.clock()`; a bad clock or limit fails closed). Every time saved is the server's
+`os.time()`. Nothing here forces a save: changes ride the next autosave or the final save on
+leave. Handlers never let an error reach the client.
+
+| Remote | Shape | Limit / 10 s | Rules |
+| --- | --- | --- | --- |
+| `Net.Requests.GetSettings` | `() -> Net.Settings?` | 3 | `Profile.settingsOf`, defaults filled in. Waits up to 20 s (polling every 0.5 s, one wait per player) for a joining player's profile; nil if it did not load, the player left, or refused |
+| `Net.Requests.SaveSettings` | `(Net.Settings) -> boolean` | 3 | `Profile.cleanSettings`: a table with all three fields, finite volumes clamped to 0..1 and rounded to 0.01, a boolean `reducedMotion`; extra keys ignored; NaN, inf, wrong types or a missing field refuse it whole (false, nothing saved). true = saved. Over the limit, the latest valid request is kept (one per player) and applied when the window reopens, or right before the final save if the player leaves first, so the last change is never dropped (at most limit + 1 applies per window) |
+| `Net.Requests.GetOnboarding` | `() -> Net.OnboardingStatus?` | 3 | `Profile.onboardingStatus`. Same bounded wait as GetSettings |
+| `Net.Requests.AckOnboarding` | `(stepId) -> boolean` | 3 | `Profile.acknowledgeOnboarding`: only a `"Client"` step, and only the next one. true = recorded now, or already behind the player (or onboarding is over); false = refused |
+| `Net.Pushes.OnboardingChanged` | `(Net.OnboardingStatus)` | | Sent to the player after every step they complete, by a server event or an ack |
+
+`Net.Settings` is `{ musicVolume, sfxVolume, reducedMotion }`, every field present.
+`Net.OnboardingStatus` is `{ step, nextStepId?, complete }`: `step` as saved (all 6 for a save from
+before onboarding), `nextStepId` the step to guide next (nil once complete), `complete` true once
+finished or skipped, and for every save from before onboarding (show no onboarding).
+
+Onboarding steps, `Profile.ONBOARDING_STEPS` (pure, frozen). `OnboardingState.step` saves how many
+are done, so the list is persisted meaning: once shipped, never reorder or remove a step or change
+an id; a new step goes at the end.
+
+| # | id | Appendix C | Decided by | Done when |
+| --- | --- | --- | --- | --- |
+| 1 | `hatch` | 1 | Server | The free first egg hatched |
+| 2 | `place` | 2 | Server | The player put a critter on a pad |
+| 3 | `collect` | 2 | Server | The player banked den Glow |
+| 4 | `buyEgg` | 3 | Server | The player bought an egg with Glow |
+| 5 | `stealHome` | 4-5 | Server | A stolen critter reached the player's profile (the guided steal's escape) |
+| 6 | `raidLogTip` | 5 | Client | The player dismissed the one-line raid log explanation |
+
+Appendix C line 6 (the 30-minute shield) needs no saved state (from `createdAt`; raid's P2.6r) and
+line 7 (notification opt-in) is not onboarding.
+
+- **Server events.** Services call `DataService.advanceOnboarding(userId, stepId)` after the real
+  event succeeded, with a `"Server"` step id they choose, never anything a client sent. It runs
+  `Profile.advanceOnboardingTo` at `os.time()`: forward only, it may jump over earlier steps (the
+  player is past them), and it never restarts a finished or skipped onboarding (every save from
+  before onboarding counts as finished). A repeat or a passed step changes nothing. It never
+  yields or saves, pushes `OnboardingChanged` when it wrote, does nothing for a profile not loaded
+  in that server, and returns whether it wrote.
+- **Client acknowledgements.** Only `"Client"` steps, only the next one, through `AckOnboarding`.
+  The client can never skip ahead or complete a server step.
 
 ## Money model
 

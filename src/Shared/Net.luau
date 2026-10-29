@@ -93,6 +93,22 @@ export type ReplayPayload = {
 	data: string,
 }
 
+-- Settings (P2.5): GetSettings' answer and SaveSettings' request. Every field is present. The
+-- server clamps each volume to 0..1 and rounds it to 0.01 (Profile.cleanSettings).
+export type Settings = {
+	musicVolume: number, -- 0 to 1; scales the music mix (default 0.6)
+	sfxVolume: number, -- 0 to 1; scales sound effects (default 0.8)
+	reducedMotion: boolean, -- default false
+}
+
+-- Onboarding progress (P2.6, playbook Appendix C): GetOnboarding's answer and the
+-- OnboardingChanged push. Steps are Profile.ONBOARDING_STEPS, in order.
+export type OnboardingStatus = {
+	step: number, -- steps done: 0 to #Profile.ONBOARDING_STEPS (a save from before onboarding: all)
+	nextStepId: string?, -- the step to guide next; nil once complete
+	complete: boolean, -- finished or skipped (and every save from before onboarding): show none
+}
+
 local Net = {}
 
 -- Client -> server requests (RemoteFunctions unless noted).
@@ -120,6 +136,20 @@ Net.Requests = table.freeze({
 	-- () -> boolean (true if started). Den owner only, live raids only. Blocks entry only: raiders
 	-- inside can leave, but a carried critter drops at the border. Server enforces Config.LiveRaid.
 	Lockdown = "Lockdown",
+	-- () -> Settings?, defaults filled in. Waits (up to 20 s) for the profile to load; nil = it did
+	-- not load in time, or the request was refused: keep the client's defaults.
+	GetSettings = "GetSettings",
+	-- (Settings) -> boolean. A table with all three fields: finite volumes (clamped to 0..1, rounded
+	-- to 0.01) and a boolean reducedMotion; extra keys are ignored. false = refused, nothing saved.
+	-- true = saved with the profile; past Net.Limits.SaveSettings the latest request is kept and
+	-- applied when the limit's window reopens (or on leave), so the last change is never dropped.
+	SaveSettings = "SaveSettings",
+	-- () -> OnboardingStatus?. Waits (up to 20 s) for the profile to load; nil = not loaded in time.
+	GetOnboarding = "GetOnboarding",
+	-- (stepId) -> boolean. Client-side acknowledgements only (a "Client" step of
+	-- Profile.ONBOARDING_STEPS, e.g. "raidLogTip"), and only the next step. true = recorded now or
+	-- already behind the player; false = refused. Every other step advances from server events.
+	AckOnboarding = "AckOnboarding",
 })
 
 -- Server -> client pushes (RemoteEvents).
@@ -130,6 +160,8 @@ Net.Pushes = table.freeze({
 	ServerAnnouncement = "ServerAnnouncement", -- (kind, payload) e.g. Mythic stolen
 	-- (RevengeJoinStatus) a live revenge join failed after Teleporting, or you arrived (P1.9)
 	RevengeJoinStatus = "RevengeJoinStatus",
+	-- (OnboardingStatus) after every step the player completes (server event or AckOnboarding)
+	OnboardingChanged = "OnboardingChanged",
 })
 
 -- Max requests per player per 10 seconds, enforced server-side.
@@ -143,6 +175,10 @@ Net.Limits = table.freeze({
 	ReportBlocked = 2,
 	JoinRevengeServer = 2,
 	GetReplay = 3,
+	GetSettings = 3,
+	SaveSettings = 3,
+	GetOnboarding = 3,
+	AckOnboarding = 3,
 })
 
 --[[
