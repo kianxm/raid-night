@@ -23,8 +23,18 @@ local RaidApi = require(Raid:WaitForChild("RaidApi"))
 local RaidMath = require(Raid:WaitForChild("RaidMath"))
 local Toast = require(Raid:WaitForChild("Toast"))
 local Ui = require(Raid:WaitForChild("Ui"))
+local Theme = require(script.Parent.Parent:WaitForChild("Ui"):WaitForChild("Theme"))
+local LogKit = require(script.Parent.Parent:WaitForChild("Ui"):WaitForChild("LogKit"))
 
-local COLOR = Ui.COLOR
+local COLOR = {
+	glow = Theme.color.glow,
+	revenge = Theme.color.revenge,
+	gold = Theme.color.gold,
+	ink = Theme.color.ink,
+	inkDim = Theme.color.inkDim,
+	inkMute = Theme.color.inkMute,
+	line = Theme.color.line,
+}
 local SLOW_SECONDS = 20 -- a real wait: after this the teleport has not happened, so say so
 
 local RevengeController = {}
@@ -33,6 +43,11 @@ type Pending = { userId: number, raidId: string, name: string }
 
 local card: Frame
 local titleLabel: TextLabel
+local avatarLabel: TextLabel
+local closedCard: Frame
+local closedTitle: TextLabel
+local closedBody: TextLabel
+local closedAvatar: TextLabel
 local statusLabel: TextLabel
 local joinButton: TextButton
 local denButton: TextButton
@@ -92,7 +107,7 @@ local function applyStatus(status: any)
 		joinToken += 1
 		local mine = joinToken
 		joinButton.Active = false
-		Ui.setButton(joinButton, Strings.revengeJoin, COLOR.go, false)
+		Ui.setButton(joinButton, Strings.revengeJoinLive, COLOR.glow, false)
 		setStatus(Strings.format(Strings.revengeJoining, { name = p.name }))
 		task.delay(SLOW_SECONDS, function()
 			if mine == joinToken and pending == p then
@@ -104,12 +119,12 @@ local function applyStatus(status: any)
 	else -- Failed
 		busy = false
 		joinToken += 1
-		Ui.setButton(joinButton, Strings.revengeJoin, COLOR.go, false)
+		Ui.setButton(joinButton, Strings.revengeJoinLive, COLOR.glow, false)
 		setStatus((Strings :: any)[RaidMath.failKey(status.reason)])
 		if RaidMath.fallbackOffered(status.reason) then
 			Ui.setButton(denButton, Strings.revengeDenInstead, COLOR.revenge, true)
 		else
-			Ui.setButton(denButton, Strings.revengeDen, COLOR.revenge, false)
+			Ui.setButton(denButton, Strings.revengeRaidNow, COLOR.revenge, false)
 		end
 	end
 end
@@ -127,34 +142,93 @@ function RevengeController.begin(userId: number, revengeRaidId: string, raiderOn
 	pending = { userId = userId, raidId = revengeRaidId, name = name }
 	titleLabel.Text = Strings.format(Strings.revengeTitle, { name = name })
 	setStatus("")
-	Ui.setButton(joinButton, Strings.revengeJoin, COLOR.go, true)
-	Ui.setButton(denButton, Strings.revengeDen, COLOR.revenge, true)
+	Ui.setButton(joinButton, Strings.revengeJoinLive, COLOR.glow, true)
+	Ui.setButton(denButton, Strings.revengeRaidNow, COLOR.revenge, true)
+	avatarLabel.Text = string.upper(string.sub(name, 1, 2))
 	card.Visible = true
+	Ui.pop(card)
 end
 
-function RevengeController.start()
-	RaidApi.start()
-	local gui = Ui.screenGui("Revenge", 8, Players.LocalPlayer:WaitForChild("PlayerGui"))
+function RevengeController.showClosed(userId: number)
+	local name = RaidApi.nameFor(userId)
+	closedTitle.Text = Strings.revengeClosedTitle
+	closedBody.Text = Strings.format(Strings.revengeClosedBody, { name = name })
+	closedAvatar.Text = string.upper(string.sub(name, 1, 2))
+	closedCard.Visible = true
+	Ui.pop(closedCard)
+end
 
-	card = Ui.panel(gui, "RevengeCard", UDim2.fromOffset(320, 200), UDim2.fromScale(0.5, 0.5))
-	card.AnchorPoint = Vector2.new(0.5, 0.5)
-	card.Visible = false
-	local stroke = card:FindFirstChildOfClass("UIStroke") :: UIStroke
-	stroke.Color = COLOR.revenge
+local function buildChoice(gui: ScreenGui)
+	card = LogKit.popup(gui, "RevengeCard", COLOR.revenge, UDim2.fromScale(0.92, 0.92), Vector2.new(620, 330))
 
-	titleLabel = Ui.label(card, Ui.DISPLAY, 26, COLOR.revenge)
-	titleLabel.Size = UDim2.new(1, -64, 0, 36)
-	titleLabel.Position = UDim2.fromOffset(12, 8)
+	local face = LogKit.avatar(card, "??", COLOR.revenge, 52)
+	face.Position = UDim2.fromOffset(16, 18)
+	avatarLabel = face:FindFirstChildOfClass("TextLabel") :: TextLabel
+
+	titleLabel = Theme.text(card, Theme.type.title, COLOR.revenge)
+	titleLabel.Size = UDim2.new(1, -150, 0, 30)
+	titleLabel.Position = UDim2.fromOffset(78, 16)
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
-	local x = Ui.button(card, "Close", "X", COLOR.gold, UDim2.fromOffset(44, 36))
-	x.AnchorPoint = Vector2.new(1, 0)
-	x.Position = UDim2.new(1, -8, 0, 8)
+	local online = Theme.chip(card, "Online", Strings.revengeOnline, Theme.color.panelSunken, Theme.color.ink)
+	online.Size = UDim2.fromOffset(110, 24)
+	online.Position = UDim2.fromOffset(78, 50)
+	local dot = Instance.new("Frame")
+	dot.Size = UDim2.fromOffset(8, 8)
+	dot.Position = UDim2.new(0, 6, 0.5, -4)
+	dot.BackgroundColor3 = Theme.color.go
+	dot.BorderSizePixel = 0
+	Theme.corner(dot, Theme.radius.full)
+	dot.Parent = online
+	local onlineText = online:FindFirstChild("Text") :: TextLabel
+	onlineText.Position = UDim2.fromOffset(20, 2)
+	onlineText.Size = UDim2.new(1, -26, 1, -4)
+
+	local x = LogKit.closeX(card)
 	x.Activated:Connect(close)
 
-	joinButton = Ui.button(card, "Join", Strings.revengeJoin, COLOR.go, UDim2.new(1, -24, 0, 50))
-	joinButton.Position = UDim2.fromOffset(12, 54)
+	-- Two option cards side by side: Raid their den (primary) and Join their server.
+	local function option(name: string, x0: number, title: string, body: string, note: string): Frame
+		local f = LogKit.well(card, name)
+		f.Size = UDim2.new(0.5, -22, 0, 150)
+		f.Position = UDim2.new(x0, if x0 == 0 then 16 else 6, 0, 84)
+		local t = Theme.text(f, Theme.type.buttonText - 2, COLOR.ink)
+		t.Text = title
+		t.TextXAlignment = Enum.TextXAlignment.Left
+		t.Size = UDim2.new(1, -20, 0, 26)
+		t.Position = UDim2.fromOffset(10, 8)
+		local b = Theme.bodyText(f, Theme.type.label, COLOR.inkDim)
+		b.Text = body
+		b.TextWrapped = true
+		b.TextXAlignment = Enum.TextXAlignment.Left
+		b.TextYAlignment = Enum.TextYAlignment.Top
+		b.Size = UDim2.new(1, -20, 0, 38)
+		b.Position = UDim2.fromOffset(10, 36)
+		local n = Theme.bodyText(f, Theme.type.caption, COLOR.inkMute)
+		n.Text = note
+		n.TextXAlignment = Enum.TextXAlignment.Left
+		n.Size = UDim2.new(1, -20, 0, 16)
+		n.Position = UDim2.fromOffset(10, 76)
+		return f
+	end
+	local denCard = option("DenOption", 0, Strings.revengeDen, Strings.revengeDenBody, "")
+	denButton =
+		Ui.button(denCard, "Den", Strings.revengeRaidNow, COLOR.revenge, UDim2.new(1, -20, 0, Theme.size.tapMin))
+	denButton.AnchorPoint = Vector2.new(0, 1)
+	denButton.Position = UDim2.new(0, 10, 1, -8)
+	denButton.Activated:Connect(function()
+		local p = pending
+		if p and denButton.Active then
+			startAsync(p.userId, p.raidId, true)
+		end
+	end)
+
+	local joinCard = option("JoinOption", 0.5, Strings.revengeJoin, Strings.revengeJoinBody, Strings.revengeJoinNote)
+	joinButton =
+		Ui.button(joinCard, "Join", Strings.revengeJoinLive, COLOR.glow, UDim2.new(1, -20, 0, Theme.size.tapMin))
+	joinButton.AnchorPoint = Vector2.new(0, 1)
+	joinButton.Position = UDim2.new(0, 10, 1, -8)
 	joinButton.Activated:Connect(function()
 		local p = pending
 		if not p or busy or not joinButton.Active then
@@ -173,19 +247,64 @@ function RevengeController.start()
 		end)
 	end)
 
-	denButton = Ui.button(card, "Den", Strings.revengeDen, COLOR.revenge, UDim2.new(1, -24, 0, 50))
-	denButton.Position = UDim2.fromOffset(12, 112)
-	denButton.Activated:Connect(function()
-		local p = pending
-		if p and denButton.Active then
-			startAsync(p.userId, p.raidId, true)
-		end
+	statusLabel = Theme.bodyText(card, Theme.type.body, COLOR.gold)
+	statusLabel.Size = UDim2.new(1, -32, 0, 20)
+	statusLabel.Position = UDim2.new(0, 16, 1, -52)
+	statusLabel.Visible = false
+
+	local noBuy = Theme.bodyText(card, Theme.type.caption, COLOR.inkMute)
+	noBuy.Text = Strings.revengeNoBuy
+	noBuy.TextXAlignment = Enum.TextXAlignment.Left
+	noBuy.Size = UDim2.new(1, -32, 0, 18)
+	noBuy.Position = UDim2.new(0, 16, 1, -28)
+end
+
+local function buildClosed(gui: ScreenGui)
+	closedCard = LogKit.popup(gui, "RevengeClosed", COLOR.glow, UDim2.fromScale(0.92, 0.92), Vector2.new(480, 330))
+	local face = LogKit.avatar(closedCard, "??", COLOR.line, 52)
+	face.Position = UDim2.fromOffset(16, 18)
+	closedAvatar = face:FindFirstChildOfClass("TextLabel") :: TextLabel
+
+	closedTitle = Theme.text(closedCard, Theme.type.title, COLOR.ink)
+	closedTitle.Size = UDim2.new(1, -150, 0, 56)
+	closedTitle.Position = UDim2.fromOffset(78, 18)
+	closedTitle.TextXAlignment = Enum.TextXAlignment.Left
+	closedTitle.TextWrapped = true
+
+	local x = LogKit.closeX(closedCard)
+	x.Activated:Connect(function()
+		closedCard.Visible = false
 	end)
 
-	statusLabel = Ui.label(card, Ui.BODY, 16, COLOR.gold)
-	statusLabel.Size = UDim2.new(1, -24, 0, 24)
-	statusLabel.Position = UDim2.new(0, 12, 1, -32)
-	statusLabel.Visible = false
+	closedBody = Theme.bodyText(closedCard, Theme.type.body, COLOR.inkDim)
+	closedBody.TextWrapped = true
+	closedBody.TextXAlignment = Enum.TextXAlignment.Left
+	closedBody.TextYAlignment = Enum.TextYAlignment.Top
+	closedBody.Size = UDim2.new(1, -32, 0, 40)
+	closedBody.Position = UDim2.fromOffset(16, 88)
+
+	local well = LogKit.well(closedCard, "Note")
+	well.Size = UDim2.new(1, -32, 0, 40)
+	well.Position = UDim2.fromOffset(16, 136)
+	local note = Theme.bodyText(well, Theme.type.label, COLOR.inkMute)
+	note.Text = Strings.revengeClosedNote
+	note.Size = UDim2.new(1, -20, 1, -8)
+	note.Position = UDim2.fromOffset(10, 4)
+	note.TextXAlignment = Enum.TextXAlignment.Left
+
+	local done = Ui.button(closedCard, "Done", Strings.close, COLOR.glow, UDim2.new(1, -32, 0, Theme.size.tapMin + 8))
+	done.AnchorPoint = Vector2.new(0, 1)
+	done.Position = UDim2.new(0, 16, 1, -16)
+	done.Activated:Connect(function()
+		closedCard.Visible = false
+	end)
+end
+
+function RevengeController.start()
+	RaidApi.start()
+	local gui = Ui.screenGui("Revenge", 8, Players.LocalPlayer:WaitForChild("PlayerGui"))
+	buildChoice(gui)
+	buildClosed(gui)
 
 	RaidApi.revengeStatus:Connect(applyStatus)
 	RaidApi.raidStarted:Connect(close)
