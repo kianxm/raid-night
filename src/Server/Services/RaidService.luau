@@ -51,18 +51,19 @@
 	  Lockdown (Raid/Lockdown.luau): Net.Requests.Lockdown, entry block, 45 s with cooldown
 	  Studio only: Raid/TestHook.luau seeds a stand-in den for single-client tests (D-010)
 
+	Async raids (P1.3a): Raid/AsyncRaid.luau runs StartRaid, pocket dens (Raid/Pocket.luau), traps,
+	guards, the timer, grabs and GetRaidLog. An escape ends in RaidService.onAsyncEscape below.
+
 	Server API:
 	  requestGrab(player, plot, padIndex) -> (ok, reason?)  start a server-timed grab hold
 	  cancelGrab(player)                                     stop a hold (prompt released)
 	  isCarrying(player) -> boolean
+	  onAsyncEscape(escape) -> (moved, glow)                 an async raider reached the gate carrying
 
-	TODO (Phase 1, async raids):
-	  [ ] StartRaid: RaidRules.canRaid, acquire lock, load snapshot, build pocket den far off-map
-	      from pooled models, start the Config.Raid.durationSeconds timer
-	  [ ] Guards (simple patrol/chase/tag AI) and traps from the snapshot
-	  [ ] End raid: RaidRules.recordOutgoing; on escape hand off to EscrowService
-	  [ ] Record replay frames (positions at 5 Hz + events) for the defender
-	  [ ] One pocket per player, destroyed on exit; streaming keeps others from loading it
+	TODO (Phase 1):
+	  [ ] P1.3b: onAsyncEscape -> EscrowService (Async transfer), shield, revenge token, logs on
+	      both sides; RaidRules.recordOutgoing for every ended raid (pair limit) via data
+	  [ ] P1.4: replay frames (positions at 5 Hz + events) for the defender
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -84,8 +85,10 @@ local DataService = require(script.Parent.DataService)
 local EscrowService = require(script.Parent.EscrowService)
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 local IncomeService = require(script.Parent.IncomeService) :: any
+local MatchmakingService = require(script.Parent.MatchmakingService) :: any
 local RaidFolder = script.Parent.Parent.Raid
 local Lockdown = require(RaidFolder.Lockdown)
+local AsyncRaid = require(RaidFolder.AsyncRaid)
 
 type PlayerProfile = Types.PlayerProfile
 type Critter = Types.Critter
@@ -662,6 +665,26 @@ local function stepCarries()
 	end
 end
 
+-- Async escape ------------------------------------------------------------------------------------
+
+--[[
+	An async raider reached the pocket's gate carrying a critter. Everything in `run` is
+	server-tracked (AsyncRaid). Returns (moved, glow): whether the loot reached the raider, and the
+	Glow taken; AsyncRaid releases the raid lock after this returns and pushes RaidEnded.
+	P1.3a stub (D-046): nothing moves, no shield, no revenge token. P1.3b replaces the body with
+	the EscrowService Async transfer (critterUid, glowRequested, isRevenge, kind "Async").
+	The pool update already uses the snapshot's power band; P1.3b passes the new shield.
+]]
+function RaidService.onAsyncEscape(run: AsyncRaid.Escape): (boolean, number)
+	MatchmakingService.noteRaided(run.defenderUserId, run.snapshotPower, os.time(), 0)
+	warn(
+		`[RaidService] async raid {run.raidId}: {run.raiderUserId} escaped {run.defenderUserId}'s den with `
+			.. `{run.speciesId} ({run.critterUid}), {run.glowRequested} Glow requested`
+			.. `{if run.isRevenge then " (revenge)" else ""}; escrow handoff is P1.3b, nothing moved`
+	)
+	return false, 0
+end
+
 -- Prompts -----------------------------------------------------------------------------------------
 
 local function ensurePrompt(plot: number, padIndex: number, pad: BasePart): ProximityPrompt
@@ -840,6 +863,13 @@ function RaidService.start()
 			end
 		end
 	)
+	AsyncRaid.start({
+		rootOf = rootOf,
+		isCarryingLive = RaidService.isCarrying,
+		raidEnded = raidEnded,
+		remotes = remotes :: Folder,
+		onEscape = RaidService.onAsyncEscape,
+	})
 	if RunService:IsStudio() then
 		local TestHook = require(RaidFolder.TestHook)
 		TestHook.install({

@@ -17,6 +17,8 @@ local FILES = {
 	"src/Server/Services/RaidService.luau",
 	"src/Server/Raid/Lockdown.luau",
 	"src/Server/Raid/TestHook.luau",
+	"src/Server/Raid/AsyncRaid.luau",
+	"src/Server/Raid/Pocket.luau",
 }
 -- TestHook builds its own in-memory stand-in profile, which no player owns, so it is the one
 -- file allowed to fill a critters table. It must still never save anything.
@@ -42,13 +44,42 @@ end
 
 local tests = {}
 
-tests["RaidService reads Config.Flags only through Escrow.canStartTransfer"] = function()
-	for i = 2, #FILES do
-		expect.eq(count(codeOnly(fs.readFile(FILES[i])), "Flags"), 0, `{FILES[i]} reads a flag`)
+tests["raid code reads Config.Flags only through Escrow.canStartTransfer"] = function()
+	local kinds = { [FILES[1]] = "Live", ["src/Server/Raid/AsyncRaid.luau"] = "Async" }
+	for _, path in FILES do
+		local code = codeOnly(fs.readFile(path))
+		local kind = kinds[path]
+		expect.eq(count(code, "Flags"), if kind then 1 else 0, `{path}: flag reads`)
+		if kind then
+			local check = `Escrow.canStartTransfer(Config.Flags, "{kind}"`
+			expect.eq(count(code, check), 1, `{path}: and it is the {kind} kill-switch check`)
+		end
 	end
-	local code = codeOnly(fs.readFile(FILES[1]))
-	expect.eq(count(code, "Flags"), 1, "exactly one flag read")
-	expect.eq(count(code, 'Escrow.canStartTransfer(Config.Flags, "Live"'), 1, "and it is the kill-switch check")
+end
+
+tests["async raids: start checks, lock on every end, nothing private to the client"] = function()
+	local code = codeOnly(fs.readFile("src/Server/Raid/AsyncRaid.luau"))
+	local first = string.find(code, "local function startRaid", 1, true)
+	local last = string.find(code, "local function onStartRaid", 1, true)
+	expect.truthy(first and last, "startRaid found")
+	local start = string.sub(code, first :: number, last :: number)
+	expect.truthy(string.find(start, "RaidRules.canStartAsync(", 1, true), "pure start checks")
+	expect.truthy(string.find(start, "SnapshotService.blockedBy(player.UserId)", 1, true), "raider's block list")
+	expect.truthy(string.find(start, "MatchmakingService.getPresence(targetUserId)", 1, true), "presence")
+	local lock = string.find(start, "MatchmakingService.acquireLock(", 1, true)
+	local release = string.find(start, "MatchmakingService.releaseLock, targetUserId, raidId", 1, true)
+	expect.truthy(lock and release and release > lock, "a failed entry releases the lock")
+	local endFirst = string.find(code, "local function endRaid", 1, true)
+	local endLast = string.find(code, "local function grab", 1, true)
+	local finish = string.sub(code, endFirst :: number, endLast :: number)
+	expect.eq(
+		count(finish, "pcall(MatchmakingService.releaseLock, raid.defenderUserId, raid.raidId)"),
+		1,
+		"every end releases"
+	)
+	expect.eq(count(code, "storedGlow"), 0, "exact Glow never reaches the client")
+	expect.eq(count(code, "blockedUserIds"), 0, "the block list never reaches the client")
+	expect.eq(count(code, "EscrowService"), 0, "P1.3a: the escape goes through RaidService.onAsyncEscape")
 end
 
 tests["the test hook only ever installs in Studio"] = function()
