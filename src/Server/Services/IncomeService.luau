@@ -35,6 +35,23 @@
 	  setCritterLock(fn?)           fn(userId, uid) -> true while a critter must not move (being
 	                                carried). Locked critters cannot be placed, are never swapped
 	                                off their pad by another placement, and are not drawn.
+	  tutorialCritterAvailable(player)  true while grantTutorialCritter could still grant (the
+	                                player is in onboarding and short of its stealHome step)
+	  grantTutorialCritter(player)  the tutorial den steal (P2.6, D-064): grants one fixed Common,
+	                                untradeable, at most once per player ever, keyed on onboarding
+	                                step Economy.TUTORIAL_CLAIM_STEP (Economy.grantTutorialCritter).
+	                                It advances that step itself, so never call
+	                                DataService.advanceOnboarding("stealHome") before it: that
+	                                spends the claim and the grant then refuses. Returns a copy of
+	                                the critter, or nil. Never yields; saves ride the next autosave.
+
+	Onboarding (P2.6, C6b): after an economy call succeeds this service reports the step through
+	DataService.advanceOnboarding (forward only, so a step already behind the player is a no-op):
+	  hatch     the free (untradeable) egg hatched; also "place" if that critter is on a pad, since
+	            buyEgg and auto-place put it there without a PlaceCritter call
+	  buyEgg    a paid egg hatched
+	  place     PlaceCritter onto a Pad
+	  collect   a collect banked more than 0
 ]]
 
 local Players = game:GetService("Players")
@@ -48,6 +65,7 @@ local Types = require(Shared.Types)
 local CritterCatalog = require(Shared.CritterCatalog) :: any
 local Net = require(Shared.Net) :: any
 local Plots = require(Shared.Plots) :: any
+local Profile = require(Shared.Profile) :: any
 local DataService = require(script.Parent.DataService) :: any
 local DenWorldService = require(script.Parent.DenWorldService) :: any
 
@@ -264,8 +282,14 @@ local function push(player: Player)
 		return isLocked(userId, uid)
 	end)
 	denChanged:FireClient(player, Economy.denState(profile))
-	renderDen(player, profile)
 	local plot = DenWorldService.getPlot(player)
+	-- P2.3: show a newly unlocked pad at once, before critters are drawn on it (RaidService also
+	-- syncs it at 2 Hz). setShownPads exists only once P2.3's DenWorldService is in.
+	local setShownPads = DenWorldService.setShownPads
+	if plot and setShownPads then
+		setShownPads(plot, Economy.usablePadCount(profile.denLevel, physicalPads(player)))
+	end
+	renderDen(player, profile)
 	if plot then
 		updateStation(plot, profile)
 	end
@@ -279,11 +303,55 @@ function IncomeService.setCritterLock(fn: ((number, string) -> boolean)?)
 	critterLock = fn
 end
 
+-- Onboarding (P2.6) ------------------------------------------------------------------------------
+
+-- Reports a server onboarding step. Forward only and never yields; a no-op once the player is past
+-- it, outside onboarding, or not loaded here.
+local function onboard(player: Player, stepId: string)
+	DataService.advanceOnboarding(player.UserId, stepId)
+end
+
+function IncomeService.tutorialCritterAvailable(player: Player): boolean
+	local profile = DataService.getProfile(player.UserId)
+	if not profile or Profile.isOnboardingComplete(profile) then
+		return false
+	end
+	return Profile.onboardingStep(profile) < Profile.onboardingStepIndex(Economy.TUTORIAL_CLAIM_STEP)
+end
+
+function IncomeService.grantTutorialCritter(player: Player): any
+	local userId = player.UserId
+	local profile = DataService.getProfile(userId)
+	if not profile then
+		return nil
+	end
+	local critter = Economy.grantTutorialCritter(
+		profile,
+		os.time(),
+		HttpService:GenerateGUID(false),
+		function(): boolean
+			return DataService.advanceOnboarding(userId, Economy.TUTORIAL_CLAIM_STEP) == true
+		end
+	)
+	if not critter then
+		return nil
+	end
+	-- Granted and recorded: a failed push must not hide that from the caller.
+	local ok, err = pcall(push, player)
+	if not ok then
+		warn(`[IncomeService] push after the tutorial grant failed for {userId}: {err}`)
+	end
+	return table.clone(critter)
+end
+
 -- Requests --------------------------------------------------------------------------------------
 
 local function collect(player: Player, profile: any): number
 	local banked = Economy.collect(profile, os.time())
 	push(player)
+	if banked > 0 then
+		onboard(player, "collect")
+	end
 	return banked
 end
 
@@ -297,6 +365,17 @@ local function buyEgg(player: Player, profile: any): any
 	})
 	if critter then
 		push(player)
+		if critter.untradeable then
+			-- The free egg is the hatch. buyEgg (or push's auto-place) puts it straight on a pad,
+			-- which is Appendix C's "place it", so that step is done too.
+			onboard(player, "hatch")
+			local hatched = profile.critters[critter.uid]
+			if hatched and hatched.placement == "Pad" then
+				onboard(player, "place")
+			end
+		else
+			onboard(player, "buyEgg")
+		end
 		return table.clone(critter)
 	end
 	return nil
@@ -325,6 +404,9 @@ local function placeCritter(player: Player, profile: any, uid: any, placement: a
 	local ok = Economy.place(profile, uid, placement, padIndex, physicalPads(player), os.time(), locked)
 	if ok then
 		push(player)
+		if placement == "Pad" then
+			onboard(player, "place")
+		end
 	end
 	return ok
 end
