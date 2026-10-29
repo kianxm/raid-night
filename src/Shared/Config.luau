@@ -64,6 +64,17 @@ local Config = {
 		stolenTradeLockSeconds = 24 * HOUR,
 	},
 
+	-- Live stealing in a den whose owner is online (decision D-003). Server-enforced.
+	LiveRaid = {
+		lockdownSeconds = 45, -- a Lockdown blocks new raiders from entering the den this long
+		-- Counts from the END of a Lockdown (decision D-011). LockdownUntil = start + lockdownSeconds;
+		-- LockdownReadyAt = LockdownUntil + lockdownCooldownSeconds, the earliest the next one can
+		-- start. So a den is locked at most 45 s in every 165 s.
+		lockdownCooldownSeconds = 120,
+		tagRange = 6, -- studs: how close the owner must be to tag a raider
+		grabHoldSeconds = 1, -- how long a raider holds the grab to pick a critter up
+	},
+
 	Income = {
 		baseStorageSeconds = 8 * HOUR, -- storage cap at den level 1, expressed in seconds of income
 		storageSecondsPerLevel = 15 * 60, -- +15 min of storage per den level
@@ -96,6 +107,9 @@ local Config = {
 		eggPriceBase = 50,
 		eggPriceGrowth = 1.12, -- egg price scales with den level
 		rebirthMinTier = "Legendary", -- must own at least one critter of this tier or higher
+		-- Highest tier a bought egg can hatch. Tiers up to it keep their EggOdds ratios,
+		-- renormalized (Economy.rollTierUpTo). Phase 2 raises it to "Mythic" (decision D-003).
+		eggMaxTier = "Uncommon",
 	},
 
 	Matchmaking = {

@@ -92,4 +92,16 @@ function Profile.prepare(data: any, userId: number, now: number): PlayerProfile
 	return profile
 end
 
+--[[
+	Whether a critter may leave its owner by trade or gift. Any trading or gifting code must
+	refuse a critter this returns false for (the reviewer checks). Raids are not trades: escrow
+	moves untradeable critters like any other, and the flag travels with them (decision D-005).
+]]
+function Profile.isTradeable(critter: Types.Critter, now: number): boolean
+	if critter.untradeable then
+		return false
+	end
+	return critter.stolenLockUntil == nil or now >= critter.stolenLockUntil
+end
+
 return Profile
