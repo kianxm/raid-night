@@ -138,14 +138,21 @@ function RaidHudController.start()
 		local escaped = payload.escaped == true
 		local species = if type(payload.speciesId) == "string" then CritterCatalog.get(payload.speciesId) else nil
 		local key = RaidMath.outcomeKey(payload.reason, escaped)
-		if escaped then
+		-- payload.pending is optional (added by the raid agent's contract change); nil means not pending.
+		local pending = not escaped and payload.reason == "Escaped" and payload.pending == true
+		if pending then
+			resultTitle.Text = if species
+				then Strings.format(Strings.raidPendingNamed, { name = species.name })
+				else Strings.raidPending
+		elseif escaped then
 			resultTitle.Text = if species
 				then Strings.format(Strings.raidEscaped, { name = species.name })
+				elseif type(payload.glow) == "number" and payload.glow > 0 then Strings.raidGlowOnly
 				else Strings.raidEscapedNone
 		else
 			resultTitle.Text = (Strings :: any)[key]
 		end
-		resultTitle.TextColor3 = if escaped then COLOR.go else COLOR.revenge
+		resultTitle.TextColor3 = if escaped or pending then COLOR.go else COLOR.revenge
 		resultSub.Text = if type(payload.glow) == "number" and payload.glow > 0
 			then Strings.format(Strings.raidGlow, { n = tostring(payload.glow) })
 			else ""
