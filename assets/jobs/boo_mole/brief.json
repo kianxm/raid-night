@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: pops out of the ground and silently mouths boo",
     "stolen": "gotcha pose when stolen: a quick mischievous gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "floater",
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -21,6 +22,7 @@
     "#16232A"
   ],
   "personality": "mischievous",
+  "pose": "floating like a little ghost, body fading into a wispy tail",
   "status": "prompts-ready",
   "tier": "Uncommon"
 }

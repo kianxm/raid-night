@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: its eye looks around slowly, then stares straight at the camera",
     "stolen": "gotcha pose when stolen: a quick enigmatic gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "floater",
   "budget": {
     "heightStuds": 4,
     "texture": 1024,
@@ -12,7 +13,7 @@
   "eventOnly": true,
   "humanArtPass": true,
   "id": "midnight_mew",
-  "look": "cat-sized creature made of pure darkness with a single huge glowing moon eye",
+  "look": "a creature whose entire body is a window into a deep purple starry galaxy with nebula clouds: one smooth rounded teardrop shape for head and body, two tall pointed ears trailing wisps of smoke, no whiskers, no mouth, one single glowing crescent-moon eye in the center of its face and no other eyes, a long curling tail, and a thin glowing ring of light orbiting it with tiny stars",
   "name": "The Midnight Mew",
   "notes": "",
   "palette": [
@@ -21,6 +22,7 @@
     "#2A0A3D"
   ],
   "personality": "enigmatic",
+  "pose": "floating above the ground, its lower body dissolving into drifting stardust instead of legs",
   "status": "prompts-ready",
   "tier": "Secret"
 }

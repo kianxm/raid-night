@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: the moon lure dims, the angler shakes it like a flashlight until it flares back on",
     "stolen": "gotcha pose when stolen: a quick sly gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "floater",
   "budget": {
     "heightStuds": 3.5,
     "texture": 1024,
@@ -12,7 +13,7 @@
   "eventOnly": false,
   "humanArtPass": true,
   "id": "abyss_angler",
-  "look": "floating deep-sea anglerfish whose lure is a tiny full moon",
+  "look": "round deep-sea anglerfish with a sly grin of tiny rounded teeth, flowing ribbon-like fins and a tiny full-moon lure on a curling stalk",
   "name": "Abyss Angler",
   "notes": "",
   "palette": [
@@ -21,6 +22,7 @@
     "#070D18"
   ],
   "personality": "sly",
+  "pose": "a round fish body with fins and a tail, no legs and no arms, floating as if swimming, the lure dangling in front of its face",
   "status": "prompts-ready",
   "tier": "Legendary"
 }

@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: a seam pops open and it calmly stitches itself back up",
     "stolen": "gotcha pose when stolen: a quick unbothered gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "upright",
   "budget": {
     "heightStuds": 2.5,
     "texture": 1024,
@@ -21,6 +22,7 @@
     "#2A2233"
   ],
   "personality": "unbothered",
+  "pose": "standing upright on two short legs, arms relaxed",
   "status": "prompts-ready",
   "tier": "Rare"
 }

@@ -42,6 +42,16 @@ Chunky, toy-like night critters glowing softly in a dark navy moonlit town.
 - **Tier reads from across the map:** glow intensity and particles scale with tier. Common:
   soft glow, no particles. Rare: brighter glow, a few motes. Legendary+: strong glow, trail
   or aura. Secret: unique effect nobody else has.
+- **The rarer, the more wow** (Kian, 2026-10-29). Commons and Uncommons stay simple. Rare adds
+  one signature flourish; Epic a more elaborate silhouette. Legendary is majestic, with a face
+  and head designed for its species (never a generic toy face), a strong glow, aura and motes.
+  Mythic is celestial and layered. Secret is otherworldly, unlike any animal, the most
+  spectacular critter in the game. Aura and motes share the glow color and do not count as a
+  second glowing feature. Legendary and above get a fuller signature design in
+  `tools/assets/Prompts.luau`.
+- **Style reference: the mouse only** (Kian, 2026-10-29). `ref-01.png` is a mouse, and its round
+  ears and face leak into any critter it is passed with. Only `dusk_mouse` is generated with it;
+  every other critter relies on the STYLE block's words for the matte vinyl finish.
 - **Mutations are done in-engine**, not as new models: Shiny (sparkle overlay), Moonlit
   (pale blue rim light), Haunted (translucent + green wisps), Golden (gold material swap).
 - **Originality:** never resemble an existing character, mascot, brand or franchise.
@@ -72,26 +82,9 @@ for numbers and titles, one clean sans for body. Every screen readable at phone 
 
 ## Prompt blocks
 
-These are copied into prompts by the builder script. Keep them in sync with
-`tools/assets/build_prompts.luau`.
-
-**STYLE**
-> Stylized 3D game character for a cozy nighttime game. Chunky toy-like shapes, soft rounded
-> silhouette, oversized head about 40 percent of body height, big expressive eyes, short stubby
-> limbs. Matte toon-shaded body with one softly glowing feature. Clean simple shapes and
-> textures, no fine detail. Readable silhouette at small size.
-
-**AVOID**
-> Avoid photorealism, realistic fur strands, text, letters, logos, watermarks, existing cartoon
-> characters, franchise mascots, human faces, weapons, gore, scary or sexualized features, sad,
-> crying, injured or frightened expressions or poses.
-
-**EXPRESSION** (Common / Uncommon / Rare and above)
-> Expression: {personality}, kept simple and friendly so it reads as cute.
->
-> Expression: {personality}, with a touch of attitude that still reads as cute and friendly.
->
-> Expression: {personality}, with lots of character that still reads as cute and charming.
+The prompt text (STYLE, AVOID, EXPRESSION, the tier wow ladder, body plans, each critter's glow and
+signature design) lives in `tools/assets/Prompts.luau`, and `tools/assets/build_prompts.luau`
+writes it to `assets/jobs/`. Change it there; this page holds the rules it follows.
 
 **ANIMATIONS** (written to `brief.json`, not to image prompts)
 > denIdle: happy idle in the den: {idle}
@@ -101,13 +94,3 @@ These are copied into prompts by the builder script. Keep them in sync with
 >
 > stolen: gotcha pose when stolen: a quick {personality} gotcha, in on the joke, never sad or
 > scared
-
-**TURNAROUND VIEW** (one image per view: front, side, back)
-> {STYLE} Character: {name}, {look}. {EXPRESSION} {view} view, neutral standing pose, full
-> body, centered, orthographic camera, evenly lit, plain mid-grey background. Main glow color
-> {glow}; other colors {palette}. {AVOID}
-
-**ICON**
-> {STYLE} Inventory icon of {name}, {look}. {EXPRESSION} Three-quarter view, head and body
-> centered and filling the frame, soft rim light, glow color {glow}, plain background for
-> removal. {AVOID}

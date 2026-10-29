@@ -4,6 +4,7 @@
     "denIdle": "happy idle in the den: snores and slowly drifts sideways while hanging",
     "stolen": "gotcha pose when stolen: a quick sleepy gotcha, in on the joke, never sad or scared"
   },
+  "bodyPlan": "flyer",
   "budget": {
     "heightStuds": 2,
     "texture": 512,
@@ -12,7 +13,7 @@
   "eventOnly": false,
   "humanArtPass": false,
   "id": "snooze_bat",
-  "look": "chubby purple bat hanging upside down in a floppy nightcap",
+  "look": "chubby purple bat in a floppy nightcap, dozing in mid-air",
   "name": "Snooze Bat",
   "notes": "",
   "palette": [
@@ -21,6 +22,7 @@
     "#1A1530"
   ],
   "personality": "sleepy",
+  "pose": "hovering right side up with its wings spread, eyes closed, legs tucked; not hanging, nothing holds it up",
   "status": "prompts-ready",
   "tier": "Common"
 }

@@ -17,7 +17,9 @@ Critters.luau ──build_prompts──▶ assets/jobs/<id>/      prompts + brie
 
 1. Generate 6-10 style exploration images from the STYLE block with 3 different critters.
 2. Pick the best 3-4 and save them as `assets/clean/_style/ref-01.png` and onward.
-3. Every later generation passes these as reference images. This is what keeps 40 critters
+3. Superseded (2026-10-29): the locked reference is a mouse and leaks its ears into other
+   critters, so only `dusk_mouse` passes it; see the style bible. Original rule: every later
+   generation passes these as reference images. This is what keeps 40 critters
    looking like one game. Pick a model that accepts multiple references.
 
 ## Stage 1: build prompts
@@ -27,7 +29,9 @@ lune run tools/assets/build_prompts.luau          # all critters
 lune run tools/assets/build_prompts.luau fox      # ids containing "fox"
 ```
 
-Writes `assets/jobs/<id>/front.txt`, `side.txt`, `back.txt`, `icon.txt` and `brief.json`
+Prompt text, each critter's body plan and pose, and the hex-to-words color names live in
+`tools/assets/Prompts.luau` (tested by `tests/specs/AssetPrompts.spec.luau`). A new critter needs
+an `ART` entry there. Writes `assets/jobs/<id>/front.txt`, `side.txt`, `back.txt`, `icon.txt` and `brief.json`
 (name, tier, personality, palette, the three-animation set, triangle and texture budgets), plus
 `assets/jobs/INDEX.md`.
 
