@@ -7,7 +7,7 @@
 
 - **Phase:** 2 (Vertical slice).
 - **Tasks:** 26 of 31 rows are Done. Four are Blocked on credits or on Kian: P2.1, P2.2 generation, P2.11 and P2.4t. P2.12's build freeze and tester access are yours.
-- **PRs:** 30 PRs (#118 to #149, without #138 and #146/#147, which are issues) are folded into `preview/phase2` at **802513e**. Earlier Phase 2 art work (#87) is in it too. Merging into integration was refused by the permission check (D-058).
+- **PRs:** 30 PRs (#118 to #149, without #138 and #146/#147, which are issues) are folded into `preview/phase2` at **802513e**, then the UI redesign (P2.13, D-071) on top: **c6521f7** (662 tests, 0 failures). Earlier Phase 2 art work (#87) is in it too. Merging into integration was refused by the permission check (D-058).
 
 ## How to land it
 
@@ -37,6 +37,26 @@
 - **Analytics (P2.9, P2.9b):** all 17 Appendix A events, the onboarding and raid-flow funnels, and Glow sources and sinks. No names and no typed text are logged.
 - **Gear (P2.10):** grapple, smoke, decoy, speed coil and lockpick. Everything is server-validated, with a kill switch.
 - **Closed-test kit (P2.12):** `docs/playtests/phase2.md` with a "Before inviting" checklist.
+
+## UI redesign (added at Kian's request, D-071)
+
+Your design canvas is now in the game, in #151-#156:
+- **Theme:** every screen uses one theme module built from the Raid Night design system. Fredoka maps to Fredoka One and Nunito to Builder Sans Bold.
+- **Den HUD:** restyled for phone, plus a PC hotbar: 1 Eggs, 2 Raid, 3 Shop, 4 Critters, 5 Defenses, Q Lockdown.
+- **Eggs and shop:** odds panel, hatch popup, shop, a PC egg screen and a PC shop.
+- **Raid:** portal cards, raid HUD, outcome cards.
+- **Raid log, revenge and opt-in:** raid log, revenge sheets, an opt-in pre-card, and the PC "Recent raids" panel.
+- **Live play and the rest:** breach banner, lockdown pill, collection cards, settings, onboarding chip.
+
+Every screen and server push opened without errors in Studio. The visual comparison against each artboard didn't run, because the Mac screen was locked (viewport 1x1); retry with the screen awake.
+
+Not translated, because the features don't exist yet:
+- leave-raid, share clip, scout, reroll, speed bar;
+- the multi-egg catalog, restock timer, event tokens, shop tabs;
+- SafetyWindow details, Defend-a-friend, the server-wide announcement, collection tabs and guards;
+- a real report flow (compliance: the Report button points to Roblox's menu for now).
+
+Icons to upload are listed in each PR (about 15).
 
 ## What to test yourself (about 1 hour, plus the closed test)
 

@@ -5,7 +5,7 @@ Updated 2026-10-29. Read this first on startup, then docs/progress.md. Follow th
 
 ## Phase
 Phase 2 is at its human gate (gate report: docs/gate-report-phase2.md). Do not start Phase 3 or
-cross the gate until Kian approves. Everything is folded into `preview/phase2` (802513e, 657 tests,
+cross the gate until Kian approves. Everything is folded into `preview/phase2` (c6521f7 incl. the UI redesign P2.13, 662 tests,
 0 fail); nothing is merged into integration (merge refused, D-058).
 
 ## In flight
@@ -19,6 +19,9 @@ whose commits are all in preview/phase2.
    integration, then the 4-client session with testers.
 3. Fill Creator Dashboard ids (Config.Purchases, notification MESSAGE_IDS) when Kian sends them.
 4. When credits return: P2.1 Gate 1 picks, P2.2 kit generation, P2.11 audio (D-057).
+
+## Pending
+P2.13f screenshot pass vs the design canvas: retry with Kian's screen awake (integration agent, D-060 method).
 
 ## Ask Kian
 Merges; #138 tuning; lockpick rule (D-068); product definitions and refund questions (D-061,
