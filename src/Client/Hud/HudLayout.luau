@@ -10,16 +10,15 @@ local HudLayout = {}
 
 export type Mode = "phone" | "desktop"
 
--- Hotbar actions in slot order. Keys 1-6 are the den actions; Lockdown sits apart on Q.
+-- Hotbar actions in slot order. Keys 1-5 are the den actions (Collect is the in-world prompt, per the PC canvas note); Lockdown sits apart on Q.
 export type Slot = { action: string, keyName: string, keyLabel: string, apart: boolean }
 
 HudLayout.SLOTS = {
-	{ action = "collect", keyName = "One", keyLabel = "1", apart = false },
-	{ action = "eggs", keyName = "Two", keyLabel = "2", apart = false },
-	{ action = "raid", keyName = "Three", keyLabel = "3", apart = false },
-	{ action = "shop", keyName = "Four", keyLabel = "4", apart = false },
-	{ action = "critters", keyName = "Five", keyLabel = "5", apart = false },
-	{ action = "defenses", keyName = "Six", keyLabel = "6", apart = false },
+	{ action = "eggs", keyName = "One", keyLabel = "1", apart = false },
+	{ action = "raid", keyName = "Two", keyLabel = "2", apart = false },
+	{ action = "shop", keyName = "Three", keyLabel = "3", apart = false },
+	{ action = "critters", keyName = "Four", keyLabel = "4", apart = false },
+	{ action = "defenses", keyName = "Five", keyLabel = "5", apart = false },
 	{ action = "lockdown", keyName = "Q", keyLabel = "Q", apart = true },
 } :: { Slot }
 

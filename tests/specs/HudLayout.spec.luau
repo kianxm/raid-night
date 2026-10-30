@@ -11,15 +11,16 @@ tests["touch devices always get the phone layout"] = function()
 	expect.eq(HudLayout.mode(false, true), "desktop", "pc")
 end
 
-tests["hotbar has keys 1-6 then Q set apart"] = function()
-	expect.eq(#HudLayout.SLOTS, 7, "seven slots")
-	for i = 1, 6 do
+tests["hotbar has keys 1-5 then Q set apart"] = function()
+	expect.eq(#HudLayout.SLOTS, 6, "six slots")
+	for i = 1, 5 do
 		expect.eq(HudLayout.SLOTS[i].keyLabel, tostring(i), `key {i}`)
 		expect.eq(HudLayout.SLOTS[i].apart, false, `slot {i} together`)
 	end
-	expect.eq(HudLayout.SLOTS[7].keyLabel, "Q", "last key")
-	expect.eq(HudLayout.SLOTS[7].action, "lockdown", "lockdown on Q")
-	expect.eq(HudLayout.SLOTS[7].apart, true, "Q apart")
+	expect.eq(HudLayout.SLOTS[1].action, "eggs", "key 1 opens the egg screen")
+	expect.eq(HudLayout.SLOTS[6].keyLabel, "Q", "last key")
+	expect.eq(HudLayout.SLOTS[6].action, "lockdown", "lockdown on Q")
+	expect.eq(HudLayout.SLOTS[6].apart, true, "Q apart")
 end
 
 tests["hotbar is centered and Q has the wider gap on the PC canvas"] = function()
@@ -27,8 +28,8 @@ tests["hotbar is centered and Q has the wider gap on the PC canvas"] = function(
 	expect.eq(bar.slotSize, HudLayout.HOTBAR_MAX, "full size at 1440")
 	expect.eq(bar.left + bar.width + bar.left, 1440, "centered")
 	expect.eq(bar.xs[2] - bar.xs[1], bar.slotSize + bar.gap, "normal gap")
-	expect.eq(bar.xs[7] - bar.xs[6], bar.slotSize + bar.apartGap, "Q gap")
-	expect.eq(bar.xs[7] + bar.slotSize, bar.left + bar.width, "bar ends at Q")
+	expect.eq(bar.xs[6] - bar.xs[5], bar.slotSize + bar.apartGap, "Q gap")
+	expect.eq(bar.xs[6] + bar.slotSize, bar.left + bar.width, "bar ends at Q")
 end
 
 tests["hotbar shrinks to fit a narrow window but never below the floor"] = function()
