@@ -221,7 +221,6 @@ end
 -- PC hotbar (DeskMain.dc.html): bottom-center, keys 1-6 then Lockdown apart on Q. Slots are
 -- Theme buttons with a keycap chip; no icon art exists yet, so the label carries the meaning.
 local SLOT_STYLE: { [string]: { text: string, fill: Color3, neutral: boolean } } = {
-	collect = { text = Strings.collect, fill = COLOR.collect, neutral = false },
 	eggs = { text = Strings.hotbarEggs, fill = COLOR.buy, neutral = false },
 	raid = { text = Strings.raid, fill = C.glow, neutral = false },
 	shop = { text = Strings.menuShop, fill = C.panelRaised, neutral = true },
@@ -847,9 +846,6 @@ function HudController.start()
 		(require(menu) :: any).show(id)
 	end
 	local ACTIONS: { [string]: () -> () } = {
-		collect = function()
-			request(Net.Requests.Collect, busy)
-		end,
 		eggs = function()
 			ui.oddsPanel.Visible = not ui.oddsPanel.Visible
 		end,
@@ -962,9 +958,7 @@ function HudController.start()
 			setEnabled(ui.buy, free or state.glow >= price, COLOR.buy)
 
 			local hb = ui.hotbar
-			if hb.collect then
-				setEnabled(hb.collect, stored >= 1, collectColor)
-				setSub(hb.collect, "+" .. HudMath.abbreviate(stored))
+			if hb.eggs then
 				setEnabled(hb.eggs, free or state.glow >= price, COLOR.buy)
 				setSub(hb.eggs, if free then Strings.free else HudMath.abbreviate(price))
 			end
