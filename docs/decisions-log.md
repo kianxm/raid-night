@@ -3,6 +3,135 @@
 Technical decisions made under the playbook's decision policy (section 2), newest first. Kian
 can overturn any entry; the orchestrator then turns the reversal into tasks.
 
+### D-071 · 2026-10-29 · UI redesign from Kian's design canvas (Kian)
+Context: Kian asked to redesign the UI from his designs: canvas "Raid Night — End-to-end screens"
+(51 artboards, phone landscape 932x430 and PC 1440x900) built on his "Raid Night" design system.
+Decision: one theme module from the design system's tokens first (P2.13a), then screen batches in
+parallel (P2.13b-e), stacked on it, into preview/phase2. Web fonts map to the closest Roblox
+font; icons are drawn shapes until Kian uploads image assets (listed per PR); visual and layout
+only, with no behavior changes. Screens whose feature doesn't exist yet (Leaderboard, Nemesis,
+Replay, Share clip, Defenses editor, Pick a den, Raid scout, Meteor, Secret hatch) wait for their
+feature; Blood Moon stays out (paid randomness, CLAUDE.md rule 6). Why: one look, set by Kian.
+Reversible: yes.
+
+### D-070 · 2026-10-29 · Onboarding's second egg is discounted
+Context: Studio pass P2.12b: join → tutorial steal took ~3:51; the floor is ~3:00, because the second
+egg costs 150 Glow at 1 Glow/s (P1.8 prices). Exit check: under 3 min. Decision: while onboarding
+is at the buyEgg step, that one egg costs `Config.Onboarding.buyEggPrice` (~40); onboarding only
+moves forward, so it's once per player; odds unchanged. Why: meet Appendix C's timeline without
+retuning the economy Kian approved. Reversible: yes (Config).
+
+### D-069 · 2026-10-29 · New-player shield and the tutorial den
+Context: raid on #139. Decision: a new player's 30-minute live shield
+(`Config.Protection.newPlayerLiveShieldSeconds` = 1800, from createdAt) stays on while they
+live-steal from others, because it's short and covers onboarding only. The tutorial den ignores the
+`raids` kill switch: it takes from no player and only grants the one-time tutorial critter
+(D-064), so onboarding never stalls during an incident. Successful-raid counting goes through a new
+DataService.countSuccessfulRaid, idempotent per raidId (C6c). Opt-in prompt remotes belong to
+notifications (P2.7c), with promptedAt saved only once the client reports it showed. Why: fair to new
+players; one onboarding path. Reversible: yes (Config / one check).
+
+### D-068 · 2026-10-29 · Gear: lockpick breaks a Lockdown (switchable, Kian to confirm); gear kill switch
+Context: raid on #129. The design names a lockpick (live only) but not what it picks. Decision:
+the lockpick lets one raider through one active Lockdown after 8 s at the border (outside, within
+6 studs); a carried critter still drops at the border. This narrows Kian's lockdown rule (D-013),
+so it ships behind `Config.Gear.lockpick.enabled` and is on the gate list. All gear also has
+`Config.Gear.enabled` and follows `raids`. Grapple, smoke, decoy and speed coil work in async raids
+(1 use per raid, 2 at level 5); speed coil never lifts a carrier past walk speed; grapple never
+while carrying. Buying/upgrading gear: economy (Economy.buyGear, UpgradeGear) in P2.8c.
+Why: follows the design's intent, fair to defenders, one value to turn off. Reversible: yes.
+
+### D-067 · 2026-10-29 · Phase 2 follow-ups land on preview/phase2
+Context: hand-offs now cross several stacked PR chains (C6, C6b, P2.8, P2.9, P2.7) that can't merge
+(D-058). Decision: the integration agent builds `preview/phase2` from every Phase 2 PR in order;
+follow-up tasks branch from preview/phase2 and open PRs into it (reviewed as usual); the
+integration agent folds approved ones in with a local merge and push. Kian lands the phase by
+merging preview/phase2 into integration in one PR (as Phase 1 did with #111), or PR by PR in the
+listed order. Why: one coherent tree to test, no cross-stack rebasing. Reversible: yes.
+
+### D-066 · 2026-10-29 · raided_offline is logged against the raider when the defender is offline
+Context: data on #128: Roblox analytics logs events against a player in the server. Decision: log
+`raided_offline` on the raider's server/player; counts are right, unique users for that event are
+raiders. No new saved field. Why: simplest; revisit if the closed test needs per-defender uniques.
+Reversible: yes.
+
+### D-065 · 2026-10-29 · P2.8 open product questions: safe defaults, answers are Kian's
+Context: economy on #127. Decision: (1) restricted players aren't offered VIP (`vip.offerRestricted
+= false`) until its non-Glow perks are defined; (2) a restricted player who buys a Robux-linked
+product outside our UI gets NotProcessedYet (no grant); whether that is an acceptable refund path is
+Kian's; (3) timer skips, event-pass rewards and cosmetic sets stay undefined and unsold; (4) Lantern
+Night ending early on server shutdown is listed for Kian (no carry-over built). Remaining accrue
+call sites move to the helper in P2.8b (data), P2.8m (matchmaking); DenState.vaultSlots and
+GetShopOffers in P2.8c (economy, additive Net per D-059). Why: what is sold and refunds are product
+and policy calls. Reversible: yes (Config).
+
+### D-064 · 2026-10-29 · No onboarding skip yet; tutorial steal is a one-time grant
+Context: data on #126. Decision: no skip remote for now (the guided steal is the hook; revisit
+after the closed test). The tutorial den has no defender profile, so its steal grants one fixed
+Common critter marked untradeable, at most once per player (economy, P2.6e), called by raid at
+the tutorial escape; nothing goes through Escrow. Why: simplest path to the onboarding exit check;
+no free critter farming; rule 4 untouched. Reversible: yes.
+
+### D-063 · 2026-10-29 · C6 follow-ups: who wires remotes, accessories stay with the buyer, gear 0 = not owned
+Context: data on #123. Decision: (1) data writes the server handlers and Net remotes for settings
+and onboarding (C6b, stacked on C6); onboarding steps advance server-side from real events, the
+client may only acknowledge client-only tips. (2) Accessories are owned per player; a worn
+accessory is a binding on the owner's profile, so a stolen critter arrives bare and the
+accessory stays in the buyer's inventory; nothing in Escrow carries it. (3) Gear level 0 means not
+owned; gear is bought and upgraded with Glow (P2.10). (4) Appendix C's free 30-minute shield and
+the tutorial den are raid's (new task P2.6r): live steals must respect a new-player window from
+createdAt (Config key), and escapes call Profile.countSuccessfulRaid then onSuccessfulRaid.
+Why: rule 4 / principle 1 (a stolen purchase is a lost purchase); server authority. Reversible: yes.
+
+### D-062 · 2026-10-29 · Notification state lives in its own DataStore; storage-full sends stay off
+Context: P2.7 (#118). Decision: NotificationService keeps last-sent day, pending loss and
+opt-in-prompted time in its own `NotificationState_v1` DataStore keyed by user id, not in the
+profile, so a raider's server can apply the daily cap for an offline defender without touching
+another profile. Only the "first critter lost" notification is on; a storage-full category is
+built but switched off in NotificationRules until Kian approves (notification strategy is his).
+Why: rule 4 (never write another player's profile), design pillar. Reversible: yes.
+
+### D-061 · 2026-10-29 · P2.8 product defaults while Kian's questions are open
+Context: three open product questions (Blocked list) and P2.8 starts tonight. Decision: build
+the safe side of each, all behind Config so a reversal is one value: (1) every product that
+raises or protects Glow is classified Robux-linked and fails closed (factor 1 / not offered)
+for players whose PolicyService info restricts paid random items, until the per-product audit
+says otherwise; (2) VIP's 1.5x applies to online earning only, offline accrue stays unboosted
+(the playbook's default); (3) Lantern Night is hidden from restricted players and the VIP
+description says the Glow bonus isn't available everywhere. Nothing is created in the Creator
+Dashboard; product list and prices go to Kian. Why: principle 3 (policy) and 5 (reversible).
+Reversible: yes (Config).
+
+### D-060 · 2026-10-29 · Phase 2 Studio checks run on preview/phase2 by temporary sync
+Context: merges wait for Kian (D-058), Rojo serves the main checkout. Decision: as D-055, the
+integration agent syncs preview/phase2's changed scripts into the open, unsaved edit place for a
+single-client pass, restores the originals, saves and publishes nothing, test ids only (D-056).
+If Studio MCP doesn't respond, the run goes to Needs Kian. Multi-client checks join the deferred
+list. Why: catch runtime errors before morning without touching Kian's checkout. Reversible: yes.
+
+### D-059 · 2026-10-29 · One Phase 2 profile-field batch (C6), owners add remotes in their PRs
+Context: settings, onboarding, notifications, gear, purchases and analytics each need saved
+state; Profile.luau is data's file. Decision: data adds every Phase 2 profile field in one PR
+(C6), all optional with safe defaults, no migration, reviewer at xhigh. Dependent tasks stack on
+C6. New remotes, Types and Config tables that a task needs go in that task's own PR (precedent
+#100), additive only, mirrored in docs/contracts.md, with a reviewer pass. Why: one schema
+review instead of six; tasks don't wait on each other. Reversible: yes (optional fields).
+
+### D-058 · 2026-10-29 · Phase 2 merge path: stacked PRs and preview/phase2
+Context: `gh pr merge` is refused again in unattended runs (tried on ledger #116; D-044).
+Decision: every PR targets integration; a task that needs another's code stacks on its branch;
+the Phase 2 ledger stacks on #116; before the gate the integration agent builds `preview/phase2`
+(all PRs merged in order, conflicts resolved, checks green, no PR). Kian merges. Why: work
+continues without a merge; the preview proves the stack. Reversible: yes.
+
+### D-057 · 2026-10-29 · Phase 2 runs on placeholder art and sound
+Context: no Higgsfield credits (Kian). Decision: P2.1 and P2.11 generation are Blocked; P2.2
+writes briefs and prompts only. P2.3 and P2.4 no longer wait on art: they build a seam that loads
+an asset id per piece/species when one exists in `assets/clean/<id>/ids.json` (or a Config/data
+table) and falls back to today's procedural placeholders, so real models drop in with no code
+change. Sound hooks ship with empty ids (no sound plays) in P2.5. Asset Gates 1-2 happen when
+credits return. Why: everything but the art can be finished and tested now. Reversible: yes.
+
 ### D-056 · 2026-10-29 · Studio test sessions write test-id keys to the place's DataStores (amends D-019)
 Context: the soak needs forced shutdowns in DataStore mode, which only accepted a real loaded
 raider, so the overnight run used Kian's account (D-055). Decision: in Studio only (IsStudio +
@@ -134,6 +263,14 @@ approved by the orchestrator when every proposed value sits inside the design do
 (Config only, reversible); anything outside them waits for Kian. Irreversible choices that could
 go either way are prepared, not taken. Why: keep the phase moving without crossing Kian's
 decisions. Reversible: yes (Kian can overturn any entry at the gate).
+
+### D-040 · 2026-10-29 · P2.1 critter art pulled ahead of Phase 1 (Kian)
+Decision: pause before Phase 1 and run the critter asset pipeline (P2.1) now, to use the Higgsfield
+trial credits (100 left, trial ends in a few days). 2D concept fronts first in batches of 5 with
+Gate 1 after each; one 3D test on an approved critter if credits allow. Body plans live in
+`tools/assets/Prompts.luau` (`ART`), not the catalog: only the art pipeline reads them, so no
+contract change. Why: art has no code dependencies, and the credits expire. Reversible: yes.
+(Restored to the ledger 2026-10-29; it was only on #87's branch.)
 
 ### D-039 · 2026-10-29 · Process speed-ups (Kian)
 Context: ~24 h of Phase 0 produced 77 PRs, 25 of them ledger-only; the live-protection chain

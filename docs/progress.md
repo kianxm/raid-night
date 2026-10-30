@@ -1,6 +1,6 @@
 # Progress
 
-Current phase: 1 → 2 (Phase 1 gate approved, main promoted; Phase 2 not started, waiting for Kian) · Last updated: 2026-10-29
+Current phase: 2, at the Phase 2 gate (waiting for Kian); UI redesign P2.13 running at Kian's request · Last updated: 2026-10-29
 
 ## Phase 0: Prototype (parallelism 2)
 
@@ -58,7 +58,58 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 | P1.9 | matchmaking | P1.2 | In review | #94; P1.9b #105 (stacked) | 1 | #105 (raid): live steal escapes as a revenge transfer when getLiveRevenge is active; 280 tests; token not spent yet (D-052); reviewer APPROVED (no Glow bonus on live revenge, retries keep identical args). Reviewer APPROVED, 276 tests, CI green; merge waits for Kian (D-044). Studio single-client plan and the two-server check not run (Kian). RaidService wiring of getLiveRevenge handed to P1.3 |
 | P1.10 | integration | P1.6, P1.9 | Done | #104, #112, #115 | 1 | Single-server soak clean 2026-10-29 (P1.10g, integration 506fe40, test ids only): ~30 min, 24 raids, 7 forced stops mid-transfer (Stop ~5 s, recovery 1-3 s), 0 dupes, 0 losses, 0 errors; soak-4 recovered once; #114 fixed by #115. Multi-client parts stay on the deferred list |
 
+## Phase 2: Vertical slice (parallelism 4)
+
+Started and run to the gate 2026-10-29 (Kian: "Run Phase 2", unattended overnight). No Higgsfield
+credits: placeholder art and sound (D-057). Merges refused: every PR is folded into
+`preview/phase2` (802513e: 657 tests, 0 fail, lint/format/types clean); Kian lands the phase by
+merging it (D-058, D-067). Gate report: `docs/gate-report-phase2.md`.
+
+"Done" below means reviewed (where required), checks green, and folded into preview/phase2.
+
+| Task | Agent | Depends | Status | Branch / PR | Attempts | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| C6 | data | — | Done | #123 | 1 | 7 optional profile fields, no migration. Reviewer (xhigh) APPROVED (D-059, D-063) |
+| C6b | data | C6 | Done | #126 | 1 | Settings + onboarding remotes, RateLimit.luau, steps 1-6 server-advanced. Reviewer (xhigh) APPROVED (D-064) |
+| C6c | data | P2.6r | Done | #143 | 1 | countSuccessfulRaid(userId, raidId), idempotent. Reviewer (xhigh) APPROVED |
+| P2.1 | assets | — | Blocked | #87 (in preview) | 1 | Prompts + 40 fronts done (D-040). Generation + Gate 1/2: credits and Kian (D-057) |
+| P2.2 | assets | — | Blocked | #122 (in preview) | 1 | 19 briefs + kit manifest (ids empty), ~263 credits estimated. Generation: credits (D-057) |
+| P2.3 | raid | — | Done | #125 | 1 | Kit seam (placeholder fallback), pads 6→30 by level, streaming, 12 lights, 851 parts at 30 pads. Phone perf: Kian |
+| P2.4 | economy | — | Done | #124 | 1 | Species→asset-id seam, tier glow, 4 mutations, eggMaxTier → Mythic. Studio: mutations visible |
+| P2.4t | economy | P2.4 | Blocked | #138 (PROPOSAL, not in preview) | 1 | Tuning after Mythic: Kian picks option 1-4 |
+| P2.5 | ui | — | Done | #119, #120, #121 | 1 | Shop, Bag, Den mgmt, Settings, strings table, silent sound cues |
+| P2.5d | ui | P2.5, C6b | Done | #135, #136 | 1 | Settings wiring, 6-tier odds chip, gear HUD, idle animator |
+| P2.5f | ui | P2.8c | Done | #144 | 1 | Shop offers, gear upgrades, vault capacity, Lantern banner |
+| P2.5g | ui | P2.5f | Done | #145 | 1 | One gear upgrade path; Lantern hidden unless boosted; fixes #147 |
+| P2.5h | ui | P2.6f | Done | #149 | 1 | Egg price labels use paidEggPrice |
+| P2.6 | ui | P2.5, C6b, P2.6r | Done | #142 | 1 | Onboarding hints, arrow, first-steal banner, opt-in controller (PromptOptIn return value to confirm live) |
+| P2.6e | economy | C6b | Done | #130 | 1 | Onboarding call points, one-time untradeable tutorial critter (D-064) |
+| P2.6r | raid | C6b, P2.3, P2.6e | Done | #139 | 1 | Tutorial den, 30-min new-player live shield, RaidEvents. Reviewer APPROVED (D-069) |
+| P2.6f | economy | P2.12b | Done | #148 | 1 | Fixes #146: onboarding egg 50 Glow (D-070). Reviewer APPROVED. Studio: first steal at 60 s |
+| P2.7 | notifications | — | Done | #118 | 1 | Send rules, own DataStore, storage category off (D-062). Reviewer APPROVED. Strings + key: Kian |
+| P2.7b | notifications | P2.7, P2.9 | Done | #131 | 1 | track → analytics, onLoss dedupe. Reviewer APPROVED |
+| P2.7c | notifications | P2.7b | Done | #140 | 1 | Opt-in push/request, promptedAt only when shown. Reviewer APPROVED |
+| P2.8 | economy | C6 | Done | #127 | 2 | Products, receipts exactly-once, factor helper, D-061/D-065 defaults. Reviewer (xhigh) BLOCKING x2 → fixed → APPROVED. Products to create: Kian |
+| P2.8b | data | P2.8 | Done | #132 | 1 | Escrow/seed accrues via the helper. Reviewer (xhigh) APPROVED |
+| P2.8m | matchmaking | P2.8 | Done | #133 | 1 | Snapshot accrue via helper (PENDING empty), raid_portal_opened. Raid scout undefined: Kian |
+| P2.8c | economy | P2.8, P2.9, P2.10 | Done | #141 | 1 | buyGear/UpgradeGear, vaultSlots, GetShopOffers, economy analytics. Reviewer (xhigh) APPROVED |
+| P2.9 | data | C6 | Done | #128 | 1 | Analytics schema, funnels, sources/sinks (D-066). Reviewer (xhigh) APPROVED |
+| P2.9b | data | P2.9, C6b | Done | #134 | 1 | Steps from Profile, onboarding_step, live DenRaided sink. Reviewer (xhigh) APPROVED |
+| P2.10 | raid | C6, P2.3 | Done | #129 | 1 | 5 gear items, switches (D-068). Reviewer APPROVED. Lockpick rule: Kian. 2-client checks deferred |
+| P2.11 | assets | — | Blocked | | 0 | No credits (D-057); cue names wired, ids empty |
+| P2.12a | integration | — | Done | preview/phase2 802513e | 1 | Every PR folded in order; 657 pass, 0 fail |
+| P2.12b | integration | P2.12a | Done | Studio (D-060) | 1 | Single-client pass: all areas PASS; #146/#147 found and fixed (P2.12c: onboarding 60 s) |
+| P2.13a | ui | — | Done | #151 → preview/phase2 | 1 | 662 tests. Theme.luau (tokens; Fredoka→FredokaOne, Nunito→BuilderSansBold), Raid/Ui delegates to it, den HUD phone + PC hotbar (1-6, Q). Icons for Kian: 7 x 128 px + Glow orb. Not translatable: hard shadows/bevels approximated, tracked caps |
+| P2.13b | ui | P2.13a | Done | #153 (stacked on #151) | 2 | Odds panel, hatch popup, shop, Lantern restyled; PC egg screen (key 1) + PC shop 2-column grid (headers may look cramped: check in Studio). Needs feature: egg catalog, restock timer, event tokens, shop tabs |
+| P2.13c | ui | P2.13a | Done | #152 (stacked on #151) | 2 | Portal cards, raid HUD, outcome cards, PC keys 1-3/Enter/Esc; Back to den / Raid again wired. Needs feature: Leave raid remote, Share clip, Scout, Reroll, speed bar, traps seen, rank/Glow lost stats |
+| P2.13d | ui | P2.13a | Done | #154 (stacked on #151) | 1 | Raid log rows, revenge sheet, revenge-closed sheet, opt-in pre-card (Not now = shown false), PC "Recent raids" panel. Needs feature: real report flow (compliance: report button on every raid log entry; today it points to the Roblox menu), earned Glow, shield/loot pills, pair-limit reason |
+| P2.13e | ui | P2.13a | Done | #155 (stacked on #151) | 1 | Breach (pulse, static under reduced motion), lockdown pill, live toasts, collection/detail cards, settings, onboarding + "Protected while you learn". Needs feature: SafetyWindow details, DefendFriend, ServerAnnounce, collection tabs, guards, nicknames |
+| P2.13f | integration | P2.13a-e | Blocked | preview/phase2 c6521f7 (with #156) | 1 | Folded #151-#155: 662 pass, 0 fail; every screen and push opens with no errors in Studio. Screenshots blocked: Mac screen locked/asleep (viewport 1x1). Retry with the screen awake. Hotbar had Collect on key 1 vs design → P2.13g |
+| P2.13g | ui | P2.13f | Done | #156 | 1 | PC hotbar 1 Eggs, 2 Raid, 3 Shop, 4 Critters, 5 Defenses, Q Lockdown; Collect stays the in-world prompt (Kian: follow the canvas note over the DeskMain markup) |
+| P2.12 | integration | all | Done | #137 | 1 | docs/playtests/phase2.md + "Before inviting" checklist. Build freeze + tester access: Kian |
+
 ## Setup notes
+- 2026-10-29 (Phase 2): Studio MCP healthy, "Raid Night" open in Edit, no wedged play session; Workspace.StreamingEnabled = true (confirms #125's ask); HttpEnabled = false.
 - 2026-10-28: Studio MCP command bar `require(DataService)` gets a separate module copy (nil
   profiles); check profiles through a temporary server Script instead. `StudioMemoryProfiles`
   is left true in the open edit place (unsaved, unpublished).
@@ -83,30 +134,13 @@ Started 2026-10-29 (Kian: "Run Phase 1", unattended overnight; D-041).
 
 ## Blocked (needs Kian)
 
-- PR #92 (P1.5b, fixes #90 blank Raid Portal): reviewed, CI green, src/Client only, but the
-  permission check refused `gh pr merge 92` twice ("Merge Without Review"). Merge it yourself, or
-  allow the integration agent to merge reviewed PRs. Not worked around.
+- Merges: the permission check refuses `gh pr merge` (D-044/D-058). Land #116 (Phase 1 ledger), then
+  preview/phase2 (802513e) into integration, then this ledger PR. See docs/gate-report-phase2.md.
+- Higgsfield credits for P2.1/P2.2/P2.11 generation, and Asset Gate 1 picks (#87).
+- Compliance: the design requires a report button on every raid log entry; no server report flow exists (the button points to Roblox's menu). Decide what a report does (log + block from matching + Roblox report menu?) so it can be built.
+- P2.4t tuning after eggMaxTier → Mythic (#138): pick option 1-4 (see the P2.4t row).
 
-- P1.7 tuning (#95, applied in P1.8's stacked PR): upgradeCostBase 100→500, eggPriceBase 50→150,
-  eggPriceGrowth 1.12→1.32. First rebirth median day 0.9 → 20.7 (p10 8.7, p90 47.7); Glow held
-  stays ~1-4 egg prices instead of climbing to 12,000. The design sets no first-rebirth target:
-  approve the ~3-week pace, pick another, or keep today's values. Level 30 of 50 on day 1 either way.
-
-- Rollout: turn `Config.Flags.asyncRaids` on only after every pre-P1.1 server has shut down
-  (shut down old servers after the publish that ships #97/#98); an old server would void a Pending
-  async record and could lose the critter and Glow (D-049).
-
-- Studio MCP wedged ("Start play hasn't finished yet" for 30+ min after a forced stop): restart Studio
-  or the MCP plugin before the next Studio run.
-- Test data (D-055, updated): `p11-sd-1` is now Committed: Kian's account 11086525754 gained test
-  critter `seed-1-1` and 474 Glow (133018 → 133492); keep or remove it. Earlier note: `p11-sd-1` was Pending with raider =
-  Kian's real account 11086525754 and test defender -1 already debited of critter `seed-1-1` (Glow 0).
-  On preview/Phase 1 code the recovery sweep commits it once into 11086525754 (that is the pending
-  forced-shutdown check: expect exactly one seed-1-1). On today's integration code an old recovery may
-  void it and the test critter is lost from -1 (test data only). Seeded test defenders `Player_-1`,
-  `Player_-2`, `Player_-3` exist. Kian's profile is otherwise unchanged (Glow 133018, 13 critters).
-
-Not urgent: all three are needed before P2.8 ships products, nothing earlier.
+P2.8 product questions (defaults chosen in D-061; confirm or overturn at the gate):
 - Other Robux products that raise or protect a restricted player's Glow (reviewer S1 on #59):
   vault slot (Vault critters earn 50%), auto-collect, shield, timer skips (undefined; if any
   skip covers income it grants Glow), event pass rewards, raid scout, and VIP's "non-Glow
@@ -153,6 +187,12 @@ the escrow simulation. Do not ask for multi-client runs in status reports.
 - Live protection (D-036/D-037): an owner buying an egg after a protecting loss (auto-place lifts
   protection); an owner vaulting during a carry from a refilled den (the steal still lands).
 
+- (Phase 2) 4-client session with no errors (exit check); each gear item in a 2-client live raid
+  (#129); owners using gear on raiders; notification test send landing and Join opening the revenge
+  screen (#118, needs strings + key); real Robux purchases incl. a forced shutdown mid-purchase and VIP
+  10-min 1.5x check (#127, needs product ids); phone-size screenshots of every screen and the phone
+  perf check (#125 step 7); analytics arriving in the Creator Dashboard (published place).
+
 ## Hardening backlog (triage after the phase playtest, D-039)
 
 Exploit and fairness edge cases that lose nothing and fail safe. One line each: what, where it
@@ -193,6 +233,20 @@ dropped based on real play.
 - getLiveRevenge can miss a block that exists only in a snapshot and was added after arrival (reviewer #94; rare).
 - `raiderOnline` tells a victim whether their raider is online (reviewer #94; privacy note, by design, blocks respected).
 - seenOnline: one MemoryStore read per revenge row per GetRaidTargets (15 s cache); watch the budget (reviewer #94). Six more in #94.
+
+- Notifications (reviewer #118): the opt-in prompt hook saves promptedAt before the client confirms the prompt showed (check CanPromptOptInAsync client-side); `successfulRaids == 1` is the only chance (confirm the onboarding steal doesn't count); launchRaidId must go through the server revenge-token check; NotificationState_v1 needs right-to-erasure handling; confirm Open Cloud from HttpService with a Secret works live (small each).
+- Profile receipts (reviewer #123): recordReceipt should return a reason (recorded/duplicate/invalid) and drop the 100-char PurchaseId limit; evict by insertion order, not `at` (small).
+- Onboarding (reviewer #123): a template-only Phase 1 save stamped by `prepare` skips onboarding (set it there); countSuccessfulRaid isn't keyed by raid id (retried escape counts twice: analytics/opt-in only); guard test that Critter never carries an accessory; frozen real Phase 1 save fixture (small each).
+- Settings/onboarding (reviewer #126): settingsFlushes keyed by userId can flush a rejoined session early (harmless); an over-limit SaveSettings returns true but drops if the lock is lost before the flush; over-limit reads return the same nil as a refusal (no retry signal); onboarding ends only on the client's raidLogTip ack (consider a server-side finish); awaitProfile polls at 0.5 s (small each).
+- Analytics (reviewer #128): a Debited save whose reply is lost never fires onLoss (no notification; fails safe); Live debits log no DenRaided sink while the credit logs RaidLoot (dashboard won't balance for live raids); AnalyticsService.sessionFor adds entries for already-left players (tiny leak) (small each).
+- Purchases (reviewer #127): a shield with >16 h left gives <8 h for 49 R$ (require the full 8 h or hide it); PurchaseSource guard only checks `IncomeService.accrue(` appears in SnapshotService, not before buildSnapshot; Economy.perkActive turns off all VIP perks for restricted players while contracts.md says only the Glow bonus (decide when perks exist); Escrow.debitAbsentProfile accrues at factor 1, so make the guard fail if vipBoostsOffline is flipped (small each).
+- Gear (reviewer #129): den owners can use gear too (coil/grapple to chase a carrier): confirm or limit to raiders after the playtest; live decoy part is named "Decoy" (exploit clients can tell); GearEvent "Ended" comment vs code; grapple LOS ignores CanQuery=false parts (keep CanQuery on future barriers); grapple during pocket raid end treated as live (fails safe) (small each).
+- Notifications/snapshots (reviewer #131/#133): a raid is marked seen before the POST, so a failed POST/crash drops that loss's notification (fails safe); "Throttled" for an offline defender isn't logged (needs a Player); the first post-load accrue in SnapshotService pays the offline gap at factor 1 (matters only if vipBoostsOffline turns on); portalOpenedFields keys off revengeRaidId (use isRevenge); PurchaseSource snapshot guard only checks the call appears in the file (small each).
+- RaidLogController's Revenge button calls GetRaidTargets (8 s cache) to read raiderOnline, which counts as a portal open; put raiderOnline on the log entry instead (ui/matchmaking; small).
+- Raid onboarding (reviewer #139/#143; Types.luau:189 comment should name DataService.countSuccessfulRaid): a pending async escape that lands later is never counted as a successful raid, so that player's opt-in prompt may never fire (notifications/data; small); ui should hide other players' tutorial dens/prompts (server already refuses); Pocket critters still draw as orbs (switch to CritterView; raid; medium).
+- Onboarding UI (#142): "Protected while you learn" chip from NewPlayerShieldUntil not built; tutorial escape shows both the "You stole X" toast and the first-steal banner (ui; tiny each).
+- Shop/notifications (reviewer #140/#141): GetShopOffers doesn't wait for loadPasses (an owned pass can show just after join; cosmetic); `purchase` analytics undercounts (first grant whose save failed, passes marked owned by loadPasses); pendingPrompt set after a yield without checking the player is still in server (harmless leak); promptedAt save via withLock can be dropped if another decision holds the lock (harmless) (small each).
+- Onboarding egg (reviewer #148): a player who reaches stealHome before buying skips buyEgg and loses the discount (fails safe; design choice).
 
 ## Repo rules
 - 2026-10-28: repo made public, so the `protected` ruleset is now enforced on `main` and

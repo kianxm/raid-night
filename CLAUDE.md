@@ -52,11 +52,11 @@ docs/              design summary, contracts, setup, agents playbook, decisions
 
 | Agent | Owns | Never touches |
 | --- | --- | --- |
-| `data` | `src/Server/Services/DataService.luau`, `EscrowService.luau`, `src/Shared/Escrow.luau`, `src/Shared/Profile.luau` | UI |
-| `economy` | `src/Shared/Economy.luau`, `Config.luau` values, `Data/Critters.luau` stats, `IncomeService`, `PurchaseService` | Escrow |
-| `raid` | `src/Shared/RaidRules.luau`, `RaidService.luau`, `src/Server/Raid/**`, den/pocket world code (`DenWorldService`, `Plots.luau`) | Profiles directly |
+| `data` | `src/Server/Services/DataService.luau`, `EscrowService.luau`, `src/Shared/Escrow.luau`, `src/Shared/Profile.luau`, `src/Shared/RateLimit.luau`, `src/Shared/Analytics.luau`, `AnalyticsService` | UI |
+| `economy` | `src/Shared/Economy.luau`, `Config.luau` values, `Data/Critters.luau` stats, `IncomeService`, `PurchaseService`, critter visuals (`CritterVisuals`, `CritterView`) | Escrow |
+| `raid` | `src/Shared/RaidRules.luau`, `RaidService.luau`, `src/Server/Raid/**`, den/pocket world code (`DenWorldService`, `Plots.luau`, `WorldKit.luau`), `GearRules.luau` | Profiles directly |
 | `matchmaking` | `src/Shared/Matchmaking.luau`, `MatchmakingService`, `SnapshotService` | Escrow |
-| `notifications` | `NotificationService.luau` | Everything else |
+| `notifications` | `NotificationService.luau`, `src/Shared/NotificationRules.luau` | Everything else |
 | `ui` | `src/Client/**` | `src/Server/**` |
 | `assets` | `tools/assets/**`, `assets/**`, `docs/style-bible.md` | Game code |
 | `integration` | The only agent that drives Roblox Studio (MCP), playtests, merges | Feature code |
