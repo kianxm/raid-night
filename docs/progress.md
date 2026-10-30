@@ -105,7 +105,7 @@ merging it (D-058, D-067). Gate report: `docs/gate-report-phase2.md`.
 | P2.13d | ui | P2.13a | In review | #154 (stacked on #151) | 1 | Raid log rows, revenge sheet, revenge-closed sheet, opt-in pre-card (Not now = shown false), PC "Recent raids" panel. Needs feature: real report flow (compliance: report button on every raid log entry; today it points to the Roblox menu), earned Glow, shield/loot pills, pair-limit reason |
 | P2.13e | ui | P2.13a | In review | #155 (stacked on #151) | 1 | Breach (pulse, static under reduced motion), lockdown pill, live toasts, collection/detail cards, settings, onboarding + "Protected while you learn". Needs feature: SafetyWindow details, DefendFriend, ServerAnnounce, collection tabs, guards, nicknames |
 | P2.13f | integration | P2.13a-e | Blocked | preview/phase2 bf0fc92 | 1 | Folded #151-#155: 662 pass, 0 fail; every screen and push opens with no errors in Studio. Screenshots blocked: Mac screen locked/asleep (viewport 1x1). Retry with the screen awake. Hotbar had Collect on key 1 vs design → P2.13g |
-| P2.13g | ui | P2.13f | In progress | agent/ui/P2.13g → preview/phase2 | 1 | PC hotbar slots match DeskMain |
+| P2.13g | ui | P2.13f | Done | #156 | 1 | PC hotbar 1 Eggs, 2 Raid, 3 Shop, 4 Critters, 5 Defenses, Q Lockdown; Collect stays the in-world prompt (Kian: follow the canvas note over the DeskMain markup) |
 | P2.12 | integration | all | Done | #137 | 1 | docs/playtests/phase2.md + "Before inviting" checklist. Build freeze + tester access: Kian |
 
 ## Setup notes
